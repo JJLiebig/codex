@@ -6099,6 +6099,10 @@
       "description": "Legacy fallback for `tui.disable_paste_burst`. Prefer the setting under `[tui]`.",
       "type": "boolean"
     },
+    "disable_unnecessary_updates": {
+      "description": "Suppress time-driven progress updates; enabled by default.",
+      "type": "boolean"
+    },
     "experimental_compact_prompt_file": {
       "$ref": "#/definitions/AbsolutePathBuf"
     },

@@ -324,6 +324,7 @@ pub fn turn_permission_fields(
 }
 
 pub struct TestCodexBuilder {
+    session_source: Option<SessionSource>,
     config_mutators: Vec<Box<ConfigMutator>>,
     auth: CodexAuth,
     auth_manager: Option<Arc<AuthManager>>,
@@ -343,6 +344,11 @@ pub struct TestCodexBuilder {
 }
 
 impl TestCodexBuilder {
+    pub fn with_session_source(mut self, source: SessionSource) -> Self {
+        self.session_source = Some(source);
+        self
+    }
+
     pub fn with_config<T>(mut self, mutator: T) -> Self
     where
         T: FnOnce(&mut Config) + Send + 'static,
@@ -706,7 +712,7 @@ impl TestCodexBuilder {
             auth_manager.clone(),
             models_manager,
             codex_core::CodexAppsToolsCache::default(),
-            SessionSource::Exec,
+            self.session_source.clone().unwrap_or(SessionSource::Exec),
             Arc::clone(&environment_manager),
             Arc::clone(&self.extensions),
             user_instructions_provider,
@@ -1346,6 +1352,7 @@ fn function_call_output<'a>(bodies: &'a [Value], call_id: &str) -> &'a Value {
 
 pub fn test_codex() -> TestCodexBuilder {
     TestCodexBuilder {
+        session_source: None,
         config_mutators: vec![Box::new(|config| {
             config
                 .features

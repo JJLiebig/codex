@@ -1369,7 +1369,11 @@ impl Session {
     /// Render the request copy without changing instructions persisted or inherited by forks.
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
         let config = self.get_config().await;
-        let instructions = self.get_base_instructions().await;
+        let mut instructions = self.get_base_instructions().await;
+        if codex_config::disable_unnecessary_updates(&config.config_layer_stack) {
+            instructions.text =
+                crate::codex_plus_plus::quiet_updates::instructions(&instructions.text);
+        }
         if !config.update_plan_enabled
             && config.model_catalog.is_none()
             && matches!(

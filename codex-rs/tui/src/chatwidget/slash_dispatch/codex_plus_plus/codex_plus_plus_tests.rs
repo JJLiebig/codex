@@ -33,6 +33,7 @@ fn settings_view(
                 capacity,
                 /*current_user_message_inbox*/ false,
                 ToolActivityPresentation::Full,
+                /*current_quiet_updates*/ true,
                 weekly_supported,
                 None,
                 &keymap,
@@ -51,7 +52,7 @@ fn render_settings(
 ) -> String {
     let (view, _rx) = settings_view(automatic, weekly, capacity);
     let mut terminal =
-        Terminal::new(VT100Backend::new(/*width*/ 84, /*height*/ 14)).expect("terminal");
+        Terminal::new(VT100Backend::new(/*width*/ 84, /*height*/ 24)).expect("terminal");
     terminal
         .draw(|frame| view.render(frame.area(), frame.buffer_mut()))
         .expect("render Codex++ settings");
@@ -102,6 +103,7 @@ fn unsupported_settings_save_only_the_visible_settings() {
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
             user_message_inbox: UserMessageInbox::Disabled,
             tool_activity: ToolActivityPresentation::Full,
+            disable_unnecessary_updates: true,
         })
     );
 }
@@ -153,6 +155,7 @@ fn redemption_rows_describe_configured_thresholds() {
         CapacityBounded,
         /*current_user_message_inbox*/ false,
         ActivityFull,
+        /*current_quiet_updates*/ true,
         /*weekly_supported*/ true,
         /*dcg_status*/ None,
         &settings_list_keymap(RuntimeKeymap::defaults().list),
@@ -193,6 +196,7 @@ fn weekly_setting_saves_full_selection() {
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
             user_message_inbox: UserMessageInbox::Disabled,
             tool_activity: ToolActivityPresentation::Full,
+            disable_unnecessary_updates: true,
         })
     );
 }
@@ -227,6 +231,7 @@ fn capacity_setting_saves_indefinite_mode() {
             model_capacity_retry_mode: ModelCapacityRetryMode::Indefinite,
             user_message_inbox: UserMessageInbox::Enabled,
             tool_activity: ToolActivityPresentation::Full,
+            disable_unnecessary_updates: true,
         })
     );
 }
@@ -357,5 +362,20 @@ fn persistence_messages_snapshot() {
             persistence_verification_failed_message("connection closed".to_string()),
         ]
         .join("\n")
+    );
+}
+
+#[test]
+fn quiet_updates_toggle_is_saved() {
+    let (mut view, mut rx) = settings_view(AutomaticOn, WeeklyOn, CapacityBounded);
+    view.handle_key_event(KeyEvent::from(KeyCode::End));
+    view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+    view.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    assert_matches!(
+        rx.try_recv(),
+        Ok(AppEvent::PersistCodexPlusPlusSettings {
+            disable_unnecessary_updates: false,
+            ..
+        })
     );
 }

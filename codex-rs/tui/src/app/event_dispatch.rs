@@ -2551,6 +2551,7 @@ impl App {
                 self.update_feature_flags(app_server, updates).await;
             }
             AppEvent::PersistCodexPlusPlusSettings {
+                disable_unnecessary_updates,
                 automatic_account_selection,
                 weekly_usage_window_auto_start,
                 auto_redeem_resets,
@@ -2567,6 +2568,7 @@ impl App {
                     Some(model_capacity_retry_mode),
                     user_message_inbox,
                     tool_activity,
+                    disable_unnecessary_updates,
                 )
                 .await;
                 self.chat_widget.reconcile_compact_tool_activity_status();

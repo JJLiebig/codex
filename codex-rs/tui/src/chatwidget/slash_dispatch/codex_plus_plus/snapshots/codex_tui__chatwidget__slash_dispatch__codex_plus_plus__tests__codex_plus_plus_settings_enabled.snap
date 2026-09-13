@@ -1,8 +1,11 @@
 ---
 source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/codex_plus_plus_tests.rs
-assertion_line: 63
+assertion_line: 64
 expression: "render_settings(AutomaticAccountSelection::Enabled,\nWeeklyUsageWindowAutoStart::Enabled, ModelCapacityRetryMode::Bounded,)"
 ---
+
+  Codex++ Settings
+  Select the settings to enable.
 
 › 1. [*] Automatic account selection                 Choose and switch accounts
                                                      when needed.
@@ -15,5 +18,12 @@ expression: "render_settings(AutomaticAccountSelection::Enabled,\nWeeklyUsageWin
                                                      minutes.
   6. [ ] Compact tool activity                       Keep routine tool details in
                                                      Ctrl+T instead of the main
+                                                     conversation.
+  7. [ ] Agent inbox messages (Experimental)         Let Codex leave durable
+                                                     messages you can review
+                                                     with /inbox.
+  8. [*] Disable unnecessary updates to save tokens  Report meaningful progress
+                                                     instead of timed status
+                                                     updates.
 
   Press space to toggle; enter to save or manage; esc to cancel
