@@ -288,6 +288,9 @@ pub struct ConfigToml {
     pub model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
     /// Whether agents can leave durable, non-blocking messages for the user.
     pub user_message_inbox: Option<UserMessageInbox>,
+
+    /// Suppress time-driven progress updates; enabled by default.
+    pub disable_unnecessary_updates: Option<bool>,
     /// How Codex++ presents routine tool activity in the main TUI conversation.
     pub codex_plus_plus_tool_activity: Option<ToolActivityPresentation>,
     /// Whether the global Destructive Command Guard introduction was shown.

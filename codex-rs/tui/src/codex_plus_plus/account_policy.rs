@@ -20,6 +20,7 @@ pub(crate) async fn persist_settings(
     model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
     user_message_inbox: UserMessageInbox,
     tool_activity: ToolActivityPresentation,
+    disable_unnecessary_updates: bool,
 ) {
     let automatic = match automatic_account_selection {
         AutomaticAccountSelection::Enabled => "enabled",
@@ -75,6 +76,10 @@ pub(crate) async fn persist_settings(
             ToolActivityPresentation::Full => "full",
             ToolActivityPresentation::Compact => "compact",
         }),
+    ));
+    writes.push(crate::config_update::replace_config_value(
+        "disable_unnecessary_updates",
+        serde_json::json!(disable_unnecessary_updates),
     ));
     let write_error = crate::config_update::write_config_batch(app_server.request_handle(), writes)
         .await
@@ -157,6 +162,12 @@ pub(crate) async fn persist_settings(
         Some("enabled") => UserMessageInbox::Enabled,
         _ => UserMessageInbox::Disabled,
     };
+    let effective_quiet_updates = response
+        .config
+        .additional
+        .get("disable_unnecessary_updates")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
     let effective_tool_activity = match response
         .config
         .additional
@@ -205,6 +216,7 @@ pub(crate) async fn persist_settings(
         && weekly_usage_window_auto_start.is_none_or(|weekly| effective_weekly == weekly)
         && requested_auto_redeem.is_none_or(|requested| effective_auto_redeem == requested)
         && model_capacity_retry_mode.is_none_or(|capacity| effective_capacity == capacity)
+        && effective_quiet_updates == disable_unnecessary_updates
         && effective_user_message_inbox == user_message_inbox
         && effective_tool_activity == tool_activity
     {

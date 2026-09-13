@@ -324,6 +324,7 @@ pub fn turn_permission_fields(
 }
 
 pub struct TestCodexBuilder {
+    session_source: Option<SessionSource>,
     config_mutators: Vec<Box<ConfigMutator>>,
     auth: CodexAuth,
     auth_manager: Option<Arc<AuthManager>>,
@@ -343,6 +344,11 @@ pub struct TestCodexBuilder {
 }
 
 impl TestCodexBuilder {
+    pub fn with_session_source(mut self, source: SessionSource) -> Self {
+        self.session_source = Some(source);
+        self
+    }
+
     pub fn with_config<T>(mut self, mutator: T) -> Self
     where
         T: FnOnce(&mut Config) + Send + 'static,
@@ -706,7 +712,7 @@ impl TestCodexBuilder {
             auth_manager.clone(),
             models_manager,
             codex_core::CodexAppsToolsCache::default(),
-            SessionSource::Exec,
+            self.session_source.clone().unwrap_or(SessionSource::Exec),
             Arc::clone(&environment_manager),
             Arc::clone(&self.extensions),
             user_instructions_provider,
@@ -1346,7 +1352,23 @@ fn function_call_output<'a>(bodies: &'a [Value], call_id: &str) -> &'a Value {
 
 pub fn test_codex() -> TestCodexBuilder {
     TestCodexBuilder {
+        session_source: None,
         config_mutators: vec![Box::new(|config| {
+            // Upstream instruction tests isolate the original prompt. Fork coverage opts in.
+            let path = config.codex_home.join("config.toml");
+            let mut user = config
+                .config_layer_stack
+                .effective_user_config()
+                .unwrap_or_else(|| {
+                    serde_json::from_value(serde_json::json!({})).expect("empty TOML table")
+                });
+            user.as_table_mut()
+                .expect("TOML table")
+                .insert("disable_unnecessary_updates".into(), false.into());
+            config.config_layer_stack = config
+                .config_layer_stack
+                .with_user_config(&path, user)
+                .expect("quiet-update test configuration");
             config
                 .features
                 .disable(Feature::Apps)

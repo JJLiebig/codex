@@ -48,6 +48,7 @@ use crate::tools::network_approval::DeferredNetworkApproval;
 use codex_core_plugins::PluginMetricsSidecar;
 
 mod async_watcher;
+pub(crate) mod codex_plus_plus;
 mod errors;
 mod head_tail_buffer;
 mod oneshot;
@@ -161,6 +162,7 @@ impl ProcessStore {
 }
 
 pub(crate) struct UnifiedExecProcessManager {
+    pub(crate) completion_wake: codex_plus_plus::completion_wake::CompletionWake,
     process_store: Mutex<ProcessStore>,
     max_write_stdin_yield_time_ms: u64,
 }
@@ -168,6 +170,7 @@ pub(crate) struct UnifiedExecProcessManager {
 impl UnifiedExecProcessManager {
     pub(crate) fn new(max_write_stdin_yield_time_ms: u64) -> Self {
         Self {
+            completion_wake: Default::default(),
             process_store: Mutex::new(ProcessStore::default()),
             max_write_stdin_yield_time_ms: max_write_stdin_yield_time_ms
                 .max(MIN_EMPTY_YIELD_TIME_MS),
@@ -233,7 +236,6 @@ pub(crate) fn generate_chunk_id() -> String {
 }
 
 #[cfg(test)]
-#[cfg(unix)]
 #[path = "process_tests.rs"]
 mod process_tests;
 #[cfg(test)]

@@ -1251,6 +1251,7 @@ pub(crate) enum AppEvent {
     /// Persist automatic account selection without touching hidden settings.
     /// Persist all Codex++ global settings selected in `/codexplusplus`.
     PersistCodexPlusPlusSettings {
+        disable_unnecessary_updates: bool,
         automatic_account_selection: AutomaticAccountSelection,
         weekly_usage_window_auto_start: Option<WeeklyUsageWindowAutoStart>,
         auto_redeem_resets: Option<codex_config::AutoRedeemResets>,

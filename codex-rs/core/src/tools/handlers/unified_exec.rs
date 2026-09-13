@@ -36,6 +36,8 @@ pub(crate) struct ExecCommandArgs {
     #[serde(default = "default_exec_yield_time_ms")]
     yield_time_ms: u64,
     #[serde(default)]
+    on_exit: Option<crate::unified_exec::codex_plus_plus::completion_wake::OnExit>,
+    #[serde(default)]
     timeout_ms: Option<u64>,
     #[serde(default)]
     max_output_tokens: Option<usize>,

@@ -1,3 +1,5 @@
+mod quiet_updates;
+pub use quiet_updates::disable_unnecessary_updates;
 mod auto_redeem_resets;
 mod dcg_nux;
 mod model_capacity_retry;

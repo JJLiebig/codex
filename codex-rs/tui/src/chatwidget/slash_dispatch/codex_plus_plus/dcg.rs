@@ -50,6 +50,7 @@ pub(super) fn settings_item(
         .map(|action| {
             vec![Box::new(move |tx: &AppEventSender| {
                 tx.send(AppEvent::PersistCodexPlusPlusSettings {
+                    disable_unnecessary_updates: selection.quiet_updates.load(Ordering::Relaxed),
                     automatic_account_selection: selected(
                         &selection.automatic,
                         AutomaticOn,

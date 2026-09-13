@@ -442,24 +442,39 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        if !self.input_queue.has_pending_mailbox_items().await
-            || (!self.input_queue.has_trigger_turn_mailbox_items().await
-                && !self.has_outstanding_durable_sleep())
+        let mailbox_ready = self.input_queue.has_pending_mailbox_items().await
+            && (self.input_queue.has_trigger_turn_mailbox_items().await
+                || self.has_outstanding_durable_sleep());
+        if !self
+            .services
+            .unified_exec_manager
+            .completion_wake
+            .has_ready()
+            && !mailbox_ready
         {
             return;
         }
 
-        let turn_state = {
+        let (turn_state, completions) = {
             let mut active_turn = self.active_turn.lock().await;
             if active_turn.is_some() {
                 return;
             }
+            let completions = self
+                .services
+                .unified_exec_manager
+                .completion_wake
+                .take_input(self.is_interrupted());
+            if completions.is_empty() && !mailbox_ready {
+                return;
+            }
             let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-            Arc::clone(&active_turn.turn_state)
+            (Arc::clone(&active_turn.turn_state), completions)
         };
 
-        let (input, mut start_options) =
+        let (mut input, mut start_options) =
             self.input_queue.get_pending_input(&self.active_turn).await;
+        input.extend(completions);
         if !input.iter().any(
             |item| matches!(item, TurnInput::InterAgentCommunication(mail) if mail.trigger_turn),
         ) {
@@ -507,6 +522,10 @@ impl Session {
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {
+        self.services
+            .unified_exec_manager
+            .completion_wake
+            .cancel_for_abort(&reason);
         let mut aborted_turn = false;
         let mut active_turn_to_clear = None;
         let mut turn_context = None;
@@ -532,6 +551,10 @@ impl Session {
             // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
             self.input_queue.clear_pending(&active_turn).await;
         }
+        self.services
+            .unified_exec_manager
+            .completion_wake
+            .cancel_for_abort(&reason);
         if reason == TurnAbortReason::Interrupted && aborted_turn {
             self.maybe_start_turn_for_pending_work().await;
         }
@@ -555,6 +578,10 @@ impl Session {
                 ) {
                     self.mark_interrupted();
                 }
+                self.services
+                    .unified_exec_manager
+                    .completion_wake
+                    .cancel_for_abort(&reason);
                 active.take()
             } else {
                 None
@@ -577,6 +604,10 @@ impl Session {
         // Let interrupted tasks observe cancellation before dropping pending approvals, or an
         // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
         self.input_queue.clear_pending(&active_turn).await;
+        self.services
+            .unified_exec_manager
+            .completion_wake
+            .cancel_for_abort(&reason);
 
         if reason == TurnAbortReason::Interrupted {
             self.maybe_start_turn_for_pending_work().await;

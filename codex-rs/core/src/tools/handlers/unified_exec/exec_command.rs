@@ -65,6 +65,7 @@ const EXEC_COMMAND_REJECTION_MAX_BYTES: usize = 900;
 pub(crate) struct ExecCommandHandlerOptions {
     pub(crate) allow_login_shell: bool,
     pub(crate) allow_tty: bool,
+    pub(crate) completion_wake: bool,
     pub(crate) exec_permission_approvals_enabled: bool,
     pub(crate) include_environment_id: bool,
     pub(crate) include_shell_parameter: bool,
@@ -89,6 +90,7 @@ impl Default for ExecCommandHandler {
             options: ExecCommandHandlerOptions {
                 allow_login_shell: false,
                 allow_tty: true,
+                completion_wake: true,
                 exec_permission_approvals_enabled: false,
                 include_environment_id: false,
                 include_shell_parameter: true,
@@ -130,7 +132,12 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
             self.options.include_windows_shell_guidance,
         );
         let mut spec = match self.lifetime {
-            ExecCommandLifetime::Interactive => spec,
+            ExecCommandLifetime::Interactive => {
+                crate::unified_exec::codex_plus_plus::completion_wake::add_wake_option(
+                    spec,
+                    self.options.completion_wake,
+                )
+            }
             ExecCommandLifetime::OneShot => one_shot_exec_command_spec(spec),
         };
         if !self.options.allow_tty
@@ -326,6 +333,7 @@ impl ExecCommandHandler {
         let ExecCommandArgs {
             mut tty,
             yield_time_ms,
+            on_exit,
             timeout_ms,
             max_output_tokens,
             sandbox_permissions: _,
@@ -484,7 +492,17 @@ impl ExecCommandHandler {
             None => manager.exec_command(request, &context).await,
         };
         match result {
-            Ok(response) => Ok(boxed_tool_output(response)),
+            Ok(response) => {
+                if self.options.completion_wake
+                    && on_exit.is_some()
+                    && let Some(id) = response.process_id
+                {
+                    manager
+                        .wake_on_exit(&context.session, id, &context.cancellation_token)
+                        .await;
+                }
+                Ok(boxed_tool_output(response))
+            }
             Err(UnifiedExecError::SandboxDenied {
                 output,
                 original_token_count,

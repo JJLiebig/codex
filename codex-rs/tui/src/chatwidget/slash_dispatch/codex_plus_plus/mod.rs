@@ -52,6 +52,7 @@ impl ChatWidget {
             self.config.model_capacity_retry_mode,
             crate::codex_plus_plus::user_message_inbox_enabled(&self.config.config_layer_stack),
             self.config.codex_plus_plus_tool_activity,
+            codex_config::disable_unnecessary_updates(&self.config.config_layer_stack),
             self.weekly_start_supported,
             Some(dcg_status),
             &list_keymap,
@@ -119,6 +120,7 @@ struct SettingsSelection {
     capacity_indefinite: Arc<AtomicBool>,
     user_message_inbox: Arc<AtomicBool>,
     compact_tool_activity: Arc<AtomicBool>,
+    quiet_updates: Arc<AtomicBool>,
 }
 
 impl SettingsSelection {
@@ -155,6 +157,7 @@ fn codex_plus_plus_settings_params(
     current_capacity: ModelCapacityRetryMode,
     current_user_message_inbox: bool,
     current_tool_activity: ToolActivityPresentation,
+    current_quiet_updates: bool,
     weekly_supported: bool,
     dcg_status: Option<DcgStatus>,
     list_keymap: &ListKeymap,
@@ -182,6 +185,7 @@ fn codex_plus_plus_settings_params(
         capacity_indefinite: Arc::new(AtomicBool::new(current_capacity == CapacityIndefinite)),
         user_message_inbox: Arc::new(AtomicBool::new(current_user_message_inbox)),
         compact_tool_activity: Arc::new(AtomicBool::new(current_tool_activity == ActivityCompact)),
+        quiet_updates: Arc::new(AtomicBool::new(current_quiet_updates)),
     };
     let mut items = vec![settings_item(
         "Automatic account selection",
@@ -249,6 +253,13 @@ fn codex_plus_plus_settings_params(
         "Agent inbox messages (Experimental)",
         "Let Codex leave durable messages you can review with /inbox.",
         Arc::clone(&selection.user_message_inbox),
+        selection.clone(),
+        weekly_supported,
+    ));
+    items.push(settings_item(
+        "Disable unnecessary updates to save tokens",
+        "Report meaningful progress instead of timed status updates.",
+        Arc::clone(&selection.quiet_updates),
         selection,
         weekly_supported,
     ));
@@ -283,6 +294,7 @@ fn settings_item(
                 AutomaticOff
             };
             tx.send(AppEvent::PersistCodexPlusPlusSettings {
+                disable_unnecessary_updates: selection.quiet_updates.load(Ordering::Relaxed),
                 automatic_account_selection: automatic,
                 weekly_usage_window_auto_start: save_weekly.then(|| {
                     if selection.weekly.load(Ordering::Relaxed) {

@@ -4,6 +4,7 @@ mod approved_command_prefix_saved;
 mod apps_instructions;
 mod available_plugins_instructions;
 mod base_instructions;
+pub(crate) mod codex_plus_plus;
 mod compaction_summary;
 mod contextual_user_message;
 mod current_time_reminder;

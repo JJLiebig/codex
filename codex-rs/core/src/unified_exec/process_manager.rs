@@ -471,6 +471,7 @@ impl UnifiedExecProcessManager {
     }
 
     pub(crate) async fn release_process_id(&self, process_id: i32) {
+        self.completion_wake.observed(process_id);
         let removed = {
             let mut store = self.process_store.lock().await;
             let entry = store.processes.remove(&process_id);
@@ -948,6 +949,10 @@ impl UnifiedExecProcessManager {
             }
         }
 
+        if request.input == INTERRUPT {
+            self.completion_wake.observed(request.process_id);
+        }
+
         let yield_time_ms = {
             // Empty polls use configurable background timeout bounds. Non-empty
             // writes keep a fixed max cap so interactive stdin remains responsive.
@@ -1029,6 +1034,9 @@ impl UnifiedExecProcessManager {
             }
         };
 
+        if exit_code.is_some() {
+            self.completion_wake.observed(request.process_id);
+        }
         let response = ExecCommandToolOutput {
             event_call_id,
             chunk_id,
@@ -1169,6 +1177,7 @@ impl UnifiedExecProcessManager {
         // prune_processes_if_needed runs while holding process_store; do async
         // network-approval cleanup only after dropping that lock.
         if let Some(pruned_entry) = pruned_entry {
+            self.completion_wake.observed(pruned_entry.process_id);
             unregister_network_approval_for_entry(&pruned_entry).await;
             pruned_entry.process.terminate();
         }
@@ -1680,6 +1689,7 @@ impl UnifiedExecProcessManager {
     }
 
     pub(crate) async fn terminate_all_processes(&self) {
+        self.completion_wake.clear();
         let entries: Vec<ProcessEntry> = {
             let mut processes = self.process_store.lock().await;
             let entries: Vec<ProcessEntry> = processes
@@ -1717,6 +1727,7 @@ impl UnifiedExecProcessManager {
     }
 
     pub(crate) async fn terminate_process(&self, process_id: i32) -> bool {
+        self.completion_wake.observed(process_id);
         let (process, already_exited) = {
             let store = self.process_store.lock().await;
             let Some(entry) = store.processes.get(&process_id) else {

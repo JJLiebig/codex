@@ -533,7 +533,9 @@ pub(super) async fn submission_loop(
 ) {
     // To break out of this loop, send Op::Shutdown.
     let mut shutdown_received = false;
-    while let Ok(sub) = rx_sub.recv().await {
+    while let Some(sub) =
+        crate::unified_exec::codex_plus_plus::completion_wake::next_submission(&sess, &rx_sub).await
+    {
         if matches!(sub.op, Op::ResolveElicitation { .. }) {
             debug!(submission_id = %sub.id, operation = sub.op.kind(), "Submission");
         } else {
