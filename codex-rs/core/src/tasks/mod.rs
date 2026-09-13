@@ -442,15 +442,15 @@ impl Session {
         self: &Arc<Self>,
         sub_id: String,
     ) {
+        let mailbox_ready = self.input_queue.has_pending_mailbox_items().await
+            && (self.input_queue.has_trigger_turn_mailbox_items().await
+                || self.has_outstanding_durable_sleep());
         if !self
             .services
             .unified_exec_manager
             .completion_wake
             .has_ready()
-            .await
-            && (!self.input_queue.has_pending_mailbox_items().await
-                || (!self.input_queue.has_trigger_turn_mailbox_items().await
-                    && !self.has_outstanding_durable_sleep()))
+            && !mailbox_ready
         {
             return;
         }
@@ -464,13 +464,8 @@ impl Session {
                 .services
                 .unified_exec_manager
                 .completion_wake
-                .take_input(self.is_interrupted())
-                .await;
-            if completions.is_empty()
-                && (!self.input_queue.has_pending_mailbox_items().await
-                    || (!self.input_queue.has_trigger_turn_mailbox_items().await
-                        && !self.has_outstanding_durable_sleep()))
-            {
+                .take_input(self.is_interrupted());
+            if completions.is_empty() && !mailbox_ready {
                 return;
             }
             let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
@@ -530,8 +525,7 @@ impl Session {
         self.services
             .unified_exec_manager
             .completion_wake
-            .cancel_for_abort(&reason)
-            .await;
+            .cancel_for_abort(&reason);
         let mut aborted_turn = false;
         let mut active_turn_to_clear = None;
         let mut turn_context = None;
@@ -560,8 +554,7 @@ impl Session {
         self.services
             .unified_exec_manager
             .completion_wake
-            .cancel_for_abort(&reason)
-            .await;
+            .cancel_for_abort(&reason);
         if reason == TurnAbortReason::Interrupted && aborted_turn {
             self.maybe_start_turn_for_pending_work().await;
         }
@@ -588,8 +581,7 @@ impl Session {
                 self.services
                     .unified_exec_manager
                     .completion_wake
-                    .cancel_for_abort(&reason)
-                    .await;
+                    .cancel_for_abort(&reason);
                 active.take()
             } else {
                 None
@@ -615,8 +607,7 @@ impl Session {
         self.services
             .unified_exec_manager
             .completion_wake
-            .cancel_for_abort(&reason)
-            .await;
+            .cancel_for_abort(&reason);
 
         if reason == TurnAbortReason::Interrupted {
             self.maybe_start_turn_for_pending_work().await;

@@ -218,7 +218,7 @@ async fn background_completion_progress_instructions(setting: Option<bool>) -> R
             config.config_layer_stack = config
                 .config_layer_stack
                 .with_user_config(&path, toml::Value::Table(Default::default()))
-                .unwrap();
+                .expect("quiet-update test configuration");
             if let Some(enabled) = setting {
                 let path = config.codex_home.join("config.toml");
                 config.config_layer_stack = config
@@ -226,9 +226,9 @@ async fn background_completion_progress_instructions(setting: Option<bool>) -> R
                     .with_user_config(
                         &path,
                         toml::from_str(&format!("disable_unnecessary_updates = {enabled}"))
-                            .unwrap(),
+                            .expect("quiet-update TOML"),
                     )
-                    .unwrap();
+                    .expect("quiet-update test configuration");
             }
         }))
         .await?;

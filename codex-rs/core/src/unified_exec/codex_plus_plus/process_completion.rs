@@ -6,9 +6,17 @@ impl UnifiedExecProcess {
         state.has_exited.then_some(state.exit_code)
     }
 
-    pub(in crate::unified_exec) async fn wait_for_completion(&self) {
+    pub(in crate::unified_exec) fn wait_for_completion(
+        &self,
+    ) -> impl std::future::Future<Output = ()> + Send + 'static + use<> {
         let mut state = self.state_rx.clone();
-        let _ = state.wait_for(|state| state.has_exited).await;
+        let cancellation = self.output.cancellation_token.clone();
+        async move {
+            tokio::select! {
+                _ = state.wait_for(|state| state.has_exited) => {}
+                _ = cancellation.cancelled() => {}
+            }
+        }
     }
 }
 

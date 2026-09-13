@@ -10,8 +10,8 @@ use codex_tools::ToolSpec;
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::Weak;
-use tokio::sync::Mutex;
 use tokio::sync::Notify;
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -28,33 +28,39 @@ pub(crate) struct CompletionWake {
 }
 
 impl CompletionWake {
-    pub(crate) async fn cancel_for_abort(
-        &self,
-        reason: &codex_protocol::protocol::TurnAbortReason,
-    ) {
+    pub(crate) fn cancel_for_abort(&self, reason: &codex_protocol::protocol::TurnAbortReason) {
         if *reason != codex_protocol::protocol::TurnAbortReason::Replaced {
-            self.clear().await;
+            self.clear();
         }
     }
-    pub(crate) async fn clear(&self) {
-        self.processes.lock().await.clear();
-    }
-    pub(crate) async fn observed(&self, id: i32) {
-        self.processes.lock().await.remove(&id);
-    }
-    pub(crate) async fn has_ready(&self) -> bool {
+    pub(crate) fn clear(&self) {
         self.processes
             .lock()
-            .await
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clear();
+    }
+    pub(crate) fn observed(&self, id: i32) {
+        self.processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&id);
+    }
+    pub(crate) fn has_ready(&self) -> bool {
+        self.processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
             .any(|p| p.upgrade().is_some_and(|p| p.completion().is_some()))
     }
-    pub(crate) async fn take_input(&self, interrupted: bool) -> Vec<TurnInput> {
+    pub(crate) fn take_input(&self, interrupted: bool) -> Vec<TurnInput> {
         if interrupted {
-            self.clear().await;
+            self.clear();
             return Vec::new();
         }
-        let mut pending = self.processes.lock().await;
+        let mut pending = self
+            .processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let ready: Vec<_> = pending
             .iter()
             .filter_map(|(&id, process)| {
@@ -87,15 +93,20 @@ impl UnifiedExecProcessManager {
             return;
         };
         let process = Arc::clone(&entry.process);
-        let mut pending = self.completion_wake.processes.lock().await;
+        let mut pending = self
+            .completion_wake
+            .processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         if cancellation.is_cancelled() || session.is_interrupted() {
             return;
         }
         pending.insert(id, Arc::downgrade(&process));
         drop(pending);
+        let completion = process.wait_for_completion();
         let session = Arc::downgrade(session);
         tokio::spawn(async move {
-            process.wait_for_completion().await;
+            completion.await;
             if let Some(session) = session.upgrade() {
                 session
                     .services
