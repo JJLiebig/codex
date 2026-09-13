@@ -1941,7 +1941,9 @@ fn classify_refresh_token_failure(
     let reason = match normalized_code.as_deref() {
         Some("refresh_token_expired") => RefreshTokenFailedReason::Expired,
         Some("refresh_token_reused") => RefreshTokenFailedReason::Exhausted,
-        Some("refresh_token_invalidated") => RefreshTokenFailedReason::Revoked,
+        Some("invalid_refresh_token" | "refresh_token_invalidated") => {
+            RefreshTokenFailedReason::Revoked
+        }
         _ => RefreshTokenFailedReason::Other,
     };
 
