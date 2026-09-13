@@ -38,7 +38,7 @@ pub(super) fn standalone_command_args(platform: StandalonePlatform) -> CommandAr
             "sh",
             &[
                 "-c",
-                "shim=$CODEX_PLUS_PLUS_SHIM_DIR && installer=$(mktemp \"${TMPDIR:-/tmp}/codex-plus-plus-update.XXXXXX\") && trap 'rm -f \"$installer\"' 0 && curl -fsSL https://raw.githubusercontent.com/Pimpmuckl/codex/main/scripts/install/install-codex-plus-plus-latest.sh -o \"$installer\" && [ -s \"$installer\" ] && sh \"$installer\" --shim-dir \"$shim\"",
+                "shim=$CODEX_PLUS_PLUS_SHIM_DIR && installer=$(mktemp \"${TMPDIR:-/tmp}/codex-plus-plus-update.XXXXXX\") && trap 'rm -f \"$installer\"' 0 && curl -fsSL https://raw.githubusercontent.com/JJLiebig/codex/main/scripts/install/install-codex-plus-plus-latest.sh -o \"$installer\" && [ -s \"$installer\" ] && sh \"$installer\" --shim-dir \"$shim\"",
             ],
         ),
         StandalonePlatform::Windows => (
@@ -47,7 +47,7 @@ pub(super) fn standalone_command_args(platform: StandalonePlatform) -> CommandAr
                 "-ExecutionPolicy",
                 "Bypass",
                 "-c",
-                "$shim=$env:CODEX_PLUS_PLUS_SHIM_DIR; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/Pimpmuckl/codex/main/scripts/install/install-codex-plus-plus-latest.ps1))) -ShimDir $shim",
+                "$shim=$env:CODEX_PLUS_PLUS_SHIM_DIR; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/JJLiebig/codex/main/scripts/install/install-codex-plus-plus-latest.ps1))) -ShimDir $shim",
             ],
         ),
     }

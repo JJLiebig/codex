@@ -3,16 +3,15 @@ use crate::InstallMethod;
 use crate::StandalonePlatform;
 
 const CODEX_PLUS_PLUS_GITHUB_API_URL: &str =
-    "https://api.github.com/repos/Pimpmuckl/codex/releases/latest";
-const CODEX_PLUS_PLUS_INSTALL_URL: &str = "https://github.com/Pimpmuckl/codex#install-a-release";
+    "https://api.github.com/repos/JJLiebig/codex/releases/latest";
+const CODEX_PLUS_PLUS_INSTALL_URL: &str = "https://github.com/JJLiebig/codex#install-a-release";
 const CODEX_PLUS_PLUS_NPM_PACKAGE: &str = "@jjliebig/codex-plus-plus";
 const CODEX_PLUS_PLUS_NPM_REGISTRY_URL: &str =
     "https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus";
-const CODEX_PLUS_PLUS_RELEASE_NOTES_URL: &str =
-    "https://github.com/Pimpmuckl/codex/releases/latest";
+const CODEX_PLUS_PLUS_RELEASE_NOTES_URL: &str = "https://github.com/JJLiebig/codex/releases/latest";
 const CODEX_PLUS_PLUS_TAG_PREFIX: &str = "codex-plus-plus-v";
-const CODEX_PLUS_PLUS_UNIX_INSTALLER_URL: &str = "https://raw.githubusercontent.com/Pimpmuckl/codex/main/scripts/install/install-codex-plus-plus-latest.sh";
-const CODEX_PLUS_PLUS_WINDOWS_INSTALLER_URL: &str = "https://raw.githubusercontent.com/Pimpmuckl/codex/main/scripts/install/install-codex-plus-plus-latest.ps1";
+const CODEX_PLUS_PLUS_UNIX_INSTALLER_URL: &str = "https://raw.githubusercontent.com/JJLiebig/codex/main/scripts/install/install-codex-plus-plus-latest.sh";
+const CODEX_PLUS_PLUS_WINDOWS_INSTALLER_URL: &str = "https://raw.githubusercontent.com/JJLiebig/codex/main/scripts/install/install-codex-plus-plus-latest.ps1";
 const HOMEBREW_CASK_API_URL: &str = "https://formulae.brew.sh/api/cask/codex.json";
 const UPSTREAM_GITHUB_API_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
 const UPSTREAM_INSTALL_URL: &str = "https://developers.openai.com/codex/cli/";

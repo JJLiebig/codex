@@ -1289,7 +1289,7 @@ fn codex_plus_plus_update_available_history_cell_snapshots() {
     │ Run pnpm add -g @jjliebig/codex-plus-plus to update. │
     │                                                      │
     │ See full release notes:                              │
-    │ https://github.com/Pimpmuckl/codex/releases/latest   │
+    │ https://github.com/JJLiebig/codex/releases/latest    │
     ╰──────────────────────────────────────────────────────╯
     ");
     let cell = UpdateAvailableHistoryCell::new("9.9.9".to_string(), None);
@@ -1297,13 +1297,13 @@ fn codex_plus_plus_update_available_history_cell_snapshots() {
         .join("\n")
         .replace(codex_cli_version(), "0.0.0");
     insta::assert_snapshot!(rendered, @r"
-    ╭────────────────────────────────────────────────────────────────────────────────────╮
-    │ ✨ Update available! 0.0.0 -> 9.9.9                                              │
-    │ See https://github.com/Pimpmuckl/codex#install-a-release for installation options. │
-    │                                                                                    │
-    │ See full release notes:                                                            │
-    │ https://github.com/Pimpmuckl/codex/releases/latest                                 │
-    ╰────────────────────────────────────────────────────────────────────────────────────╯
+    ╭───────────────────────────────────────────────────────────────────────────────────╮
+    │ ✨ Update available! 0.0.0 -> 9.9.9                                             │
+    │ See https://github.com/JJLiebig/codex#install-a-release for installation options. │
+    │                                                                                   │
+    │ See full release notes:                                                           │
+    │ https://github.com/JJLiebig/codex/releases/latest                                 │
+    ╰───────────────────────────────────────────────────────────────────────────────────╯
     ");
 }
 

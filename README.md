@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/Pimpmuckl/codex/main/.github/codex-plus-plus-splash.png" alt="Codex++ splash" width="100%" />
+  <img src="https://raw.githubusercontent.com/JJLiebig/codex/main/.github/codex-plus-plus-splash.png" alt="Codex++ splash" width="100%" />
 </p>
 
 # Codex++
@@ -48,7 +48,7 @@ npm install -g --force @jjliebig/codex-plus-plus
 
 Configuration and sessions continue to use `$CODEX_HOME`. Switching or reinstalling does not remove the Codex++ account store under `$CODEX_HOME/accounts`.
 
-As a standalone alternative, download the matching package and `install-codex-plus-plus-latest` script from [Codex++ Releases](https://github.com/Pimpmuckl/codex/releases). The standalone installers verify release checksums and install an immutable package under `$CODEX_HOME/packages/codex-plus-plus`. Existing sessions keep their current release while new sessions use the update.
+As a standalone alternative, download the matching package and `install-codex-plus-plus-latest` script from [Codex++ Releases](https://github.com/JJLiebig/codex/releases). The standalone installers verify release checksums and install an immutable package under `$CODEX_HOME/packages/codex-plus-plus`. Existing sessions keep their current release while new sessions use the update.
 
 ## Manage Accounts
 
@@ -84,7 +84,7 @@ git tag "$tag"
 git push origin "$tag"
 ```
 
-The tag workflow validates the release helpers, builds Windows x64, macOS ARM64, and Linux musl x64 on standard hosted runners, verifies the exact npm payloads, publishes npm through OIDC trusted publishing with provenance, and publishes the GitHub Release only after npm succeeds. Configure the npm trusted publisher for `Pimpmuckl/codex`, workflow filename `codex-plus-plus-release.yml`, and the `npm publish` action; no npm token is used.
+The tag workflow validates the release helpers, builds Windows x64, macOS ARM64, and Linux musl x64 on standard hosted runners, verifies the exact npm payloads, publishes npm through OIDC trusted publishing with provenance, and publishes the GitHub Release only after npm succeeds. Configure the npm trusted publisher for `JJLiebig/codex`, workflow filename `codex-plus-plus-release.yml`, and the `npm publish` action; no npm token is used.
 
 Release dependency caches are optional accelerators warmed on relevant `main` changes and restored by later tags. A missing, stale, corrupt, or unavailable cache produces the same cold build, and restored caches force target/profile-scoped v8 regeneration before the full `release` build. Intermediate artifacts expire after one day and are deleted after a successful release when GitHub permits it.
 

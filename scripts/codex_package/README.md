@@ -49,7 +49,7 @@ publishing cannot create a package. After deliberately pushing a
 3. From an authenticated operator shell, publish its Linux tarball with
    `npm publish codex-plus-plus-npm-linux-x64-<version>.tgz --access public --tag linux-x64`.
 4. In npm package settings, configure a trusted publisher for repository
-   `Pimpmuckl/codex`, workflow `codex-plus-plus-release.yml`, and allowed action
+   `JJLiebig/codex`, workflow `codex-plus-plus-release.yml`, and allowed action
    `npm publish`.
 5. Rerun only the failed `publish-npm` job. It verifies and skips the manually
    published bytes, publishes the remaining exact tarballs, and then unblocks

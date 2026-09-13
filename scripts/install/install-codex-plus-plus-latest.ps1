@@ -73,7 +73,7 @@ function Confirm-AssetHash {
 }
 
 $releaseBase = if ([string]::IsNullOrWhiteSpace($env:CODEX_PLUS_PLUS_RELEASE_BASE_URL)) {
-    "https://github.com/Pimpmuckl/codex"
+    "https://github.com/JJLiebig/codex"
 } else {
     $env:CODEX_PLUS_PLUS_RELEASE_BASE_URL.TrimEnd("/")
 }

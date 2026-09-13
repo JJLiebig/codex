@@ -52,7 +52,7 @@ VERSION = "0.144.4-fork.1"
 ROOT_PACKAGE = "@jjliebig/codex-plus-plus"
 REPOSITORY = {
     "type": "git",
-    "url": "git+https://github.com/Pimpmuckl/codex.git",
+    "url": "git+https://github.com/JJLiebig/codex.git",
     "directory": "codex-cli",
 }
 PLATFORMS = {

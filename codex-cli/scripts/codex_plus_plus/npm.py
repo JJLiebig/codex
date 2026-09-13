@@ -2,7 +2,7 @@ ROOT_PACKAGE = "codex-plus-plus"
 NPM_NAME = "@jjliebig/codex-plus-plus"
 REPOSITORY = {
     "type": "git",
-    "url": "git+https://github.com/Pimpmuckl/codex.git",
+    "url": "git+https://github.com/JJLiebig/codex.git",
     "directory": "codex-cli",
 }
 PLATFORM_PACKAGES = {

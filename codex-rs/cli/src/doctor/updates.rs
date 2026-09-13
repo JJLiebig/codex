@@ -512,7 +512,7 @@ mod tests {
                 method: InstallMethod::Other,
                 package_layout: None,
             }),
-            "manual: https://github.com/Pimpmuckl/codex#install-a-release"
+            "manual: https://github.com/JJLiebig/codex#install-a-release"
         );
     }
 

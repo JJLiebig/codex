@@ -37,7 +37,9 @@ impl DcgTarget {
 }
 pub(super) async fn resolve(source: &str) -> Result<DcgTarget> {
     let mut response = create_client()
-        .get("https://api.github.com/repos/Pimpmuckl/destructive_command_guard/releases?per_page=100")
+        .get(
+            "https://api.github.com/repos/JJLiebig/destructive_command_guard/releases?per_page=100",
+        )
         .timeout(Duration::from_secs(5))
         .send()
         .await?

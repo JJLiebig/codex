@@ -15,7 +15,7 @@ import zipfile
 
 
 PACKAGE_NAME = "@jjliebig/codex-plus-plus"
-REPOSITORY_URL = "git+https://github.com/Pimpmuckl/codex.git"
+REPOSITORY_URL = "git+https://github.com/JJLiebig/codex.git"
 
 
 @dataclass(frozen=True)
@@ -189,7 +189,7 @@ def publish(version: str, npm_dir: Path, *, dry_run: bool = False) -> None:
         raise RuntimeError(
             f"{PACKAGE_NAME} does not exist. Download this run's private npm artifact, "
             "manually publish its linux-x64 tarball under --tag linux-x64, configure "
-            "trusted publishing for Pimpmuckl/codex and codex-plus-plus-release.yml, "
+            "trusted publishing for JJLiebig/codex and codex-plus-plus-release.yml, "
             "then rerun only this failed job."
         )
 

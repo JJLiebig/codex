@@ -59,7 +59,7 @@ else
   exit 1
 fi
 
-release_base=${CODEX_PLUS_PLUS_RELEASE_BASE_URL:-https://github.com/Pimpmuckl/codex}
+release_base=${CODEX_PLUS_PLUS_RELEASE_BASE_URL:-https://github.com/JJLiebig/codex}
 release_base=${release_base%/}
 release_url=$(curl --fail --silent --show-error --location --output /dev/null \
   --write-out '%{url_effective}' "$release_base/releases/latest") || {

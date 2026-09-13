@@ -115,7 +115,7 @@ fn write_installer(root: &Path, fail: bool) -> Result<()> {
     let body = if fail {
         r#"Param([string]$Owner,[string]$Repo,[string]$Version,[string]$Dest,[switch]$NoConfigure,[switch]$Verify); [IO.File]::WriteAllText((Join-Path $Dest 'dcg.exe'), 'broken'); exit 7"#
     } else {
-        r#"Param([string]$Owner,[string]$Repo,[string]$Version,[string]$Dest,[switch]$NoConfigure,[switch]$Verify); if($Owner -ne 'Pimpmuckl' -or $Repo -ne 'destructive_command_guard' -or -not $NoConfigure -or -not $Verify){exit 8}; [IO.File]::WriteAllText((Join-Path $Dest 'installed-version'), $Version); Copy-Item (Join-Path $PSScriptRoot 'fake-dcg.exe') (Join-Path $Dest 'dcg.exe') -Force"#
+        r#"Param([string]$Owner,[string]$Repo,[string]$Version,[string]$Dest,[switch]$NoConfigure,[switch]$Verify); if($Owner -ne 'JJLiebig' -or $Repo -ne 'destructive_command_guard' -or -not $NoConfigure -or -not $Verify){exit 8}; [IO.File]::WriteAllText((Join-Path $Dest 'installed-version'), $Version); Copy-Item (Join-Path $PSScriptRoot 'fake-dcg.exe') (Join-Path $Dest 'dcg.exe') -Force"#
     };
     fs::write(root.join("install.ps1"), body)?;
     Ok(())
@@ -128,7 +128,7 @@ fn write_installer(root: &Path, fail: bool) -> Result<()> {
 set -eu; while (($#)); do if [[ $1 == --dest ]]; then dest=$2; shift; fi; shift; done; printf broken > "$dest/dcg"; exit 7"#
     } else {
         r#"#!/usr/bin/env bash
-set -eu; no_configure=0; verify=0; while (($#)); do case $1 in --version) version=$2; shift;; --dest) dest=$2; shift;; --no-configure) no_configure=1;; --verify) verify=1;; esac; shift; done; [[ $OWNER == Pimpmuckl && $REPO == destructive_command_guard && $no_configure == 1 && $verify == 1 ]]; printf %s "$version" > "$dest/installed-version"; cp "$(dirname "$0")/fake-dcg" "$dest/dcg"; chmod +x "$dest/dcg""#
+set -eu; no_configure=0; verify=0; while (($#)); do case $1 in --version) version=$2; shift;; --dest) dest=$2; shift;; --no-configure) no_configure=1;; --verify) verify=1;; esac; shift; done; [[ $OWNER == JJLiebig && $REPO == destructive_command_guard && $no_configure == 1 && $verify == 1 ]]; printf %s "$version" > "$dest/installed-version"; cp "$(dirname "$0")/fake-dcg" "$dest/dcg"; chmod +x "$dest/dcg""#
     };
     fs::write(root.join("install.sh"), body)?;
     Ok(())
