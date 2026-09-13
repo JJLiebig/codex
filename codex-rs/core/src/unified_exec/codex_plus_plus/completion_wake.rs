@@ -43,21 +43,23 @@ impl CompletionWake {
         self.processes.lock().await.remove(&id);
     }
     pub(crate) async fn has_ready(&self) -> bool {
-        self.processes.lock().await.values().any(|p| {
-            p.upgrade()
-                .is_some_and(|p| p.cancellation_token().is_cancelled())
-        })
+        self.processes
+            .lock()
+            .await
+            .values()
+            .any(|p| p.upgrade().is_some_and(|p| p.completion().is_some()))
     }
-    pub(crate) async fn take_input(&self) -> Vec<TurnInput> {
+    pub(crate) async fn take_input(&self, interrupted: bool) -> Vec<TurnInput> {
+        if interrupted {
+            self.clear().await;
+            return Vec::new();
+        }
         let mut pending = self.processes.lock().await;
         let ready: Vec<_> = pending
             .iter()
             .filter_map(|(&id, process)| {
                 let process = process.upgrade()?;
-                process
-                    .cancellation_token()
-                    .is_cancelled()
-                    .then_some((id, process.exit_code()))
+                process.completion().map(|code| (id, code))
             })
             .take(8)
             .collect();
@@ -86,14 +88,14 @@ impl UnifiedExecProcessManager {
         };
         let process = Arc::clone(&entry.process);
         let mut pending = self.completion_wake.processes.lock().await;
-        if cancellation.is_cancelled() {
+        if cancellation.is_cancelled() || session.is_interrupted() {
             return;
         }
         pending.insert(id, Arc::downgrade(&process));
         drop(pending);
         let session = Arc::downgrade(session);
         tokio::spawn(async move {
-            process.cancellation_token().cancelled().await;
+            process.wait_for_completion().await;
             if let Some(session) = session.upgrade() {
                 session
                     .services
@@ -104,6 +106,11 @@ impl UnifiedExecProcessManager {
             }
         });
     }
+}
+
+pub(crate) fn supported_source(source: &codex_protocol::protocol::SessionSource) -> bool {
+    // Exec shuts down on final; parents treat a subagent final as completed and may unload it.
+    !matches!(source, codex_protocol::protocol::SessionSource::Exec) && !source.is_non_root_agent()
 }
 
 pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {

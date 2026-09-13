@@ -998,10 +998,10 @@ fn add_core_tool_sources(context: &CoreToolPlanContext<'_>, registry: &mut ToolR
                 && !matches!(context.model_info.shell_type, ConfigShellToolType::Disabled)
             {
                 registry.add(ExecCommandHandler::new(ExecCommandHandlerOptions {
-                    completion_wake: !matches!(
-                        turn_context.session_source,
-                        codex_protocol::protocol::SessionSource::Exec
-                    ),
+                    completion_wake:
+                        crate::unified_exec::codex_plus_plus::completion_wake::supported_source(
+                            &turn_context.session_source,
+                        ),
                     allow_login_shell: any_environment_allows_login_shell(context.environments),
                     allow_tty: turn_context
                         .config
@@ -1097,9 +1097,8 @@ fn add_shell_tools(context: &CoreToolPlanContext<'_>, registry: &mut ToolRegistr
     let exec_permission_approvals_enabled = features.enabled(Feature::ExecPermissionApprovals);
     let include_environment_id = matches!(environment_mode, ToolEnvironmentMode::Multiple);
     let options = ExecCommandHandlerOptions {
-        completion_wake: !matches!(
-            turn_context.session_source,
-            codex_protocol::protocol::SessionSource::Exec
+        completion_wake: crate::unified_exec::codex_plus_plus::completion_wake::supported_source(
+            &turn_context.session_source,
         ),
         allow_login_shell,
         allow_tty: features.enabled(Feature::UnifiedExecTty),

@@ -1354,6 +1354,21 @@ pub fn test_codex() -> TestCodexBuilder {
     TestCodexBuilder {
         session_source: None,
         config_mutators: vec![Box::new(|config| {
+            // Upstream instruction tests isolate the original prompt. Fork coverage opts in.
+            let path = config.codex_home.join("config.toml");
+            let mut user = config
+                .config_layer_stack
+                .effective_user_config()
+                .unwrap_or_else(|| {
+                    serde_json::from_value(serde_json::json!({})).expect("empty TOML table")
+                });
+            user.as_table_mut()
+                .expect("TOML table")
+                .insert("disable_unnecessary_updates".into(), false.into());
+            config.config_layer_stack = config
+                .config_layer_stack
+                .with_user_config(&path, user)
+                .expect("quiet-update test configuration");
             config
                 .features
                 .disable(Feature::Apps)

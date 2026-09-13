@@ -236,7 +236,6 @@ pub(crate) fn generate_chunk_id() -> String {
 }
 
 #[cfg(test)]
-#[cfg(unix)]
 #[path = "process_tests.rs"]
 mod process_tests;
 #[cfg(test)]

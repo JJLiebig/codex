@@ -22,17 +22,23 @@ enum Finish {
     Cancel,
     Ordinary,
     Exec,
+    Subagent,
 }
 
 #[test_case(Finish::Wake; "idle completion resumes once")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
+#[test_case(Finish::Subagent; "subagents do not report completion while waiting")]
 #[test_case(Finish::Exec; "one turn host does not offer wakes")]
 #[test_case(Finish::Ordinary; "ordinary background commands do not wake")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn background_completion(finish: Finish) -> Result<()> {
     let source = if matches!(finish, Finish::Exec) {
         codex_protocol::protocol::SessionSource::Exec
+    } else if matches!(finish, Finish::Subagent) {
+        codex_protocol::protocol::SessionSource::SubAgent(
+            codex_protocol::protocol::SubAgentSource::Other("worker".into()),
+        )
     } else {
         codex_protocol::protocol::SessionSource::Cli
     };
@@ -70,7 +76,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
-    if !matches!(finish, Finish::Ordinary | Finish::Exec) {
+    if !matches!(finish, Finish::Ordinary | Finish::Exec | Finish::Subagent) {
         responses.push(sse(vec![
             ev_assistant_message("m2", "Done."),
             ev_completed("r4"),
@@ -83,7 +89,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         mock.requests()[0].body_json()["tools"]
             .to_string()
             .contains("on_exit"),
-        !matches!(finish, Finish::Exec)
+        !matches!(finish, Finish::Exec | Finish::Subagent)
     );
     let output = mock.requests()[1]
         .function_call_output_text("background")
@@ -125,7 +131,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         match finish {
             Finish::Wake | Finish::Cancel => 3,
             Finish::Read => 4,
-            Finish::Ordinary | Finish::Exec => 2,
+            Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
     if matches!(finish, Finish::Wake) {
@@ -204,10 +210,15 @@ async fn background_completion_batches_exits_before_final_answer() -> Result<()>
 #[test_case(Some(false); "quiet progress can be disabled")]
 #[tokio::test]
 async fn background_completion_progress_instructions(setting: Option<bool>) -> Result<()> {
-    let original = "Keep useful guidance.\nAvoid performing blocking sleep or wait calls longer than 60 seconds.\nYou should not be left without a commentary update for more than 60 seconds.";
+    let original = "Keep useful guidance. Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration. Keep custom suffix.\nThe user appreciates consistent, frequent communication during your turn, and should not be left without a commentary update for more than 60 seconds during ongoing work. Keep trailing guidance.";
     let harness =
         TestCodexHarness::with_auto_env_builder(test_codex().with_config(move |config| {
             config.base_instructions = Some(original.into());
+            let path = config.codex_home.join("config.toml");
+            config.config_layer_stack = config
+                .config_layer_stack
+                .with_user_config(&path, toml::Value::Table(Default::default()))
+                .unwrap();
             if let Some(enabled) = setting {
                 let path = config.codex_home.join("config.toml");
                 config.config_layer_stack = config
@@ -233,6 +244,8 @@ async fn background_completion_progress_instructions(setting: Option<bool>) -> R
         assert_eq!(instructions, original);
     } else {
         assert!(instructions.contains("Keep useful guidance."));
+        assert!(instructions.contains("Keep custom suffix."));
+        assert!(instructions.contains("Keep trailing guidance."));
         assert!(!instructions.contains("60 seconds"));
         assert!(
             instructions

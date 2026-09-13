@@ -464,7 +464,7 @@ impl Session {
                 .services
                 .unified_exec_manager
                 .completion_wake
-                .take_input()
+                .take_input(self.is_interrupted())
                 .await;
             if completions.is_empty()
                 && (!self.input_queue.has_pending_mailbox_items().await
@@ -585,6 +585,11 @@ impl Session {
                 ) {
                     self.mark_interrupted();
                 }
+                self.services
+                    .unified_exec_manager
+                    .completion_wake
+                    .cancel_for_abort(&reason)
+                    .await;
                 active.take()
             } else {
                 None
@@ -607,6 +612,11 @@ impl Session {
         // Let interrupted tasks observe cancellation before dropping pending approvals, or an
         // in-flight approval wait can surface as a model-visible rejection before TurnAborted.
         self.input_queue.clear_pending(&active_turn).await;
+        self.services
+            .unified_exec_manager
+            .completion_wake
+            .cancel_for_abort(&reason)
+            .await;
 
         if reason == TurnAbortReason::Interrupted {
             self.maybe_start_turn_for_pending_work().await;
