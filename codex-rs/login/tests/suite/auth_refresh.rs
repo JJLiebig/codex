@@ -1078,15 +1078,15 @@ async fn refresh_token_does_not_retry_after_standard_invalid_grant_failure() -> 
 
 #[serial_test::serial(auth_env)]
 #[tokio::test]
-async fn reused_refresh_token_fails_over_to_another_imported_account() -> Result<()> {
+async fn invalid_refresh_token_fails_over_to_another_imported_account() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .and(path("/oauth/token"))
-        .respond_with(ResponseTemplate::new(400).set_body_json(json!({
+        .respond_with(ResponseTemplate::new(401).set_body_json(json!({
             "error": {
-                "code": "refresh_token_reused"
+                "code": "invalid_refresh_token"
             }
         })))
         .expect(1)
