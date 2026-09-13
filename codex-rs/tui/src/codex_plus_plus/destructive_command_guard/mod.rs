@@ -44,9 +44,9 @@ use uuid::Uuid;
 
 use latest_release::DcgTarget;
 
-const MARKETPLACE_NAME: &str = "jjliebig-dcg";
+const MARKETPLACE_NAME: &str = "pimpmuckl-dcg";
 const PLUGIN_NAME: &str = "destructive-command-guard";
-const PLUGIN_ID: &str = "destructive-command-guard@jjliebig-dcg";
+const PLUGIN_ID: &str = "destructive-command-guard@pimpmuckl-dcg";
 const MARKETPLACE_SOURCE: &str = "https://github.com/JJLiebig/destructive_command_guard.git";
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 static OPERATION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
