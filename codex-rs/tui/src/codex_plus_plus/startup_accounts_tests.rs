@@ -147,6 +147,28 @@ fn automatic_default_ignores_automation_disabled_alternative() {
 }
 
 #[test]
+fn automatic_default_ignores_accounts_without_loaded_usage() {
+    let unknown = account_candidate("acct_unknown", /*automation_enabled*/ true);
+    let known = account_candidate("acct_known", /*automation_enabled*/ true);
+    let mut unknown_picker = picker_candidate("acct_unknown", /*is_current*/ false);
+    unknown_picker.five_hour_usage_left_percent = None;
+    unknown_picker.weekly_usage_left_percent = None;
+    let mut known_picker = picker_candidate("acct_known", /*is_current*/ false);
+    known_picker.in_use = true;
+    let candidates = vec![unknown, known];
+    let picker_candidates = vec![unknown_picker, known_picker];
+
+    assert_eq!(
+        automatic_default_index(&candidates, &picker_candidates),
+        Some(1)
+    );
+    assert_eq!(
+        automatic_default_index(&candidates[..1], &picker_candidates[..1]),
+        None
+    );
+}
+
+#[test]
 fn picker_shows_local_reset_times_and_available_credits() {
     use chrono::TimeZone;
 

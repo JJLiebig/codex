@@ -230,7 +230,15 @@ fn automatic_default_index(
     let automatic_indices = candidates
         .iter()
         .enumerate()
-        .filter(|(_, candidate)| candidate.automation_enabled)
+        .filter(|(index, candidate)| {
+            candidate.automation_enabled
+                && (picker_candidates[*index]
+                    .five_hour_usage_left_percent
+                    .is_some()
+                    || picker_candidates[*index]
+                        .weekly_usage_left_percent
+                        .is_some())
+        })
         .map(|(index, _)| index)
         .collect::<Vec<_>>();
     let automatic_candidates = automatic_indices
