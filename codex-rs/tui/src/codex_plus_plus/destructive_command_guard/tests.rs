@@ -32,7 +32,7 @@ async fn legacy_marketplace_source_migrates_without_changing_installed_identity(
         .build()
         .await?;
     let app_server = crate::start_embedded_app_server_for_picker(&config).await?;
-    let manager = DcgManager::new(&app_server, &config)?;
+    let manager = DcgManager::new(&app_server, &config).unwrap();
     let checkout_before = manager.checkout();
     assert!(matches!(checkout_before, Ok(Some(_))));
     assert_eq!(manager.migrate_marketplace_source().await, Ok(()));
