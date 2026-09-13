@@ -48,6 +48,8 @@ const MARKETPLACE_NAME: &str = "pimpmuckl-dcg";
 const PLUGIN_NAME: &str = "destructive-command-guard";
 const PLUGIN_ID: &str = "destructive-command-guard@pimpmuckl-dcg";
 const MARKETPLACE_SOURCE: &str = "https://github.com/JJLiebig/destructive_command_guard.git";
+const LEGACY_MARKETPLACE_SOURCE: &str =
+    "https://github.com/Pimpmuckl/destructive_command_guard.git";
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
 static OPERATION_IN_FLIGHT: AtomicBool = AtomicBool::new(false);
 static STATUS_DETECTION_ID: AtomicU64 = AtomicU64::new(0);
@@ -135,6 +137,9 @@ impl DcgManager {
     async fn status(&self, probe_latest: bool) -> DcgStatus {
         if let Some(reason) = self.unsupported_reason() {
             return DcgStatus::Unsupported(reason);
+        }
+        if let Err(reason) = self.migrate_marketplace_source().await {
+            return DcgStatus::NeedsRepair(reason);
         }
         let (marketplace_root, installed_target) = match self.checkout() {
             Ok(Some(marketplace)) => marketplace,
@@ -277,6 +282,9 @@ impl DcgManager {
     async fn install_managed(&self, preserve_enablement: bool) -> Result<DcgChange> {
         self.ensure_supported()?;
         let _lock = self.mutation_lock()?;
+        self.migrate_marketplace_source()
+            .await
+            .map_err(|reason| anyhow::anyhow!("cannot migrate marketplace state: {reason:?}"))?;
         let target = self.resolve_latest_target().await?;
         let current_marketplace = match self.checkout() {
             Ok(marketplace) => marketplace,
@@ -700,8 +708,10 @@ impl DcgManager {
             .and_then(toml::Value::as_str)
             .and_then(DcgTarget::from_tag)
             .ok_or(RepairReason::MarketplacePinMismatch)?;
-        if marketplace.get("source").and_then(toml::Value::as_str)
-            != Some(self.marketplace_source.as_str())
+        let source = marketplace.get("source").and_then(toml::Value::as_str);
+        if !(source == Some(self.marketplace_source.as_str())
+            || self.marketplace_source == MARKETPLACE_SOURCE
+                && source == Some(LEGACY_MARKETPLACE_SOURCE))
             || marketplace.get("source_type").and_then(toml::Value::as_str) != Some("git")
         {
             return Err(RepairReason::MarketplacePinMismatch);
@@ -710,6 +720,35 @@ impl DcgManager {
             marketplace_install_root(home).join(MARKETPLACE_NAME),
             target,
         )))
+    }
+
+    async fn migrate_marketplace_source(&self) -> std::result::Result<(), RepairReason> {
+        if self.checkout()?.is_none() || self.marketplace_source != MARKETPLACE_SOURCE {
+            return Ok(());
+        }
+        let contents = std::fs::read_to_string(self.local_codex_home.join("config.toml"))
+            .map_err(|_| RepairReason::MarketplaceConfigMalformed)?;
+        let config = toml::from_str::<toml::Value>(&contents)
+            .map_err(|_| RepairReason::MarketplaceConfigMalformed)?;
+        if config
+            .get("marketplaces")
+            .and_then(|marketplaces| marketplaces.get(MARKETPLACE_NAME))
+            .and_then(|marketplace| marketplace.get("source"))
+            .and_then(toml::Value::as_str)
+            == Some(LEGACY_MARKETPLACE_SOURCE)
+        {
+            let response = self
+                .write_config_without_reload(replace_config_value(
+                    format!("marketplaces.\"{MARKETPLACE_NAME}\".source"),
+                    serde_json::json!(MARKETPLACE_SOURCE),
+                ))
+                .await
+                .map_err(|_| RepairReason::MarketplaceConfigMalformed)?;
+            if response.status != codex_app_server_protocol::WriteStatus::Ok {
+                return Err(RepairReason::MarketplacePinMismatch);
+            }
+        }
+        Ok(())
     }
     async fn resolve_latest_target(&self) -> Result<DcgTarget> {
         #[cfg(test)]

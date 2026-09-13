@@ -20,6 +20,47 @@ fn release_metadata_accepts_only_eligible_owned_channel() {
 }
 
 #[tokio::test]
+async fn legacy_marketplace_source_migrates_without_changing_installed_identity() -> Result<()> {
+    let home = TempDir::new()?;
+    let path = home.path().join("config.toml");
+    let original = format!(
+        "[marketplaces.{MARKETPLACE_NAME}]\nsource_type = 'git'\nsource = '{LEGACY_MARKETPLACE_SOURCE}'\nref = 'v0.6.9-codexpp.1'\n[plugins.'{PLUGIN_ID}']\nenabled = false\n"
+    );
+    fs::write(&path, &original)?;
+    let config = ConfigBuilder::default()
+        .codex_home(home.path().to_path_buf())
+        .build()
+        .await?;
+    let app_server = crate::start_embedded_app_server_for_picker(&config).await?;
+    let manager = DcgManager::new(&app_server, &config)?;
+    let checkout_before = manager.checkout();
+    assert!(matches!(checkout_before, Ok(Some(_))));
+    assert_eq!(manager.migrate_marketplace_source().await, Ok(()));
+    assert_eq!(manager.checkout(), checkout_before);
+    let migrated = fs::read_to_string(&path)?;
+    assert_eq!(
+        toml::from_str::<toml::Value>(&migrated)?,
+        toml::from_str::<toml::Value>(
+            &original.replace(LEGACY_MARKETPLACE_SOURCE, MARKETPLACE_SOURCE)
+        )?
+    );
+    assert_eq!(manager.migrate_marketplace_source().await, Ok(()));
+    assert_eq!(fs::read_to_string(&path)?, migrated);
+    let foreign = original.replace(
+        LEGACY_MARKETPLACE_SOURCE,
+        "https://github.com/example/dcg.git",
+    );
+    fs::write(&path, &foreign)?;
+    assert_eq!(
+        manager.migrate_marketplace_source().await,
+        Err(RepairReason::MarketplacePinMismatch)
+    );
+    assert_eq!(fs::read_to_string(&path)?, foreign);
+    app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn managed_install_lifecycle_is_transactional_and_next_session_only() -> Result<()> {
     if !PLATFORM_SUPPORTED {
         return Ok(());
