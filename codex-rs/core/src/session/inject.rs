@@ -138,8 +138,13 @@ impl Session {
                 }
             }));
         }
-        self.record_prepared_conversation_items(turn_context, annotated_items, image_preparations)
-            .await;
+        self.record_prepared_conversation_items(
+            turn_context,
+            annotated_items,
+            image_preparations,
+            || {},
+        )
+        .await;
     }
 
     /// Injects items into active work, or records them without starting a turn.

@@ -140,6 +140,7 @@ use tracing::warn;
 #[path = "codex_plus_plus/completion_wake.rs"]
 mod completion_wake;
 pub(crate) use completion_wake::TurnRunState;
+pub(crate) use completion_wake::record_claimed_input;
 
 const POST_SAMPLING_TOKEN_ESTIMATE_TARGET: &str = "codex_core::post_sampling_token_estimate";
 
@@ -785,19 +786,23 @@ async fn run_hooks_and_collect_inputs(
             if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty()) {
                 accepted_user_input = true;
             }
-            record_pending_input(
+            if !completion_wake::record_claimed_completion(
                 sess,
                 turn_context,
-                input_item.clone(),
-                hook_outcome.additional_contexts,
-                persist_context,
-            )
-            .await;
-            completion_wake::commit_recorded_completion(
-                sess,
-                std::slice::from_ref(input_item),
+                input_item,
                 completion_claim,
-            );
+            )
+            .await
+            {
+                record_pending_input(
+                    sess,
+                    turn_context,
+                    input_item.clone(),
+                    hook_outcome.additional_contexts,
+                    persist_context,
+                )
+                .await;
+            }
             accepted.push(input_item.clone());
         }
     }

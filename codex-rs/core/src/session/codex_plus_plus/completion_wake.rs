@@ -195,19 +195,27 @@ pub(super) async fn record_pending_injections(
     record_injections(sess, turn_context, injection_items).await;
 }
 
-pub(super) fn commit_recorded_completion(
-    sess: &Session,
-    pending_input: &[TurnInput],
+pub(super) async fn record_claimed_completion(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    input: &TurnInput,
     completion_claim: &mut Option<u64>,
-) {
-    if pending_input.iter().any(is_background_completion)
-        && let Some(claim) = completion_claim.take()
-    {
+) -> bool {
+    let (TurnInput::ResponseItem(envelope), Some(claim)) = (input, *completion_claim) else {
+        return false;
+    };
+    if !is_background_completion(input) {
+        return false;
+    }
+    completion_claim.take();
+    sess.record_conversation_items_then(turn_context, std::slice::from_ref(&envelope.item), || {
         sess.services
             .unified_exec_manager
             .completion_wake
             .commit_claim(claim);
-    }
+    })
+    .await;
+    true
 }
 
 fn is_background_completion(input: &TurnInput) -> bool {
@@ -220,6 +228,23 @@ fn is_background_completion(input: &TurnInput) -> bool {
     content.iter().any(|item| {
         matches!(item, ContentItem::InputText { text } if BackgroundCompletion::matches_text(text))
     })
+}
+
+pub(crate) async fn record_claimed_input(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    input: &[TurnInput],
+    completion_claim: &mut Option<u64>,
+) -> bool {
+    run_hooks_and_collect_inputs(
+        sess,
+        turn_context,
+        input,
+        PersistContext::Standard,
+        completion_claim,
+    )
+    .await
+    .should_stop
 }
 
 async fn record_injections(

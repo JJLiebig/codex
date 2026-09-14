@@ -3380,6 +3380,16 @@ impl Session {
         turn_context: &TurnContext,
         items: &[ResponseItem],
     ) {
+        self.record_conversation_items_then(turn_context, items, || {})
+            .await;
+    }
+
+    pub(crate) async fn record_conversation_items_then(
+        &self,
+        turn_context: &TurnContext,
+        items: &[ResponseItem],
+        on_recorded: impl FnOnce(),
+    ) {
         let (items, image_preparations) =
             self.prepare_conversation_items_for_history(turn_context, items);
         let items = items
@@ -3387,8 +3397,13 @@ impl Session {
             .into_iter()
             .map(ResponseItemEnvelope::new)
             .collect();
-        self.record_prepared_conversation_items(turn_context, items, image_preparations)
-            .await;
+        self.record_prepared_conversation_items(
+            turn_context,
+            items,
+            image_preparations,
+            on_recorded,
+        )
+        .await;
     }
 
     async fn record_prepared_conversation_items(
@@ -3396,6 +3411,7 @@ impl Session {
         turn_context: &TurnContext,
         items: Vec<ResponseItemEnvelope>,
         image_preparations: Vec<ImagePreparationMetadata>,
+        on_recorded: impl FnOnce(),
     ) {
         let response_items = items
             .iter()
@@ -3409,6 +3425,7 @@ impl Session {
             state
                 .history
                 .record_annotated_items(&items, turn_context.model_info().truncation_policy.into());
+            on_recorded();
         }
         for image in image_preparations {
             self.services

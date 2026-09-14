@@ -5,12 +5,11 @@ use tokio_util::sync::CancellationToken;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn::TurnRunState;
-use crate::session::turn::run_hooks_and_record_inputs;
+use crate::session::turn::record_claimed_input;
 use crate::session::turn::run_turn;
 use crate::session::turn_context::TurnContext;
 use crate::tasks::RegularTask;
 use crate::tasks::SessionTaskResult;
-use codex_thread_store::PersistContext;
 use tracing::Instrument;
 use tracing::trace_span;
 
@@ -99,9 +98,9 @@ async fn settle_completion_claim(
     ctx: &Arc<TurnContext>,
     turn_state: &mut TurnRunState,
 ) {
-    let Some(claim) = turn_state.completion_claim else {
+    if turn_state.completion_claim.is_none() {
         return;
-    };
+    }
     let Some(pending_turn_state) = sess
         .input_queue
         .turn_state_for_sub_id(&sess.active_turn, &ctx.sub_id)
@@ -116,10 +115,5 @@ async fn settle_completion_claim(
     if pending_input.is_empty() {
         return;
     }
-    run_hooks_and_record_inputs(sess, ctx, &pending_input, PersistContext::Standard).await;
-    sess.services
-        .unified_exec_manager
-        .completion_wake
-        .commit_claim(claim);
-    turn_state.completion_claim = None;
+    record_claimed_input(sess, ctx, &pending_input, &mut turn_state.completion_claim).await;
 }
