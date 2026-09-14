@@ -76,13 +76,21 @@ pub(super) async fn record_cancelled_input(
     input: &[TurnInput],
     continuation_input: &[TurnInput],
     cancellation_token: &CancellationToken,
+    completion_claim: &mut Option<u64>,
 ) {
-    let input = if cancellation_token.is_cancelled() && !continuation_input.is_empty() {
+    let records_continuation = cancellation_token.is_cancelled() && !continuation_input.is_empty();
+    let input = if records_continuation {
         continuation_input
     } else {
         input
     };
     run_hooks_and_record_inputs(sess, turn_context, input, PersistContext::Standard).await;
+    if records_continuation && let Some(claim) = completion_claim.take() {
+        sess.services
+            .unified_exec_manager
+            .completion_wake
+            .commit_claim(claim);
+    }
 }
 
 pub(super) async fn injections(

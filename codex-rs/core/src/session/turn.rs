@@ -201,6 +201,7 @@ pub(crate) async fn run_turn(
                 &input,
                 &continuation_input,
                 &cancellation_token,
+                &mut turn_state.completion_claim,
             )
             .await;
             return Err(err);
@@ -242,6 +243,7 @@ pub(crate) async fn run_turn(
                     &input,
                     &continuation_input,
                     &cancellation_token,
+                    &mut turn_state.completion_claim,
                 )
                 .await;
                 return Err(err.into());
@@ -270,6 +272,7 @@ pub(crate) async fn run_turn(
                 &input,
                 &continuation_input,
                 &cancellation_token,
+                &mut turn_state.completion_claim,
             )
             .await;
             return Err(err);
