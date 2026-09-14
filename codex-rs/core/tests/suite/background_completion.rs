@@ -12,8 +12,10 @@ use codex_extension_api::ExtensionMetrics;
 use codex_extension_api::ExtensionRegistryBuilder;
 use codex_extension_api::TurnInputContext;
 use codex_extension_api::TurnInputContributor;
+use codex_protocol::AgentPath;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsOverrides;
@@ -38,6 +40,8 @@ use test_case::test_case;
 #[derive(Clone, Copy)]
 enum Finish {
     Wake,
+    DeferredMail,
+    TriggeredMail,
     Compact,
     Steer,
     Read,
@@ -85,6 +89,8 @@ fn wait_for_release_command() -> &'static str {
 }
 
 #[test_case(Finish::Wake; "idle completion resumes once")]
+#[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
+#[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
 #[test_case(Finish::Compact; "completion wakes after compact replacement")]
 #[test_case(Finish::Steer; "completion wakes after ordinary steering")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
@@ -127,7 +133,13 @@ async fn background_completion(finish: Finish) -> Result<()> {
     }
     let waits_for_completion = matches!(
         finish,
-        Finish::Wake | Finish::Compact | Finish::Steer | Finish::Read | Finish::Cancel
+        Finish::Wake
+            | Finish::DeferredMail
+            | Finish::TriggeredMail
+            | Finish::Compact
+            | Finish::Steer
+            | Finish::Read
+            | Finish::Cancel
     );
     let mut responses = vec![
         sse(vec![
@@ -161,6 +173,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
+    if matches!(finish, Finish::TriggeredMail) {
+        responses.push(sse(vec![
+            ev_assistant_message("mail", "Mail handled."),
+            ev_completed("r3"),
+        ]));
+    }
     if !matches!(finish, Finish::Ordinary | Finish::Exec | Finish::Subagent) {
         responses.push(sse(vec![
             ev_assistant_message("m2", "Done."),
@@ -187,7 +205,35 @@ async fn background_completion(finish: Finish) -> Result<()> {
         harness.submit("Run the background command.").await?;
     }
 
-    assert_eq!(mock.requests().len(), 2);
+    if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
+        harness
+            .test()
+            .codex
+            .submit(Op::InterAgentCommunication {
+                communication: InterAgentCommunication::new(
+                    AgentPath::try_from("/root/worker").expect("worker path should parse"),
+                    AgentPath::root(),
+                    Vec::new(),
+                    "late queue-only update".to_string(),
+                    /*trigger_turn*/ matches!(finish, Finish::TriggeredMail),
+                ),
+                start_options: Default::default(),
+            })
+            .await?;
+        if matches!(finish, Finish::TriggeredMail) {
+            wait_for_requests(&mock, 3, "triggering mail did not start its turn").await;
+            submit.as_mut().expect("active submission").await?;
+        }
+    }
+
+    assert_eq!(
+        mock.requests().len(),
+        if matches!(finish, Finish::TriggeredMail) {
+            3
+        } else {
+            2
+        }
+    );
     assert_eq!(
         mock.requests()[0].body_json()["tools"]
             .to_string()
@@ -253,7 +299,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
         );
     }
     harness.write_file("release", b"go").await?;
-    if matches!(finish, Finish::Wake | Finish::Steer | Finish::Read) {
+    if matches!(finish, Finish::TriggeredMail) {
+        wait_for_requests(&mock, 4, "completion did not resume the mail turn").await;
+    } else if matches!(
+        finish,
+        Finish::Wake | Finish::DeferredMail | Finish::Steer | Finish::Read
+    ) {
         submit.as_mut().expect("active submission").await?;
     } else if matches!(finish, Finish::Compact) {
         wait_for_event(&harness.test().codex, |event| {
@@ -271,13 +322,23 @@ async fn background_completion(finish: Finish) -> Result<()> {
     assert_eq!(
         requests.len(),
         match finish {
-            Finish::Wake | Finish::Cancel => 3,
-            Finish::Compact | Finish::Steer | Finish::Read => 4,
+            Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
+            Finish::TriggeredMail | Finish::Compact | Finish::Steer | Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
-    if matches!(finish, Finish::Wake | Finish::Compact | Finish::Steer) {
-        let request = if matches!(finish, Finish::Compact | Finish::Steer) {
+    if matches!(
+        finish,
+        Finish::Wake
+            | Finish::DeferredMail
+            | Finish::TriggeredMail
+            | Finish::Compact
+            | Finish::Steer
+    ) {
+        let request = if matches!(
+            finish,
+            Finish::TriggeredMail | Finish::Compact | Finish::Steer
+        ) {
             &requests[3]
         } else {
             &requests[2]
@@ -298,6 +359,13 @@ async fn background_completion(finish: Finish) -> Result<()> {
     }
     if matches!(finish, Finish::Steer) {
         assert_eq!(contributions.load(Ordering::Relaxed), 2);
+    }
+    if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
+        assert!(
+            requests[2].body_json()["input"]
+                .to_string()
+                .contains("late queue-only update")
+        );
     }
     Ok(())
 }
@@ -435,36 +503,41 @@ async fn background_completion_batches_exits_before_final_answer() -> Result<()>
         ),
     };
     let args = json!({"cmd":wait,"yield_time_ms":250,"on_exit":"wake"}).to_string();
-    let mock = mount_sse_sequence(
+    let mock = mount_response_sequence(
         harness.server(),
         vec![
-            sse(vec![
+            sse_response(sse(vec![
                 ev_function_call("a", "exec_command", &args),
                 ev_function_call("b", "exec_command", &args),
                 ev_completed("r1"),
-            ]),
-            sse(vec![
+            ]))
+            .insert_header("x-codex-turn-state", "batched-state"),
+            sse_response(sse(vec![
                 ev_function_call(
                     "release",
                     "exec_command",
                     &json!({"cmd":release,"yield_time_ms":10000}).to_string(),
                 ),
                 ev_completed("r2"),
-            ]),
-            sse(vec![
+            ])),
+            sse_response(sse(vec![
                 ev_assistant_message("m1", "Waiting."),
                 ev_completed("r3"),
-            ]),
-            sse(vec![
+            ])),
+            sse_response(sse(vec![
                 ev_assistant_message("m2", "Both finished."),
                 ev_completed("r4"),
-            ]),
+            ])),
         ],
     )
     .await;
     harness.submit("Run both commands.").await?;
     assert_eq!(mock.requests().len(), 4);
     let input = mock.requests()[3].body_json()["input"].to_string();
+    assert_eq!(
+        mock.requests()[3].header("x-codex-turn-state").as_deref(),
+        Some("batched-state")
+    );
     assert_eq!(input.matches("<background_completion>").count(), 1);
     assert!(input.contains("session_id=1000"));
     assert!(input.contains("session_id=1001"));
