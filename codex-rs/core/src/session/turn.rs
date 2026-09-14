@@ -331,7 +331,7 @@ pub(crate) async fn run_turn(
     else {
         return Ok(None);
     };
-    if !is_continuation {
+    if !is_continuation || !user_input.is_empty() {
         let Some(extension_items) = build_extension_turn_input_items(
             &sess,
             first_step_context.as_ref(),
@@ -381,7 +381,9 @@ pub(crate) async fn run_turn(
         }
     }
 
-    track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
+    if !is_continuation {
+        track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
+    }
 
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;

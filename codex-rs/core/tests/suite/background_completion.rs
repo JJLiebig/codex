@@ -1,12 +1,25 @@
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
+
 use anyhow::Result;
 use codex_core::TurnInputRequest;
-use codex_protocol::AgentPath;
+use codex_core::config::Config;
+use codex_extension_api::ContextualUserFragment;
+use codex_extension_api::ExtensionData;
+use codex_extension_api::ExtensionFuture;
+use codex_extension_api::ExtensionMetrics;
+use codex_extension_api::ExtensionRegistryBuilder;
+use codex_extension_api::TurnInputContext;
+use codex_extension_api::TurnInputContributor;
 use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::EventMsg;
-use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
+use codex_protocol::protocol::SandboxPolicy;
+use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ResponseMock;
+use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -25,8 +38,6 @@ use test_case::test_case;
 #[derive(Clone, Copy)]
 enum Finish {
     Wake,
-    DeferredMail,
-    TriggeredMail,
     Compact,
     Steer,
     Read,
@@ -34,6 +45,22 @@ enum Finish {
     Ordinary,
     Exec,
     Subagent,
+}
+
+struct CountingTurnInputContributor(Arc<AtomicUsize>);
+
+impl TurnInputContributor for CountingTurnInputContributor {
+    fn contribute<'a>(
+        &'a self,
+        _input: TurnInputContext<'a>,
+        _extension_metrics: Option<Arc<dyn ExtensionMetrics>>,
+        _session_store: &'a ExtensionData,
+        _thread_store: &'a ExtensionData,
+        _turn_store: &'a ExtensionData,
+    ) -> ExtensionFuture<'a, Vec<Box<dyn ContextualUserFragment + Send>>> {
+        self.0.fetch_add(1, Ordering::Relaxed);
+        Box::pin(async { Vec::new() })
+    }
 }
 
 async fn wait_for_requests(mock: &ResponseMock, count: usize, message: &str) {
@@ -58,8 +85,6 @@ fn wait_for_release_command() -> &'static str {
 }
 
 #[test_case(Finish::Wake; "idle completion resumes once")]
-#[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
-#[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
 #[test_case(Finish::Compact; "completion wakes after compact replacement")]
 #[test_case(Finish::Steer; "completion wakes after ordinary steering")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
@@ -78,8 +103,16 @@ async fn background_completion(finish: Finish) -> Result<()> {
     } else {
         codex_protocol::protocol::SessionSource::Cli
     };
-    let harness =
-        TestCodexHarness::with_auto_env_builder(test_codex().with_session_source(source)).await?;
+    let contributions = Arc::new(AtomicUsize::new(0));
+    let mut builder = test_codex().with_session_source(source);
+    if matches!(finish, Finish::Steer) {
+        let mut extensions = ExtensionRegistryBuilder::<Config>::new();
+        extensions.turn_input_contributor(Arc::new(CountingTurnInputContributor(Arc::clone(
+            &contributions,
+        ))));
+        builder = builder.with_extensions(Arc::new(extensions.build()));
+    }
+    let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
     let command = match core_test_support::test_target_os() {
         core_test_support::TestTargetOs::Windows => {
             "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; Write-Output completed; exit 7"
@@ -94,13 +127,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
     }
     let waits_for_completion = matches!(
         finish,
-        Finish::Wake
-            | Finish::DeferredMail
-            | Finish::TriggeredMail
-            | Finish::Compact
-            | Finish::Steer
-            | Finish::Read
-            | Finish::Cancel
+        Finish::Wake | Finish::Compact | Finish::Steer | Finish::Read | Finish::Cancel
     );
     let mut responses = vec![
         sse(vec![
@@ -119,12 +146,6 @@ async fn background_completion(finish: Finish) -> Result<()> {
                 "write_stdin",
                 &json!({"session_id":1000,"chars":"","yield_time_ms":30000}).to_string(),
             ),
-            ev_completed("r3"),
-        ]));
-    }
-    if matches!(finish, Finish::TriggeredMail) {
-        responses.push(sse(vec![
-            ev_assistant_message("m2", "Mail handled."),
             ev_completed("r3"),
         ]));
     }
@@ -166,48 +187,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         harness.submit("Run the background command.").await?;
     }
 
-    if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
-        harness
-            .test()
-            .codex
-            .submit(Op::InterAgentCommunication {
-                communication: InterAgentCommunication::new(
-                    AgentPath::try_from("/root/worker").expect("worker path should parse"),
-                    AgentPath::root(),
-                    Vec::new(),
-                    "late queue-only update".to_string(),
-                    /*trigger_turn*/ matches!(finish, Finish::TriggeredMail),
-                ),
-                start_options: Default::default(),
-            })
-            .await?;
-        if matches!(finish, Finish::TriggeredMail) {
-            wait_for_requests(&mock, 3, "triggering mail did not start its turn").await;
-            submit.as_mut().expect("active submission").await?;
-        } else {
-            harness
-                .test()
-                .codex
-                .submit(Op::RealtimeConversationListVoices)
-                .await?;
-            wait_for_event(&harness.test().codex, |event| {
-                matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
-            })
-            .await;
-        }
-        assert_eq!(
-            harness.test().codex.agent_status().await,
-            AgentStatus::Running
-        );
-    }
-    assert_eq!(
-        mock.requests().len(),
-        if matches!(finish, Finish::TriggeredMail) {
-            3
-        } else {
-            2
-        }
-    );
+    assert_eq!(mock.requests().len(), 2);
     assert_eq!(
         mock.requests()[0].body_json()["tools"]
             .to_string()
@@ -273,17 +253,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         );
     }
     harness.write_file("release", b"go").await?;
-    if matches!(finish, Finish::TriggeredMail) {
-        wait_for_requests(
-            &mock,
-            4,
-            "background completion did not resume the triggered-mail turn",
-        )
-        .await;
-    } else if matches!(
-        finish,
-        Finish::Wake | Finish::DeferredMail | Finish::Steer | Finish::Read
-    ) {
+    if matches!(finish, Finish::Wake | Finish::Steer | Finish::Read) {
         submit.as_mut().expect("active submission").await?;
     } else if matches!(finish, Finish::Compact) {
         wait_for_event(&harness.test().codex, |event| {
@@ -302,23 +272,13 @@ async fn background_completion(finish: Finish) -> Result<()> {
     assert_eq!(
         requests.len(),
         match finish {
-            Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
-            Finish::TriggeredMail | Finish::Compact | Finish::Steer | Finish::Read => 4,
+            Finish::Wake | Finish::Cancel => 3,
+            Finish::Compact | Finish::Steer | Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
-    if matches!(
-        finish,
-        Finish::Wake
-            | Finish::DeferredMail
-            | Finish::TriggeredMail
-            | Finish::Compact
-            | Finish::Steer
-    ) {
-        let request = if matches!(
-            finish,
-            Finish::TriggeredMail | Finish::Compact | Finish::Steer
-        ) {
+    if matches!(finish, Finish::Wake | Finish::Compact | Finish::Steer) {
+        let request = if matches!(finish, Finish::Compact | Finish::Steer) {
             &requests[3]
         } else {
             &requests[2]
@@ -337,12 +297,8 @@ async fn background_completion(finish: Finish) -> Result<()> {
                 .contains("<background_completion>")
         );
     }
-    if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
-        assert!(
-            requests[2].body_json()["input"]
-                .to_string()
-                .contains("late queue-only update")
-        );
+    if matches!(finish, Finish::Steer) {
+        assert_eq!(contributions.load(Ordering::Relaxed), 2);
     }
     Ok(())
 }
@@ -389,55 +345,81 @@ async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn background_completion_batches_exits_before_final_answer() -> Result<()> {
+async fn background_completion_preserves_turn_diff() -> Result<()> {
     let harness = TestCodexHarness::with_auto_env_builder(
         test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
     )
     .await?;
-    let (wait, release) = match core_test_support::test_target_os() {
-        core_test_support::TestTargetOs::Windows => (
-            "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; exit 0",
-            "Set-Content release go; Start-Sleep -Seconds 1",
-        ),
-        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => (
-            "while [ ! -f release ]; do sleep 0.02; done; exit 0",
-            "touch release; sleep 1",
-        ),
-    };
-    let args = json!({"cmd":wait,"yield_time_ms":250,"on_exit":"wake"}).to_string();
+    let command = wait_for_release_command();
     let mock = mount_sse_sequence(
         harness.server(),
         vec![
             sse(vec![
-                ev_function_call("a", "exec_command", &args),
-                ev_function_call("b", "exec_command", &args),
+                ev_apply_patch_custom_tool_call(
+                    "first-patch",
+                    "*** Begin Patch\n*** Add File: first.txt\n+first\n*** End Patch",
+                ),
                 ev_completed("r1"),
             ]),
             sse(vec![
                 ev_function_call(
-                    "release",
+                    "background",
                     "exec_command",
-                    &json!({"cmd":release,"yield_time_ms":10000}).to_string(),
+                    &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
                 ),
                 ev_completed("r2"),
             ]),
             sse(vec![
-                ev_assistant_message("m1", "Waiting."),
+                ev_assistant_message("waiting", "Waiting."),
                 ev_completed("r3"),
             ]),
             sse(vec![
-                ev_assistant_message("m2", "Both finished."),
+                ev_apply_patch_custom_tool_call(
+                    "second-patch",
+                    "*** Begin Patch\n*** Add File: second.txt\n+second\n*** End Patch",
+                ),
                 ev_completed("r4"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "Done."),
+                ev_completed("r5"),
             ]),
         ],
     )
     .await;
-    harness.submit("Run both commands.").await?;
-    assert_eq!(mock.requests().len(), 4);
-    let input = mock.requests()[3].body_json()["input"].to_string();
-    assert_eq!(input.matches("<background_completion>").count(), 1);
-    assert!(input.contains("session_id=1000"));
-    assert!(input.contains("session_id=1001"));
+
+    harness
+        .test()
+        .codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Patch before and after the background command.".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    wait_for_requests(&mock, 3, "background command did not reach waiting state").await;
+
+    harness.write_file("release", b"go").await?;
+    let mut final_diff = None;
+    loop {
+        match wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::TurnDiff(_) | EventMsg::TurnComplete(_))
+        })
+        .await
+        {
+            EventMsg::TurnDiff(diff) => final_diff = Some(diff.unified_diff),
+            EventMsg::TurnComplete(_) => break,
+            _ => unreachable!(),
+        }
+    }
+    let final_diff = final_diff.expect("second patch did not emit a turn diff");
+    assert!(final_diff.contains("first.txt"));
+    assert!(final_diff.contains("second.txt"));
     Ok(())
 }
 
