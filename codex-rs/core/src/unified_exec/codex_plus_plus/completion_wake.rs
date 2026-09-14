@@ -104,7 +104,7 @@ impl CompletionWake {
             .await;
         if session
             .input_queue
-            .has_pending_input(&session.active_turn)
+            .has_pending_turn_input(turn_state.as_deref())
             .await
             || session.input_queue.has_trigger_turn_mailbox_items().await
         {
@@ -146,7 +146,10 @@ impl CompletionWake {
                 _ = self.notify.notified() => {}
                 result = activity.changed() => {
                     if result.is_err()
-                        || session.input_queue.has_pending_input(&session.active_turn).await
+                        || session
+                            .input_queue
+                            .has_pending_turn_input(turn_state.as_deref())
+                            .await
                         || session.input_queue.has_trigger_turn_mailbox_items().await
                     {
                         return;

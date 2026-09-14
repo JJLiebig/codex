@@ -121,6 +121,17 @@ impl InputQueue {
         (activity_rx, pending_activity)
     }
 
+    pub(crate) async fn has_pending_turn_input(
+        &self,
+        turn_state: Option<&Mutex<TurnState>>,
+    ) -> bool {
+        if let Some(turn_state) = turn_state {
+            !turn_state.lock().await.pending_input.items.is_empty()
+        } else {
+            false
+        }
+    }
+
     pub(crate) async fn enqueue_mailbox_communication(
         &self,
         communication: InterAgentCommunication,
@@ -500,6 +511,7 @@ mod tests {
         input_queue
             .extend_pending_input_for_turn_state(&turn_state, vec![passive_output])
             .await;
+        assert!(input_queue.has_pending_turn_input(Some(&turn_state)).await);
         assert_eq!(
             input_queue.subscribe_activity(Some(&turn_state)).await.1,
             None
