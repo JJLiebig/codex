@@ -25,6 +25,7 @@ enum Finish {
     DeferredMail,
     TriggeredMail,
     Compact,
+    Steer,
     Read,
     Cancel,
     Ordinary,
@@ -36,6 +37,7 @@ enum Finish {
 #[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
 #[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
 #[test_case(Finish::Compact; "completion wakes after compact replacement")]
+#[test_case(Finish::Steer; "completion wakes after ordinary steering")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
 #[test_case(Finish::Subagent; "subagents do not report completion while waiting")]
@@ -98,6 +100,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
+    if matches!(finish, Finish::Steer) {
+        responses.push(sse(vec![
+            ev_assistant_message("m2", "Steer handled."),
+            ev_completed("r3"),
+        ]));
+    }
     if !matches!(finish, Finish::Ordinary | Finish::Exec | Finish::Subagent) {
         responses.push(sse(vec![
             ev_assistant_message("m2", "Done."),
@@ -111,6 +119,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             | Finish::DeferredMail
             | Finish::TriggeredMail
             | Finish::Compact
+            | Finish::Steer
             | Finish::Read
             | Finish::Cancel
     );
@@ -229,6 +238,32 @@ async fn background_completion(finish: Finish) -> Result<()> {
             }]))
             .await?;
     }
+    if matches!(finish, Finish::Steer) {
+        harness
+            .test()
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Acknowledge without reading the process.".into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while mock.requests().len() < 3 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("steered input did not sample");
+        assert!(
+            tokio::time::timeout(
+                std::time::Duration::from_millis(200),
+                submit.as_mut().expect("active submission")
+            )
+            .await
+            .is_err(),
+            "turn completed before background exit"
+        );
+    }
     harness.write_file("release", b"go").await?;
     if matches!(finish, Finish::TriggeredMail) {
         tokio::time::timeout(std::time::Duration::from_secs(20), async {
@@ -238,7 +273,10 @@ async fn background_completion(finish: Finish) -> Result<()> {
         })
         .await
         .expect("background completion did not resume the triggered-mail turn");
-    } else if matches!(finish, Finish::Wake | Finish::DeferredMail | Finish::Read) {
+    } else if matches!(
+        finish,
+        Finish::Wake | Finish::DeferredMail | Finish::Steer | Finish::Read
+    ) {
         submit.as_mut().expect("active submission").await?;
     } else if matches!(finish, Finish::Compact) {
         wait_for_event(&harness.test().codex, |event| {
@@ -258,15 +296,22 @@ async fn background_completion(finish: Finish) -> Result<()> {
         requests.len(),
         match finish {
             Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
-            Finish::TriggeredMail | Finish::Compact | Finish::Read => 4,
+            Finish::TriggeredMail | Finish::Compact | Finish::Steer | Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
     if matches!(
         finish,
-        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Compact
+        Finish::Wake
+            | Finish::DeferredMail
+            | Finish::TriggeredMail
+            | Finish::Compact
+            | Finish::Steer
     ) {
-        let request = if matches!(finish, Finish::TriggeredMail | Finish::Compact) {
+        let request = if matches!(
+            finish,
+            Finish::TriggeredMail | Finish::Compact | Finish::Steer
+        ) {
             &requests[3]
         } else {
             &requests[2]
