@@ -418,6 +418,59 @@ async fn background_completion_preserves_turn_diff() -> Result<()> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_completion_batches_exits_before_final_answer() -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(
+        test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
+    )
+    .await?;
+    let (wait, release) = match core_test_support::test_target_os() {
+        core_test_support::TestTargetOs::Windows => (
+            "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; exit 0",
+            "Set-Content release go; Start-Sleep -Seconds 1",
+        ),
+        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => (
+            "while [ ! -f release ]; do sleep 0.02; done; exit 0",
+            "touch release; sleep 1",
+        ),
+    };
+    let args = json!({"cmd":wait,"yield_time_ms":250,"on_exit":"wake"}).to_string();
+    let mock = mount_sse_sequence(
+        harness.server(),
+        vec![
+            sse(vec![
+                ev_function_call("a", "exec_command", &args),
+                ev_function_call("b", "exec_command", &args),
+                ev_completed("r1"),
+            ]),
+            sse(vec![
+                ev_function_call(
+                    "release",
+                    "exec_command",
+                    &json!({"cmd":release,"yield_time_ms":10000}).to_string(),
+                ),
+                ev_completed("r2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("m1", "Waiting."),
+                ev_completed("r3"),
+            ]),
+            sse(vec![
+                ev_assistant_message("m2", "Both finished."),
+                ev_completed("r4"),
+            ]),
+        ],
+    )
+    .await;
+    harness.submit("Run both commands.").await?;
+    assert_eq!(mock.requests().len(), 4);
+    let input = mock.requests()[3].body_json()["input"].to_string();
+    assert_eq!(input.matches("<background_completion>").count(), 1);
+    assert!(input.contains("session_id=1000"));
+    assert!(input.contains("session_id=1001"));
+    Ok(())
+}
+
 #[test_case(None; "quiet progress is the default")]
 #[test_case(Some(false); "quiet progress can be disabled")]
 #[tokio::test]
