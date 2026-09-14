@@ -25,6 +25,7 @@ pub(crate) struct CompletionWake {
     // Entries are bounded by the existing background-process store. Removal disarms a wake.
     processes: Mutex<BTreeMap<i32, Weak<UnifiedExecProcess>>>,
     pub(crate) notify: Notify,
+    idle_notify: Notify,
 }
 
 impl CompletionWake {
@@ -82,6 +83,10 @@ impl CompletionWake {
         ))]
     }
 
+    #[expect(
+        clippy::await_holding_invalid_type,
+        reason = "active turn ownership and completion transfer must remain atomic"
+    )]
     pub(crate) async fn wait_for_input(
         &self,
         session: &Session,
@@ -181,12 +186,9 @@ impl UnifiedExecProcessManager {
         tokio::spawn(async move {
             completion.await;
             if let Some(session) = session.upgrade() {
-                session
-                    .services
-                    .unified_exec_manager
-                    .completion_wake
-                    .notify
-                    .notify_one();
+                let completion_wake = &session.services.unified_exec_manager.completion_wake;
+                completion_wake.notify.notify_one();
+                completion_wake.idle_notify.notify_one();
             }
         });
     }
@@ -207,4 +209,20 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
             JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically. Do independent work or finish the turn; do not poll. Omit for servers and interactive commands.".into())));
     }
     spec
+}
+
+/// Preserve completion delivery when another task temporarily replaces the owning turn.
+pub(crate) async fn next_submission(
+    session: &Arc<Session>,
+    submissions: &async_channel::Receiver<codex_protocol::protocol::Submission>,
+) -> Option<codex_protocol::protocol::Submission> {
+    loop {
+        tokio::select! {
+            biased;
+            sub = submissions.recv() => return sub.ok(),
+            _ = session.services.unified_exec_manager.completion_wake.idle_notify.notified() => {
+                session.maybe_start_turn_for_pending_work().await;
+            }
+        }
+    }
 }
