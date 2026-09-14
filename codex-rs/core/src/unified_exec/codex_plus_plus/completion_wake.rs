@@ -98,16 +98,15 @@ impl CompletionWake {
             .await
             .as_ref()
             .map(|turn| Arc::clone(&turn.turn_state));
-        let (mut activity, pending_activity) = session
+        let (mut activity, _) = session
             .input_queue
             .subscribe_activity(turn_state.as_deref())
             .await;
-        if pending_activity.is_some()
-            && (session
-                .input_queue
-                .has_pending_input(&session.active_turn)
-                .await
-                || session.input_queue.has_trigger_turn_mailbox_items().await)
+        if session
+            .input_queue
+            .has_pending_input(&session.active_turn)
+            .await
+            || session.input_queue.has_trigger_turn_mailbox_items().await
         {
             return;
         }
