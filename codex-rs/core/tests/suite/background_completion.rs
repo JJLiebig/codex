@@ -1,6 +1,9 @@
 use anyhow::Result;
 use codex_core::TurnInputRequest;
+use codex_protocol::AgentPath;
+use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ev_assistant_message;
@@ -18,6 +21,7 @@ use test_case::test_case;
 #[derive(Clone, Copy)]
 enum Finish {
     Wake,
+    DeferredMail,
     Read,
     Cancel,
     Ordinary,
@@ -26,6 +30,7 @@ enum Finish {
 }
 
 #[test_case(Finish::Wake; "idle completion resumes once")]
+#[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
 #[test_case(Finish::Subagent; "subagents do not report completion while waiting")]
@@ -83,7 +88,56 @@ async fn background_completion(finish: Finish) -> Result<()> {
         ]));
     }
     let mock = mount_sse_sequence(harness.server(), responses).await;
-    harness.submit("Run the background command.").await?;
+    let waits_for_completion = matches!(
+        finish,
+        Finish::Wake | Finish::DeferredMail | Finish::Read | Finish::Cancel
+    );
+    if waits_for_completion {
+        let submit = harness.submit("Run the background command.");
+        tokio::pin!(submit);
+        let waiting = tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while mock.requests().len() < 2 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        });
+        tokio::pin!(waiting);
+        tokio::select! {
+            result = &mut submit => panic!("turn completed before background exit: {result:?}"),
+            result = &mut waiting => result.expect("background command did not reach waiting state"),
+        };
+    } else {
+        harness.submit("Run the background command.").await?;
+    }
+
+    if matches!(finish, Finish::DeferredMail) {
+        harness
+            .test()
+            .codex
+            .submit(Op::InterAgentCommunication {
+                communication: InterAgentCommunication::new(
+                    AgentPath::try_from("/root/worker").expect("worker path should parse"),
+                    AgentPath::root(),
+                    Vec::new(),
+                    "late queue-only update".to_string(),
+                    /*trigger_turn*/ false,
+                ),
+                start_options: Default::default(),
+            })
+            .await?;
+        harness
+            .test()
+            .codex
+            .submit(Op::RealtimeConversationListVoices)
+            .await?;
+        wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
+        })
+        .await;
+        assert_eq!(
+            harness.test().codex.agent_status().await,
+            AgentStatus::Running
+        );
+    }
     assert_eq!(mock.requests().len(), 2);
     assert_eq!(
         mock.requests()[0].body_json()["tools"]
@@ -95,10 +149,19 @@ async fn background_completion(finish: Finish) -> Result<()> {
         .function_call_output_text("background")
         .expect("background tool result");
     assert!(output.contains("Process running with session ID 1000"));
+    if waits_for_completion {
+        assert_eq!(
+            harness.test().codex.agent_status().await,
+            AgentStatus::Running
+        );
+    }
 
     if matches!(finish, Finish::Cancel) {
         harness.test().codex.submit(Op::Interrupt).await?;
-        // The next submission is a barrier for processing the idle interrupt.
+        wait_for_event(&harness.test().codex, |e| {
+            matches!(e, EventMsg::TurnAborted(_))
+        })
+        .await;
         harness.submit("Acknowledge cancellation.").await?;
     }
     if matches!(finish, Finish::Read) {
@@ -112,7 +175,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             .await?;
     }
     harness.write_file("release", b"go").await?;
-    if matches!(finish, Finish::Wake | Finish::Read) {
+    if matches!(finish, Finish::Wake | Finish::DeferredMail | Finish::Read) {
         wait_for_event(&harness.test().codex, |e| {
             matches!(e, EventMsg::TurnComplete(_))
         })
@@ -129,12 +192,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
     assert_eq!(
         requests.len(),
         match finish {
-            Finish::Wake | Finish::Cancel => 3,
+            Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
             Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
-    if matches!(finish, Finish::Wake) {
+    if matches!(finish, Finish::Wake | Finish::DeferredMail) {
         let input = requests[2].body_json()["input"].to_string();
         assert!(input.contains("<background_completion>"));
         assert!(input.contains("exit_code=7"));
@@ -194,10 +257,6 @@ async fn background_completion_batches_exits_before_final_answer() -> Result<()>
     )
     .await;
     harness.submit("Run both commands.").await?;
-    wait_for_event(&harness.test().codex, |e| {
-        matches!(e, EventMsg::TurnComplete(_))
-    })
-    .await;
     assert_eq!(mock.requests().len(), 4);
     let input = mock.requests()[3].body_json()["input"].to_string();
     assert_eq!(input.matches("<background_completion>").count(), 1);

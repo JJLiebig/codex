@@ -38,12 +38,14 @@ impl CompletionWake {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clear();
+        self.notify.notify_one();
     }
     pub(crate) fn observed(&self, id: i32) {
         self.processes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .remove(&id);
+        self.notify.notify_one();
     }
     pub(crate) fn has_ready(&self) -> bool {
         self.processes
@@ -78,6 +80,54 @@ impl CompletionWake {
         vec![TurnInput::ResponseItem(ResponseItemEnvelope::new(
             ContextualUserFragment::into(BackgroundCompletion(ready)),
         ))]
+    }
+
+    pub(crate) async fn wait_for_input(
+        &self,
+        session: &Session,
+        cancellation: &tokio_util::sync::CancellationToken,
+    ) -> Vec<TurnInput> {
+        let turn_state = session
+            .active_turn
+            .lock()
+            .await
+            .as_ref()
+            .map(|turn| Arc::clone(&turn.turn_state));
+        let (mut activity, pending_activity) = session
+            .input_queue
+            .subscribe_activity(turn_state.as_deref())
+            .await;
+        if pending_activity.is_some()
+            && session
+                .input_queue
+                .has_pending_input(&session.active_turn)
+                .await
+        {
+            return Vec::new();
+        }
+        loop {
+            let input = self.take_input(session.is_interrupted());
+            if !input.is_empty()
+                || self
+                    .processes
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .is_empty()
+            {
+                return input;
+            }
+            tokio::select! {
+                _ = self.notify.notified() => {}
+                result = activity.changed() => {
+                    if result.is_err()
+                        || session.input_queue.has_pending_input(&session.active_turn).await
+                    {
+                        return Vec::new();
+                    }
+                }
+                _ = cancellation.cancelled() => return Vec::new(),
+            }
+        }
     }
 }
 
@@ -134,20 +184,4 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
             JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically. Do independent work or finish the turn; do not poll. Omit for servers and interactive commands.".into())));
     }
     spec
-}
-
-/// Serialize completion-triggered starts with incoming user operations. User input wins ties.
-pub(crate) async fn next_submission(
-    session: &Arc<Session>,
-    submissions: &async_channel::Receiver<codex_protocol::protocol::Submission>,
-) -> Option<codex_protocol::protocol::Submission> {
-    loop {
-        tokio::select! {
-            biased;
-            sub = submissions.recv() => return sub.ok(),
-            _ = session.services.unified_exec_manager.completion_wake.notify.notified() => {
-                session.maybe_start_turn_for_pending_work().await;
-            }
-        }
-    }
 }
