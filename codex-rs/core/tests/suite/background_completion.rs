@@ -100,9 +100,9 @@ async fn background_completion(finish: Finish) -> Result<()> {
         finish,
         Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Read | Finish::Cancel
     );
-    if waits_for_completion {
-        let submit = harness.submit("Run the background command.");
-        tokio::pin!(submit);
+    let mut submit =
+        waits_for_completion.then(|| Box::pin(harness.submit("Run the background command.")));
+    if let Some(submit) = submit.as_mut() {
         let waiting = tokio::time::timeout(std::time::Duration::from_secs(20), async {
             while mock.requests().len() < 2 {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -110,9 +110,15 @@ async fn background_completion(finish: Finish) -> Result<()> {
         });
         tokio::pin!(waiting);
         tokio::select! {
-            result = &mut submit => panic!("turn completed before background exit: {result:?}"),
+            result = submit.as_mut() => panic!("turn completed before background exit: {result:?}"),
             result = &mut waiting => result.expect("background command did not reach waiting state"),
         };
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(200), submit.as_mut())
+                .await
+                .is_err(),
+            "turn completed before background exit"
+        );
     } else {
         harness.submit("Run the background command.").await?;
     }
@@ -140,6 +146,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             })
             .await
             .expect("triggering mail did not start its turn");
+            submit.as_mut().expect("active submission").await?;
         } else {
             harness
                 .test()
@@ -209,10 +216,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         .await
         .expect("background completion did not resume the triggered-mail turn");
     } else if matches!(finish, Finish::Wake | Finish::DeferredMail | Finish::Read) {
-        wait_for_event(&harness.test().codex, |e| {
-            matches!(e, EventMsg::TurnComplete(_))
-        })
-        .await;
+        submit.as_mut().expect("active submission").await?;
     } else {
         wait_for_event(&harness.test().codex, |e| {
             matches!(e, EventMsg::ExecCommandEnd(_))

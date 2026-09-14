@@ -76,7 +76,7 @@ impl SessionTask for RegularTask {
         let mut prewarmed_client_session = prewarmed_client_session;
         let mut mcp_startup_requirements = McpStartupRequirements::default();
         loop {
-            let last_agent_message = run_turn(
+            let turn_result = run_turn(
                 Arc::clone(&sess),
                 Arc::clone(&ctx),
                 next_input,
@@ -85,10 +85,18 @@ impl SessionTask for RegularTask {
                 cancellation_token.child_token(),
             )
             .instrument(run_turn_span.clone())
-            .await?;
+            .await;
+            let last_agent_message = match turn_result {
+                Ok(last_agent_message) => last_agent_message,
+                Err(err) => {
+                    sess.services.unified_exec_manager.completion_wake.clear();
+                    return Err(err);
+                }
+            };
             // Terminal errors are already reported. Let task completion preserve pending
             // input instead of restarting the failed turn for that same input.
             if ctx.terminal_error.lock().await.is_some() {
+                sess.services.unified_exec_manager.completion_wake.clear();
                 return Ok(last_agent_message);
             }
             sess.services
