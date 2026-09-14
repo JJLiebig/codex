@@ -107,6 +107,14 @@ impl CompletionWake {
             return;
         }
         loop {
+            let active_turn = session.active_turn.lock().await;
+            if !active_turn.as_ref().is_some_and(|active_turn| {
+                turn_state
+                    .as_ref()
+                    .is_some_and(|turn_state| Arc::ptr_eq(&active_turn.turn_state, turn_state))
+            }) {
+                return;
+            }
             let input = self.take_input(session.is_interrupted());
             if !input.is_empty() {
                 if let Some(turn_state) = turn_state.as_deref() {
@@ -121,6 +129,7 @@ impl CompletionWake {
                 }
                 return;
             }
+            drop(active_turn);
             if self
                 .processes
                 .lock()
