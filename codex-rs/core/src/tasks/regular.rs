@@ -75,12 +75,14 @@ impl SessionTask for RegularTask {
         let mut next_input = input;
         let mut prewarmed_client_session = prewarmed_client_session;
         let mut mcp_startup_requirements = McpStartupRequirements::default();
+        let mut turn_diff_tracker = None;
         loop {
             let turn_result = run_turn(
                 Arc::clone(&sess),
                 Arc::clone(&ctx),
                 next_input,
                 &mut mcp_startup_requirements,
+                &mut turn_diff_tracker,
                 prewarmed_client_session.take(),
                 cancellation_token.child_token(),
             )

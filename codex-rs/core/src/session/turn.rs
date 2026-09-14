@@ -165,6 +165,7 @@ pub(crate) async fn run_turn(
     turn_context: Arc<TurnContext>,
     input: Vec<TurnInput>,
     mcp_startup_requirements: &mut McpStartupRequirements,
+    turn_diff_tracker: &mut Option<SharedTurnDiffTracker>,
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
@@ -322,9 +323,11 @@ pub(crate) async fn run_turn(
     let mut stop_hook_active = false;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
-    let turn_diff_tracker = Arc::new(tokio::sync::Mutex::new(
-        TurnDiffTracker::with_environment_display_roots(display_roots),
-    ));
+    let turn_diff_tracker = Arc::clone(turn_diff_tracker.get_or_insert_with(|| {
+        Arc::new(tokio::sync::Mutex::new(
+            TurnDiffTracker::with_environment_display_roots(display_roots),
+        ))
+    }));
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.
