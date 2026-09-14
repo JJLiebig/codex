@@ -23,6 +23,7 @@ enum Finish {
     Wake,
     DeferredMail,
     TriggeredMail,
+    Compact,
     Read,
     Cancel,
     Ordinary,
@@ -33,6 +34,7 @@ enum Finish {
 #[test_case(Finish::Wake; "idle completion resumes once")]
 #[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
 #[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
+#[test_case(Finish::Compact; "completion wakes after compact replacement")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
 #[test_case(Finish::Subagent; "subagents do not report completion while waiting")]
@@ -89,6 +91,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
+    if matches!(finish, Finish::Compact) {
+        responses.push(sse(vec![
+            ev_assistant_message("summary", "Compacted."),
+            ev_completed("r3"),
+        ]));
+    }
     if !matches!(finish, Finish::Ordinary | Finish::Exec | Finish::Subagent) {
         responses.push(sse(vec![
             ev_assistant_message("m2", "Done."),
@@ -98,7 +106,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
     let mock = mount_sse_sequence(harness.server(), responses).await;
     let waits_for_completion = matches!(
         finish,
-        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Read | Finish::Cancel
+        Finish::Wake
+            | Finish::DeferredMail
+            | Finish::TriggeredMail
+            | Finish::Compact
+            | Finish::Read
+            | Finish::Cancel
     );
     let mut submit =
         waits_for_completion.then(|| Box::pin(harness.submit("Run the background command.")));
@@ -188,6 +201,15 @@ async fn background_completion(finish: Finish) -> Result<()> {
         );
     }
 
+    if matches!(finish, Finish::Compact) {
+        harness.test().codex.submit(Op::Compact).await?;
+        wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        submit.take();
+    }
+
     if matches!(finish, Finish::Cancel) {
         harness.test().codex.submit(Op::Interrupt).await?;
         wait_for_event(&harness.test().codex, |e| {
@@ -217,6 +239,11 @@ async fn background_completion(finish: Finish) -> Result<()> {
         .expect("background completion did not resume the triggered-mail turn");
     } else if matches!(finish, Finish::Wake | Finish::DeferredMail | Finish::Read) {
         submit.as_mut().expect("active submission").await?;
+    } else if matches!(finish, Finish::Compact) {
+        wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
     } else {
         wait_for_event(&harness.test().codex, |e| {
             matches!(e, EventMsg::ExecCommandEnd(_))
@@ -230,15 +257,15 @@ async fn background_completion(finish: Finish) -> Result<()> {
         requests.len(),
         match finish {
             Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
-            Finish::TriggeredMail | Finish::Read => 4,
+            Finish::TriggeredMail | Finish::Compact | Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
     if matches!(
         finish,
-        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail
+        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Compact
     ) {
-        let request = if matches!(finish, Finish::TriggeredMail) {
+        let request = if matches!(finish, Finish::TriggeredMail | Finish::Compact) {
             &requests[3]
         } else {
             &requests[2]
