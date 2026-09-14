@@ -323,6 +323,9 @@ async fn background_completion(finish: Finish) -> Result<()> {
         let input = request.body_json()["input"].to_string();
         assert!(input.contains("<background_completion>"));
         assert!(input.contains("exit_code=7"));
+        if matches!(finish, Finish::Wake) {
+            assert_eq!(input.matches("<permissions instructions>").count(), 1);
+        }
     }
     if matches!(finish, Finish::Read) {
         assert!(

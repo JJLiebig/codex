@@ -146,6 +146,13 @@ pub(crate) struct McpStartupRequirements {
     required_plugins: HashSet<String>,
 }
 
+#[derive(Default)]
+pub(crate) struct TurnRunState {
+    mcp_startup_requirements: McpStartupRequirements,
+    turn_diff_tracker: Option<SharedTurnDiffTracker>,
+    pub(crate) completion_claim: Option<u64>,
+}
+
 /// Takes initial turn input and runs a loop where, at each sampling request,
 /// the model replies with either:
 ///
@@ -164,11 +171,11 @@ pub(crate) async fn run_turn(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
     input: Vec<TurnInput>,
-    mcp_startup_requirements: &mut McpStartupRequirements,
-    turn_diff_tracker: &mut Option<SharedTurnDiffTracker>,
+    turn_state: &mut TurnRunState,
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
+    let is_continuation = turn_state.turn_diff_tracker.is_some();
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 
@@ -191,6 +198,7 @@ pub(crate) async fn run_turn(
         if matches!(err.details(), CodexErrorDetails::TurnAborted) {
             run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
                 .await;
+            commit_completion_claim(&sess, &mut turn_state.completion_claim);
             return Err(err);
         }
         if matches!(err.details(), CodexErrorDetails::ToolCollision(_)) {
@@ -209,7 +217,7 @@ pub(crate) async fn run_turn(
     let McpStartupRequirements {
         required_servers,
         required_plugins,
-    } = mcp_startup_requirements;
+    } = &mut turn_state.mcp_startup_requirements;
     if allow_plugin_mentions {
         required_plugins.extend(crate::plugins::collect_explicit_plugin_ids(&user_input));
     }
@@ -222,6 +230,7 @@ pub(crate) async fn run_turn(
             Err(err) => {
                 run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
                     .await;
+                commit_completion_claim(&sess, &mut turn_state.completion_claim);
                 return Err(err.into());
             }
         };
@@ -244,6 +253,7 @@ pub(crate) async fn run_turn(
         Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted) => {
             run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
                 .await;
+            commit_completion_claim(&sess, &mut turn_state.completion_claim);
             return Err(err);
         }
         Err(err) => return Err(err),
@@ -275,23 +285,29 @@ pub(crate) async fn run_turn(
     );
     let mut world_state = world_state?;
 
-    let Some((injection_items, explicitly_enabled_connectors)) = build_skills_and_plugins(
-        &sess,
-        first_step_context.as_ref(),
-        &user_input,
-        &mentioned_plugins,
-        &cancellation_token,
-    )
-    .await
-    else {
+    let Some((injection_items, explicitly_enabled_connectors)) = (if is_continuation {
+        Some(Default::default())
+    } else {
+        build_skills_and_plugins(
+            &sess,
+            first_step_context.as_ref(),
+            &user_input,
+            &mentioned_plugins,
+            &cancellation_token,
+        )
+        .await
+    }) else {
         return Ok(None);
     };
 
-    if run_pending_session_start_hooks(&sess, &turn_context).await {
+    if !is_continuation && run_pending_session_start_hooks(&sess, &turn_context).await {
         return Ok(None);
     }
     let mut can_drain_pending_input = input.is_empty();
-    if run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::TurnStart).await {
+    let stop_turn =
+        run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::TurnStart).await;
+    commit_completion_claim(&sess, &mut turn_state.completion_claim);
+    if stop_turn {
         return Ok(None);
     }
 
@@ -304,17 +320,19 @@ pub(crate) async fn run_turn(
         }
     }
 
-    sess.merge_connector_selection(explicitly_enabled_connectors.clone())
-        .await;
-    sess.set_previous_turn_settings(Some(PreviousTurnSettings {
-        model: turn_context.model_info().slug.clone(),
-        comp_hash: turn_context.model_info().comp_hash.clone(),
-        realtime_active: Some(turn_context.realtime_active),
-    }))
-    .await;
-    for response_item in injection_items {
-        sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
+    if !is_continuation {
+        sess.merge_connector_selection(explicitly_enabled_connectors.clone())
             .await;
+        sess.set_previous_turn_settings(Some(PreviousTurnSettings {
+            model: turn_context.model_info().slug.clone(),
+            comp_hash: turn_context.model_info().comp_hash.clone(),
+            realtime_active: Some(turn_context.realtime_active),
+        }))
+        .await;
+        for response_item in injection_items {
+            sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
+                .await;
+        }
     }
 
     track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
@@ -323,7 +341,7 @@ pub(crate) async fn run_turn(
     let mut stop_hook_active = false;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
-    let turn_diff_tracker = Arc::clone(turn_diff_tracker.get_or_insert_with(|| {
+    let turn_diff_tracker = Arc::clone(turn_state.turn_diff_tracker.get_or_insert_with(|| {
         Arc::new(tokio::sync::Mutex::new(
             TurnDiffTracker::with_environment_display_roots(display_roots),
         ))
@@ -656,6 +674,15 @@ pub(crate) async fn run_turn(
     }
 
     Ok(last_agent_message)
+}
+
+fn commit_completion_claim(sess: &Session, completion_claim: &mut Option<u64>) {
+    if let Some(claim) = completion_claim.take() {
+        sess.services
+            .unified_exec_manager
+            .completion_wake
+            .commit_claim(claim);
+    }
 }
 
 #[instrument(level = "trace", skip_all)]

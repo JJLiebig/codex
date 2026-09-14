@@ -4,7 +4,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::session::TurnInput;
 use crate::session::session::Session;
-use crate::session::turn::McpStartupRequirements;
+use crate::session::turn::TurnRunState;
 use crate::session::turn::run_hooks_and_record_inputs;
 use crate::session::turn::run_turn;
 use crate::session::turn_context::TurnContext;
@@ -82,16 +82,14 @@ impl SessionTask for RegularTask {
         };
         let mut next_input = input;
         let mut prewarmed_client_session = prewarmed_client_session;
-        let mut mcp_startup_requirements = McpStartupRequirements::default();
-        let mut turn_diff_tracker = None;
-        let mut completion_claim = self.completion_claim;
+        let mut turn_state = TurnRunState::default();
+        turn_state.completion_claim = self.completion_claim;
         loop {
             let turn_result = run_turn(
                 Arc::clone(&sess),
                 Arc::clone(&ctx),
                 next_input,
-                &mut mcp_startup_requirements,
-                &mut turn_diff_tracker,
+                &mut turn_state,
                 prewarmed_client_session.take(),
                 cancellation_token.child_token(),
             )
@@ -114,13 +112,7 @@ impl SessionTask for RegularTask {
                 }
                 return Ok(last_agent_message);
             }
-            if let Some(claim) = completion_claim.take() {
-                sess.services
-                    .unified_exec_manager
-                    .completion_wake
-                    .commit_claim(claim);
-            }
-            completion_claim = sess
+            turn_state.completion_claim = sess
                 .services
                 .unified_exec_manager
                 .completion_wake
