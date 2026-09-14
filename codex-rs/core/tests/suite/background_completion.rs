@@ -13,9 +13,11 @@ use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
+use core_test_support::responses::mount_response_sequence;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
 use core_test_support::responses::sse_failed;
+use core_test_support::responses::sse_response;
 use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -35,7 +37,6 @@ enum Finish {
     Ordinary,
     Exec,
     Subagent,
-    Failed,
 }
 
 async fn wait_for_requests(mock: &ResponseMock, count: usize, message: &str) {
@@ -69,7 +70,6 @@ fn wait_for_release_command() -> &'static str {
 #[test_case(Finish::Subagent; "subagents do not report completion while waiting")]
 #[test_case(Finish::Exec; "one turn host does not offer wakes")]
 #[test_case(Finish::Ordinary; "ordinary background commands do not wake")]
-#[test_case(Finish::Failed; "failed turn disarms background completion wake")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn background_completion(finish: Finish) -> Result<()> {
     let source = if matches!(finish, Finish::Exec) {
@@ -81,14 +81,8 @@ async fn background_completion(finish: Finish) -> Result<()> {
     } else {
         codex_protocol::protocol::SessionSource::Cli
     };
-    let mut builder = test_codex().with_session_source(source);
-    if matches!(finish, Finish::Failed) {
-        builder = builder.with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(0);
-        });
-    }
-    let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
+    let harness =
+        TestCodexHarness::with_auto_env_builder(test_codex().with_session_source(source)).await?;
     let command = match core_test_support::test_target_os() {
         core_test_support::TestTargetOs::Windows => {
             "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; Write-Output completed; exit 7"
@@ -111,19 +105,16 @@ async fn background_completion(finish: Finish) -> Result<()> {
             | Finish::Read
             | Finish::Cancel
     );
-    let first_response = sse(vec![
-        ev_function_call("background", "exec_command", &args.to_string()),
-        ev_completed("r1"),
-    ]);
-    let second_response = if matches!(finish, Finish::Failed) {
-        sse_failed("r2", "invalid_request_error", "request failed")
-    } else {
+    let mut responses = vec![
+        sse(vec![
+            ev_function_call("background", "exec_command", &args.to_string()),
+            ev_completed("r1"),
+        ]),
         sse(vec![
             ev_assistant_message("m1", "Waiting for completion."),
             ev_completed("r2"),
-        ])
-    };
-    let mut responses = vec![first_response, second_response];
+        ]),
+    ];
     if matches!(finish, Finish::Read) {
         responses.push(sse(vec![
             ev_function_call(
@@ -152,7 +143,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
-    if waits_for_completion {
+    if !matches!(finish, Finish::Ordinary | Finish::Exec | Finish::Subagent) {
         responses.push(sse(vec![
             ev_assistant_message("m2", "Done."),
             ev_completed("r4"),
@@ -316,7 +307,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         match finish {
             Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
             Finish::TriggeredMail | Finish::Compact | Finish::Steer | Finish::Read => 4,
-            Finish::Ordinary | Finish::Exec | Finish::Subagent | Finish::Failed => 2,
+            Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
     if matches!(
@@ -356,6 +347,47 @@ async fn background_completion(finish: Finish) -> Result<()> {
                 .contains("late queue-only update")
         );
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(test_codex().with_config(|config| {
+        config.model_provider.request_max_retries = Some(0);
+        config.model_provider.stream_max_retries = Some(0);
+    }))
+    .await?;
+    let command = wait_for_release_command();
+    let mock = mount_response_sequence(
+        harness.server(),
+        vec![
+            sse_response(sse(vec![
+                ev_function_call(
+                    "background",
+                    "exec_command",
+                    &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
+                ),
+                ev_completed("r1"),
+            ]))
+            .insert_header("x-codex-turn-state", "background-state"),
+            sse_response(sse_failed("r2", "invalid_request_error", "request failed")),
+        ],
+    )
+    .await;
+
+    harness.submit("Run the background command.").await?;
+    harness.write_file("release", b"go").await?;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::ExecCommandEnd(_))
+    })
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[1].header("x-codex-turn-state"),
+        Some("background-state".to_string())
+    );
     Ok(())
 }
 
@@ -444,14 +476,15 @@ async fn background_completion_batches_exits_before_final_answer() -> Result<()>
         test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
     )
     .await?;
-    let wait = wait_for_release_command();
-    let release = match core_test_support::test_target_os() {
-        core_test_support::TestTargetOs::Windows => {
-            "Set-Content release go; Start-Sleep -Seconds 1"
-        }
-        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
-            "touch release; sleep 1"
-        }
+    let (wait, release) = match core_test_support::test_target_os() {
+        core_test_support::TestTargetOs::Windows => (
+            "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; exit 0",
+            "Set-Content release go; Start-Sleep -Seconds 1",
+        ),
+        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => (
+            "while [ ! -f release ]; do sleep 0.02; done; exit 0",
+            "touch release; sleep 1",
+        ),
     };
     let args = json!({"cmd":wait,"yield_time_ms":250,"on_exit":"wake"}).to_string();
     let mock = mount_sse_sequence(

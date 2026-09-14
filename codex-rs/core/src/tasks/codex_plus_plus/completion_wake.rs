@@ -18,7 +18,9 @@ pub(crate) async fn settle_stopped_turn(
         return;
     }
     settle_completion_claim(sess, ctx, turn_state).await;
-    sess.services.unified_exec_manager.completion_wake.clear();
+    if !cancellation_token.is_cancelled() {
+        sess.services.unified_exec_manager.completion_wake.clear();
+    }
 }
 
 pub(crate) async fn settle_completion_claim(

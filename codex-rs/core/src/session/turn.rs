@@ -295,18 +295,20 @@ pub(crate) async fn run_turn(
     );
     let mut world_state = world_state?;
 
-    let Some((injection_items, explicitly_enabled_connectors)) = (if is_continuation {
-        Some(Default::default())
-    } else {
-        build_skills_and_plugins(
-            &sess,
-            first_step_context.as_ref(),
-            &user_input,
-            &mentioned_plugins,
-            &cancellation_token,
-        )
-        .await
-    }) else {
+    let Some((injection_items, explicitly_enabled_connectors)) =
+        (if is_continuation && input.is_empty() {
+            Some(Default::default())
+        } else {
+            build_skills_and_plugins(
+                &sess,
+                first_step_context.as_ref(),
+                &user_input,
+                &mentioned_plugins,
+                &cancellation_token,
+            )
+            .await
+        })
+    else {
         return Ok(None);
     };
 
@@ -321,6 +323,9 @@ pub(crate) async fn run_turn(
         turn_state.stopped = true;
         return Ok(None);
     }
+    if !input.is_empty() {
+        commit_completion_claim(&sess, &mut turn_state.completion_claim);
+    }
 
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
     {
@@ -331,19 +336,19 @@ pub(crate) async fn run_turn(
         }
     }
 
+    sess.merge_connector_selection(explicitly_enabled_connectors.clone())
+        .await;
     if !is_continuation {
-        sess.merge_connector_selection(explicitly_enabled_connectors.clone())
-            .await;
         sess.set_previous_turn_settings(Some(PreviousTurnSettings {
             model: turn_context.model_info().slug.clone(),
             comp_hash: turn_context.model_info().comp_hash.clone(),
             realtime_active: Some(turn_context.realtime_active),
         }))
         .await;
-        for response_item in injection_items {
-            sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-                .await;
-        }
+    }
+    for response_item in injection_items {
+        sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
+            .await;
     }
 
     track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;

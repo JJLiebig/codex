@@ -133,10 +133,14 @@ impl SessionTask for RegularTask {
                 .completion_wake
                 .wait_for_input(&sess, &cancellation_token)
                 .await;
-            if !sess.input_queue.has_pending_input(&sess.active_turn).await {
+            next_input = sess
+                .input_queue
+                .get_pending_input(&sess.active_turn)
+                .await
+                .0;
+            if next_input.is_empty() {
                 return Ok(last_agent_message);
             }
-            next_input = Vec::new();
         }
     }
 }
