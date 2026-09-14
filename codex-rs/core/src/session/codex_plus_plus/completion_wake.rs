@@ -184,20 +184,28 @@ pub(super) async fn record_pending_injections(
     pending_input: &[TurnInput],
     injection_items: &mut Vec<ResponseItem>,
     explicitly_enabled_connectors: &mut HashSet<String>,
-    completion_claim: &mut Option<u64>,
 ) {
     if pending_input.is_empty() {
         return;
     }
-    if let Some(claim) = completion_claim.take() {
+    sess.merge_connector_selection(std::mem::take(explicitly_enabled_connectors))
+        .await;
+    record_injections(sess, turn_context, injection_items).await;
+}
+
+pub(super) fn commit_recorded_completion(
+    sess: &Session,
+    pending_input: &[TurnInput],
+    completion_claim: &mut Option<u64>,
+) {
+    if !pending_input.is_empty()
+        && let Some(claim) = completion_claim.take()
+    {
         sess.services
             .unified_exec_manager
             .completion_wake
             .commit_claim(claim);
     }
-    sess.merge_connector_selection(std::mem::take(explicitly_enabled_connectors))
-        .await;
-    record_injections(sess, turn_context, injection_items).await;
 }
 
 async fn record_injections(

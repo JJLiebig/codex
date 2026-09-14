@@ -391,6 +391,11 @@ pub(crate) async fn run_turn(
             turn_state.stop();
             break;
         }
+        completion_wake::commit_recorded_completion(
+            &sess,
+            &recorded_inputs.accepted,
+            &mut turn_state.completion_claim,
+        );
         if is_continuation && !recorded_inputs.accepted.is_empty() {
             let accepted_user_input = turn_user_input(&recorded_inputs.accepted);
             let (_, accepted_plugins) =
@@ -416,7 +421,6 @@ pub(crate) async fn run_turn(
             &pending_input,
             &mut injection_items,
             &mut explicitly_enabled_connectors,
-            &mut turn_state.completion_claim,
         )
         .await;
 
