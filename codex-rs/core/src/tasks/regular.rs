@@ -89,7 +89,12 @@ impl SessionTask for RegularTask {
             let last_agent_message = match turn_result {
                 Ok(last_agent_message) => last_agent_message,
                 Err(err) => {
-                    sess.services.unified_exec_manager.completion_wake.clear();
+                    if !matches!(
+                        err.details(),
+                        codex_protocol::error::CodexErrorDetails::TurnAborted
+                    ) {
+                        sess.services.unified_exec_manager.completion_wake.clear();
+                    }
                     return Err(err);
                 }
             };
