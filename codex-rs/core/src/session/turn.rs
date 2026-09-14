@@ -137,6 +137,10 @@ use tracing::trace;
 use tracing::trace_span;
 use tracing::warn;
 
+#[path = "codex_plus_plus/completion_wake.rs"]
+mod completion_wake;
+pub(crate) use completion_wake::TurnRunState;
+
 const POST_SAMPLING_TOKEN_ESTIMATE_TARGET: &str = "codex_core::post_sampling_token_estimate";
 
 /// Explicit MCP startup requirements retained across restarts within one user turn.
@@ -144,26 +148,6 @@ const POST_SAMPLING_TOKEN_ESTIMATE_TARGET: &str = "codex_core::post_sampling_tok
 pub(crate) struct McpStartupRequirements {
     required_servers: Vec<String>,
     required_plugins: HashSet<String>,
-}
-
-#[derive(Default)]
-pub(crate) struct TurnRunState {
-    mcp_startup_requirements: McpStartupRequirements,
-    turn_diff_tracker: Option<SharedTurnDiffTracker>,
-    pub(crate) completion_claim: Option<u64>,
-    client_session: Option<ModelClientSession>,
-    pub(crate) stopped: bool,
-}
-
-impl TurnRunState {
-    pub(crate) fn from_prewarmed_client_session(
-        client_session: Option<ModelClientSession>,
-    ) -> Self {
-        Self {
-            client_session,
-            ..Default::default()
-        }
-    }
 }
 
 /// Takes initial turn input and runs a loop where, at each sampling request,
@@ -187,7 +171,7 @@ pub(crate) async fn run_turn(
     turn_state: &mut TurnRunState,
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
-    let is_continuation = turn_state.turn_diff_tracker.is_some();
+    let is_continuation = turn_state.is_continuation();
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 
@@ -223,27 +207,8 @@ pub(crate) async fn run_turn(
         return Ok(None);
     }
 
-    let continuation_input = if is_continuation {
-        match sess
-            .input_queue
-            .turn_state_for_sub_id(&sess.active_turn, &turn_context.sub_id)
-            .await
-        {
-            Some(pending_turn_state) => {
-                sess.input_queue
-                    .pending_input_for_turn_state(pending_turn_state.as_ref())
-                    .await
-            }
-            None => Vec::new(),
-        }
-    } else {
-        Vec::new()
-    };
-    let user_input = turn_user_input(if is_continuation {
-        &continuation_input
-    } else {
-        &input
-    });
+    let user_input =
+        completion_wake::user_input(&sess, &turn_context, &input, is_continuation).await;
     let allow_plugin_mentions =
         !crate::guardian::is_basic_session_source(&turn_context.session_source);
     let McpStartupRequirements {
@@ -315,48 +280,29 @@ pub(crate) async fn run_turn(
     );
     let mut world_state = world_state?;
 
-    let extension_items = if !is_continuation || !user_input.is_empty() {
-        match build_extension_turn_input_items(
+    let Some((mut injection_items, mut explicitly_enabled_connectors)) =
+        completion_wake::injections(
             &sess,
             first_step_context.as_ref(),
             &user_input,
+            &mentioned_plugins,
             &cancellation_token,
+            is_continuation,
         )
         .await
-        {
-            Some(items) => items,
-            None => return Ok(None),
-        }
-    } else {
-        Vec::new()
-    };
-    let Some((mut injection_items, mut explicitly_enabled_connectors)) =
-        (if is_continuation && user_input.is_empty() {
-            Some(Default::default())
-        } else {
-            build_skills_and_plugins(
-                &sess,
-                first_step_context.as_ref(),
-                &user_input,
-                &mentioned_plugins,
-                &cancellation_token,
-            )
-            .await
-        })
     else {
         return Ok(None);
     };
-    injection_items.extend(extension_items);
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
-        turn_state.stopped = true;
+        turn_state.stop();
         return Ok(None);
     }
     let mut can_drain_pending_input = input.is_empty();
     let stop_turn =
         run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::TurnStart).await;
     if stop_turn {
-        turn_state.stopped = true;
+        turn_state.stop();
         return Ok(None);
     }
 
@@ -369,20 +315,14 @@ pub(crate) async fn run_turn(
         }
     }
 
-    if !is_continuation {
-        sess.merge_connector_selection(std::mem::take(&mut explicitly_enabled_connectors))
-            .await;
-        sess.set_previous_turn_settings(Some(PreviousTurnSettings {
-            model: turn_context.model_info().slug.clone(),
-            comp_hash: turn_context.model_info().comp_hash.clone(),
-            realtime_active: Some(turn_context.realtime_active),
-        }))
-        .await;
-        for response_item in injection_items.drain(..) {
-            sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-                .await;
-        }
-    }
+    completion_wake::record_initial_injections(
+        &sess,
+        &turn_context,
+        &mut injection_items,
+        &mut explicitly_enabled_connectors,
+        is_continuation,
+    )
+    .await;
 
     if !is_continuation {
         track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
@@ -426,21 +366,19 @@ pub(crate) async fn run_turn(
             PersistContext::Standard,
         )
         .await;
-        if !pending_input.is_empty() {
-            commit_completion_claim(&sess, &mut turn_state.completion_claim);
-        }
         if stop_turn {
-            turn_state.stopped = true;
+            turn_state.stop();
             break;
         }
-        if !pending_input.is_empty() {
-            sess.merge_connector_selection(std::mem::take(&mut explicitly_enabled_connectors))
-                .await;
-            for response_item in injection_items.drain(..) {
-                sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-                    .await;
-            }
-        }
+        completion_wake::record_pending_injections(
+            &sess,
+            &turn_context,
+            &pending_input,
+            &mut injection_items,
+            &mut explicitly_enabled_connectors,
+            &mut turn_state.completion_claim,
+        )
+        .await;
 
         let window_id = sess.current_window_id().await;
         super::rollout_budget::maybe_record_reminder(
@@ -631,7 +569,7 @@ pub(crate) async fn run_turn(
                         return Ok(None);
                     }
                     if run_pending_session_start_hooks(&sess, &turn_context).await {
-                        turn_state.stopped = true;
+                        turn_state.stop();
                         return Ok(last_agent_message);
                     }
                     can_drain_pending_input = !model_needs_follow_up;
@@ -685,7 +623,7 @@ pub(crate) async fn run_turn(
                         }
                     }
                     if stop_outcome.should_stop {
-                        turn_state.stopped = true;
+                        turn_state.stop();
                         break;
                     }
                     if run_legacy_after_agent_hook(
@@ -696,7 +634,7 @@ pub(crate) async fn run_turn(
                     )
                     .await
                     {
-                        turn_state.stopped = true;
+                        turn_state.stop();
                         return Ok(last_agent_message);
                     }
                     break;
@@ -740,15 +678,6 @@ pub(crate) async fn run_turn(
     }
 
     Ok(last_agent_message)
-}
-
-fn commit_completion_claim(sess: &Session, completion_claim: &mut Option<u64>) {
-    if let Some(claim) = completion_claim.take() {
-        sess.services
-            .unified_exec_manager
-            .completion_wake
-            .commit_claim(claim);
-    }
 }
 
 #[instrument(level = "trace", skip_all)]

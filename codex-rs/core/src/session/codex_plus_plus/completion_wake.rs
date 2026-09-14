@@ -1,0 +1,136 @@
+use super::*;
+
+#[derive(Default)]
+pub(crate) struct TurnRunState {
+    pub(super) mcp_startup_requirements: McpStartupRequirements,
+    pub(super) turn_diff_tracker: Option<SharedTurnDiffTracker>,
+    pub(crate) completion_claim: Option<u64>,
+    pub(super) client_session: Option<ModelClientSession>,
+    pub(crate) stopped: bool,
+}
+
+impl TurnRunState {
+    pub(crate) fn from_prewarmed_client_session(
+        client_session: Option<ModelClientSession>,
+    ) -> Self {
+        Self {
+            client_session,
+            ..Default::default()
+        }
+    }
+
+    pub(super) fn is_continuation(&self) -> bool {
+        self.turn_diff_tracker.is_some()
+    }
+
+    pub(super) fn stop(&mut self) {
+        self.stopped = true;
+    }
+}
+
+pub(super) async fn user_input(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    input: &[TurnInput],
+    is_continuation: bool,
+) -> Vec<UserInput> {
+    if !is_continuation {
+        return turn_user_input(input);
+    }
+    let Some(pending_turn_state) = sess
+        .input_queue
+        .turn_state_for_sub_id(&sess.active_turn, &turn_context.sub_id)
+        .await
+    else {
+        return Vec::new();
+    };
+    let input = sess
+        .input_queue
+        .pending_input_for_turn_state(pending_turn_state.as_ref())
+        .await;
+    turn_user_input(&input)
+}
+
+pub(super) async fn injections(
+    sess: &Arc<Session>,
+    step_context: &StepContext,
+    user_input: &[UserInput],
+    mentioned_plugins: &[crate::plugins::PluginCapabilitySummary],
+    cancellation_token: &CancellationToken,
+    is_continuation: bool,
+) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
+    let extension_items = if !is_continuation || !user_input.is_empty() {
+        build_extension_turn_input_items(sess, step_context, user_input, cancellation_token).await?
+    } else {
+        Vec::new()
+    };
+    let (mut injection_items, explicitly_enabled_connectors) =
+        if is_continuation && user_input.is_empty() {
+            Default::default()
+        } else {
+            build_skills_and_plugins(
+                sess,
+                step_context,
+                user_input,
+                mentioned_plugins,
+                cancellation_token,
+            )
+            .await?
+        };
+    injection_items.extend(extension_items);
+    Some((injection_items, explicitly_enabled_connectors))
+}
+
+pub(super) async fn record_initial_injections(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    injection_items: &mut Vec<ResponseItem>,
+    explicitly_enabled_connectors: &mut HashSet<String>,
+    is_continuation: bool,
+) {
+    if is_continuation {
+        return;
+    }
+    sess.merge_connector_selection(std::mem::take(explicitly_enabled_connectors))
+        .await;
+    sess.set_previous_turn_settings(Some(PreviousTurnSettings {
+        model: turn_context.model_info().slug.clone(),
+        comp_hash: turn_context.model_info().comp_hash.clone(),
+        realtime_active: Some(turn_context.realtime_active),
+    }))
+    .await;
+    record_injections(sess, turn_context, injection_items).await;
+}
+
+pub(super) async fn record_pending_injections(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    pending_input: &[TurnInput],
+    injection_items: &mut Vec<ResponseItem>,
+    explicitly_enabled_connectors: &mut HashSet<String>,
+    completion_claim: &mut Option<u64>,
+) {
+    if pending_input.is_empty() {
+        return;
+    }
+    if let Some(claim) = completion_claim.take() {
+        sess.services
+            .unified_exec_manager
+            .completion_wake
+            .commit_claim(claim);
+    }
+    sess.merge_connector_selection(std::mem::take(explicitly_enabled_connectors))
+        .await;
+    record_injections(sess, turn_context, injection_items).await;
+}
+
+async fn record_injections(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    injection_items: &mut Vec<ResponseItem>,
+) {
+    for response_item in injection_items.drain(..) {
+        sess.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
+            .await;
+    }
+}
