@@ -5,6 +5,7 @@ use crate::context::codex_plus_plus::BackgroundCompletion;
 pub(crate) struct TurnRunState {
     pub(super) mcp_startup_requirements: McpStartupRequirements,
     pub(super) turn_diff_tracker: Option<SharedTurnDiffTracker>,
+    pub(super) usage_limit_account_attempts: HashSet<String>,
     pub(crate) completion_claim: Option<u64>,
     pub(super) client_session: Option<ModelClientSession>,
     pub(super) stop_hook_active: bool,

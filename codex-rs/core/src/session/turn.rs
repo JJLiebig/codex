@@ -181,7 +181,7 @@ pub(crate) async fn run_turn(
     let client_session = turn_state
         .client_session
         .get_or_insert_with(|| sess.services.model_client.new_session());
-    let mut usage_limit_account_attempts = HashSet::new();
+    let usage_limit_account_attempts = &mut turn_state.usage_limit_account_attempts;
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
     // diffs/full reinjection + user input) and trigger compaction preemptively
@@ -190,7 +190,7 @@ pub(crate) async fn run_turn(
         &sess,
         &turn_context,
         client_session,
-        &mut usage_limit_account_attempts,
+        usage_limit_account_attempts,
         &cancellation_token,
     )
     .await
@@ -502,7 +502,7 @@ pub(crate) async fn run_turn(
                 Arc::clone(&turn_diff_tracker),
                 client_session,
                 &responses_metadata,
-                &mut usage_limit_account_attempts,
+                usage_limit_account_attempts,
                 sampling_request_input,
                 cancellation_token.child_token(),
             )
@@ -591,7 +591,7 @@ pub(crate) async fn run_turn(
                         Arc::clone(&step_context),
                         /*fallback_step_context*/ None,
                         client_session,
-                        &mut usage_limit_account_attempts,
+                        usage_limit_account_attempts,
                         InitialContextInjection::BeforeLastUserMessage {
                             world_state: Arc::clone(&world_state),
                             step_context: Arc::clone(&step_context),
