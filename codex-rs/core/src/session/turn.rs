@@ -315,6 +315,21 @@ pub(crate) async fn run_turn(
     );
     let mut world_state = world_state?;
 
+    let extension_items = if !is_continuation || !user_input.is_empty() {
+        match build_extension_turn_input_items(
+            &sess,
+            first_step_context.as_ref(),
+            &user_input,
+            &cancellation_token,
+        )
+        .await
+        {
+            Some(items) => items,
+            None => return Ok(None),
+        }
+    } else {
+        Vec::new()
+    };
     let Some((mut injection_items, mut explicitly_enabled_connectors)) =
         (if is_continuation && user_input.is_empty() {
             Some(Default::default())
@@ -331,19 +346,7 @@ pub(crate) async fn run_turn(
     else {
         return Ok(None);
     };
-    if !is_continuation || !user_input.is_empty() {
-        let Some(extension_items) = build_extension_turn_input_items(
-            &sess,
-            first_step_context.as_ref(),
-            &user_input,
-            &cancellation_token,
-        )
-        .await
-        else {
-            return Ok(None);
-        };
-        injection_items.extend(extension_items);
-    }
+    injection_items.extend(extension_items);
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
         turn_state.stopped = true;

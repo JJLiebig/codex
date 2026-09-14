@@ -266,7 +266,6 @@ async fn background_completion(finish: Finish) -> Result<()> {
         })
         .await;
     }
-    // A second continuation is an observable regression, even with no matching mock response.
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let requests = mock.requests();
     assert_eq!(
@@ -310,7 +309,6 @@ async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
         config.model_provider.stream_max_retries = Some(0);
     }))
     .await?;
-    let command = wait_for_release_command();
     let mock = mount_response_sequence(
         harness.server(),
         vec![
@@ -318,7 +316,8 @@ async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
                 ev_function_call(
                     "background",
                     "exec_command",
-                    &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
+                    &json!({"cmd":wait_for_release_command(),"yield_time_ms":250,"on_exit":"wake"})
+                        .to_string(),
                 ),
                 ev_completed("r1"),
             ]))
@@ -327,7 +326,6 @@ async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
         ],
     )
     .await;
-
     harness.submit("Run the background command.").await?;
     harness.write_file("release", b"go").await?;
     wait_for_event(&harness.test().codex, |event| {
@@ -337,20 +335,16 @@ async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let requests = mock.requests();
     assert_eq!(requests.len(), 2);
-    assert_eq!(
-        requests[1].header("x-codex-turn-state"),
-        Some("background-state".to_string())
-    );
+    let turn_state = requests[1].header("x-codex-turn-state");
+    assert_eq!(turn_state.as_deref(), Some("background-state"));
     Ok(())
 }
-
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn background_completion_preserves_turn_diff() -> Result<()> {
     let harness = TestCodexHarness::with_auto_env_builder(
         test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
     )
     .await?;
-    let command = wait_for_release_command();
     let mock = mount_sse_sequence(
         harness.server(),
         vec![
@@ -365,7 +359,8 @@ async fn background_completion_preserves_turn_diff() -> Result<()> {
                 ev_function_call(
                     "background",
                     "exec_command",
-                    &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
+                    &json!({"cmd":wait_for_release_command(),"yield_time_ms":250,"on_exit":"wake"})
+                        .to_string(),
                 ),
                 ev_completed("r2"),
             ]),
