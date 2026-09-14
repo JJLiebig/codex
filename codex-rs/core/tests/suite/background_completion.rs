@@ -132,19 +132,6 @@ async fn background_completion(finish: Finish) -> Result<()> {
                 start_options: Default::default(),
             })
             .await?;
-        harness
-            .test()
-            .codex
-            .submit(Op::RealtimeConversationListVoices)
-            .await?;
-        wait_for_event(&harness.test().codex, |event| {
-            matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
-        })
-        .await;
-        assert_eq!(
-            harness.test().codex.agent_status().await,
-            AgentStatus::Running
-        );
         if matches!(finish, Finish::TriggeredMail) {
             tokio::time::timeout(std::time::Duration::from_secs(20), async {
                 while mock.requests().len() < 3 {
@@ -153,7 +140,21 @@ async fn background_completion(finish: Finish) -> Result<()> {
             })
             .await
             .expect("triggering mail did not start its turn");
+        } else {
+            harness
+                .test()
+                .codex
+                .submit(Op::RealtimeConversationListVoices)
+                .await?;
+            wait_for_event(&harness.test().codex, |event| {
+                matches!(event, EventMsg::RealtimeConversationListVoicesResponse(_))
+            })
+            .await;
         }
+        assert_eq!(
+            harness.test().codex.agent_status().await,
+            AgentStatus::Running
+        );
     }
     assert_eq!(
         mock.requests().len(),
@@ -199,10 +200,15 @@ async fn background_completion(finish: Finish) -> Result<()> {
             .await?;
     }
     harness.write_file("release", b"go").await?;
-    if matches!(
-        finish,
-        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Read
-    ) {
+    if matches!(finish, Finish::TriggeredMail) {
+        tokio::time::timeout(std::time::Duration::from_secs(20), async {
+            while mock.requests().len() < 4 {
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("background completion did not resume the triggered-mail turn");
+    } else if matches!(finish, Finish::Wake | Finish::DeferredMail | Finish::Read) {
         wait_for_event(&harness.test().codex, |e| {
             matches!(e, EventMsg::TurnComplete(_))
         })
