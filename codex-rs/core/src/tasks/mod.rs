@@ -525,17 +525,12 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
             .await;
-        if let Some(completion_claim) = completion_claim {
-            self.start_task(
-                turn_context,
-                Vec::new(),
-                RegularTask::with_completion_claim(completion_claim),
-            )
-            .await;
-        } else {
-            self.start_task(turn_context, Vec::new(), RegularTask::new())
-                .await;
-        }
+        self.start_task(
+            turn_context,
+            Vec::new(),
+            codex_plus_plus::completion_wake::regular_task(completion_claim),
+        )
+        .await;
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {

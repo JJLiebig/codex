@@ -324,19 +324,14 @@ pub(crate) async fn run_turn(
     )
     .await;
 
-    if !is_continuation {
-        track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
-    }
+    completion_wake::track_initial_analytics(&sess, &turn_context, &input, is_continuation).await;
 
     let mut last_agent_message: Option<String> = None;
     let mut stop_hook_active = false;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
-    let turn_diff_tracker = Arc::clone(turn_state.turn_diff_tracker.get_or_insert_with(|| {
-        Arc::new(tokio::sync::Mutex::new(
-            TurnDiffTracker::with_environment_display_roots(display_roots),
-        ))
-    }));
+    let turn_diff_tracker =
+        completion_wake::turn_diff_tracker(&mut turn_state.turn_diff_tracker, display_roots);
 
     // `ModelClientSession` is turn-scoped and caches WebSocket + sticky routing state, so we reuse
     // one instance across retries within this turn.

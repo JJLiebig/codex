@@ -8,10 +8,18 @@ use crate::session::turn::TurnRunState;
 use crate::session::turn::run_hooks_and_record_inputs;
 use crate::session::turn::run_turn;
 use crate::session::turn_context::TurnContext;
+use crate::tasks::RegularTask;
 use crate::tasks::SessionTaskResult;
 use codex_thread_store::PersistContext;
 use tracing::Instrument;
 use tracing::trace_span;
+
+pub(in crate::tasks) fn regular_task(completion_claim: Option<u64>) -> RegularTask {
+    match completion_claim {
+        Some(completion_claim) => RegularTask::with_completion_claim(completion_claim),
+        None => RegularTask::new(),
+    }
+}
 
 pub(crate) async fn run_turn_loop(
     sess: Arc<Session>,

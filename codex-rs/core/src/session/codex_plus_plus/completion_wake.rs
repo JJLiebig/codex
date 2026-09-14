@@ -28,6 +28,28 @@ impl TurnRunState {
     }
 }
 
+pub(super) fn turn_diff_tracker(
+    turn_diff_tracker: &mut Option<SharedTurnDiffTracker>,
+    display_roots: Vec<(String, PathUri)>,
+) -> SharedTurnDiffTracker {
+    Arc::clone(turn_diff_tracker.get_or_insert_with(|| {
+        Arc::new(tokio::sync::Mutex::new(
+            TurnDiffTracker::with_environment_display_roots(display_roots),
+        ))
+    }))
+}
+
+pub(super) async fn track_initial_analytics(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    input: &[TurnInput],
+    is_continuation: bool,
+) {
+    if !is_continuation {
+        track_turn_resolved_config_analytics(sess, turn_context, input).await;
+    }
+}
+
 pub(super) async fn user_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
