@@ -385,17 +385,13 @@ pub(crate) async fn run_turn(
             &turn_context,
             &pending_input,
             PersistContext::Standard,
+            &mut turn_state.completion_claim,
         )
         .await;
         if recorded_inputs.should_stop {
             turn_state.stop();
             break;
         }
-        completion_wake::commit_recorded_completion(
-            &sess,
-            &recorded_inputs.accepted,
-            &mut turn_state.completion_claim,
-        );
         if is_continuation && !recorded_inputs.accepted.is_empty() {
             let accepted_user_input = turn_user_input(&recorded_inputs.accepted);
             let (_, accepted_plugins) =
@@ -754,9 +750,15 @@ pub(crate) async fn run_hooks_and_record_inputs(
     input: &[TurnInput],
     persist_context: PersistContext,
 ) -> bool {
-    run_hooks_and_collect_inputs(sess, turn_context, input, persist_context)
-        .await
-        .should_stop
+    run_hooks_and_collect_inputs(
+        sess,
+        turn_context,
+        input,
+        persist_context,
+        &mut /*completion_claim*/ None,
+    )
+    .await
+    .should_stop
 }
 
 struct RecordedInputs {
@@ -769,6 +771,7 @@ async fn run_hooks_and_collect_inputs(
     turn_context: &Arc<TurnContext>,
     input: &[TurnInput],
     persist_context: PersistContext,
+    completion_claim: &mut Option<u64>,
 ) -> RecordedInputs {
     let mut blocked_input = false;
     let mut accepted_user_input = false;
@@ -790,6 +793,11 @@ async fn run_hooks_and_collect_inputs(
                 persist_context,
             )
             .await;
+            completion_wake::commit_recorded_completion(
+                sess,
+                std::slice::from_ref(input_item),
+                completion_claim,
+            );
             accepted.push(input_item.clone());
         }
     }
