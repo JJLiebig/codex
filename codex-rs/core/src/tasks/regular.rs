@@ -98,7 +98,9 @@ impl SessionTask for RegularTask {
             // Terminal errors are already reported. Let task completion preserve pending
             // input instead of restarting the failed turn for that same input.
             if ctx.terminal_error.lock().await.is_some() {
-                sess.services.unified_exec_manager.completion_wake.clear();
+                if !cancellation_token.is_cancelled() {
+                    sess.services.unified_exec_manager.completion_wake.clear();
+                }
                 return Ok(last_agent_message);
             }
             sess.services
