@@ -98,10 +98,11 @@ impl CompletionWake {
             .subscribe_activity(turn_state.as_deref())
             .await;
         if pending_activity.is_some()
-            && session
+            && (session
                 .input_queue
                 .has_pending_input(&session.active_turn)
                 .await
+                || session.input_queue.has_trigger_turn_mailbox_items().await)
         {
             return Vec::new();
         }
@@ -121,6 +122,7 @@ impl CompletionWake {
                 result = activity.changed() => {
                     if result.is_err()
                         || session.input_queue.has_pending_input(&session.active_turn).await
+                        || session.input_queue.has_trigger_turn_mailbox_items().await
                     {
                         return Vec::new();
                     }

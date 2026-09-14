@@ -22,6 +22,7 @@ use test_case::test_case;
 enum Finish {
     Wake,
     DeferredMail,
+    TriggeredMail,
     Read,
     Cancel,
     Ordinary,
@@ -31,6 +32,7 @@ enum Finish {
 
 #[test_case(Finish::Wake; "idle completion resumes once")]
 #[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
+#[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
 #[test_case(Finish::Subagent; "subagents do not report completion while waiting")]
@@ -81,6 +83,12 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
+    if matches!(finish, Finish::TriggeredMail) {
+        responses.push(sse(vec![
+            ev_assistant_message("m2", "Mail handled."),
+            ev_completed("r3"),
+        ]));
+    }
     if !matches!(finish, Finish::Ordinary | Finish::Exec | Finish::Subagent) {
         responses.push(sse(vec![
             ev_assistant_message("m2", "Done."),
@@ -90,7 +98,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
     let mock = mount_sse_sequence(harness.server(), responses).await;
     let waits_for_completion = matches!(
         finish,
-        Finish::Wake | Finish::DeferredMail | Finish::Read | Finish::Cancel
+        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Read | Finish::Cancel
     );
     if waits_for_completion {
         let submit = harness.submit("Run the background command.");
@@ -109,7 +117,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         harness.submit("Run the background command.").await?;
     }
 
-    if matches!(finish, Finish::DeferredMail) {
+    if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
         harness
             .test()
             .codex
@@ -119,7 +127,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
                     AgentPath::root(),
                     Vec::new(),
                     "late queue-only update".to_string(),
-                    /*trigger_turn*/ false,
+                    /*trigger_turn*/ matches!(finish, Finish::TriggeredMail),
                 ),
                 start_options: Default::default(),
             })
@@ -137,8 +145,24 @@ async fn background_completion(finish: Finish) -> Result<()> {
             harness.test().codex.agent_status().await,
             AgentStatus::Running
         );
+        if matches!(finish, Finish::TriggeredMail) {
+            tokio::time::timeout(std::time::Duration::from_secs(20), async {
+                while mock.requests().len() < 3 {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("triggering mail did not start its turn");
+        }
     }
-    assert_eq!(mock.requests().len(), 2);
+    assert_eq!(
+        mock.requests().len(),
+        if matches!(finish, Finish::TriggeredMail) {
+            3
+        } else {
+            2
+        }
+    );
     assert_eq!(
         mock.requests()[0].body_json()["tools"]
             .to_string()
@@ -175,7 +199,10 @@ async fn background_completion(finish: Finish) -> Result<()> {
             .await?;
     }
     harness.write_file("release", b"go").await?;
-    if matches!(finish, Finish::Wake | Finish::DeferredMail | Finish::Read) {
+    if matches!(
+        finish,
+        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail | Finish::Read
+    ) {
         wait_for_event(&harness.test().codex, |e| {
             matches!(e, EventMsg::TurnComplete(_))
         })
@@ -193,12 +220,20 @@ async fn background_completion(finish: Finish) -> Result<()> {
         requests.len(),
         match finish {
             Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
-            Finish::Read => 4,
+            Finish::TriggeredMail | Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
-    if matches!(finish, Finish::Wake | Finish::DeferredMail) {
-        let input = requests[2].body_json()["input"].to_string();
+    if matches!(
+        finish,
+        Finish::Wake | Finish::DeferredMail | Finish::TriggeredMail
+    ) {
+        let request = if matches!(finish, Finish::TriggeredMail) {
+            &requests[3]
+        } else {
+            &requests[2]
+        };
+        let input = request.body_json()["input"].to_string();
         assert!(input.contains("<background_completion>"));
         assert!(input.contains("exit_code=7"));
     }
