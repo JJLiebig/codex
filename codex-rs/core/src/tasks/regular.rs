@@ -4,9 +4,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::session::TurnInput;
 use crate::session::session::Session;
-use crate::session::turn::McpStartupRequirements;
+use crate::session::turn::TurnRunState;
 use crate::session::turn::run_hooks_and_record_inputs;
-use crate::session::turn::run_turn;
 use crate::session::turn_context::TurnContext;
 use crate::session_startup_prewarm::SessionStartupPrewarmResolution;
 use crate::state::TaskKind;
@@ -18,13 +17,22 @@ use tracing::trace_span;
 
 use super::SessionTask;
 use super::SessionTaskResult;
+use super::codex_plus_plus::completion_wake;
 
 #[derive(Default)]
-pub(crate) struct RegularTask;
+pub(crate) struct RegularTask {
+    completion_claim: Option<u64>,
+}
 
 impl RegularTask {
     pub(crate) fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub(crate) fn with_completion_claim(completion_claim: u64) -> Self {
+        Self {
+            completion_claim: Some(completion_claim),
+        }
     }
 }
 
@@ -44,7 +52,6 @@ impl SessionTask for RegularTask {
         input: Vec<TurnInput>,
         cancellation_token: CancellationToken,
     ) -> SessionTaskResult {
-        let run_turn_span = trace_span!("run_turn");
         // Regular turns emit `TurnStarted` inline so first-turn lifecycle does
         // not wait on startup prewarm resolution.
         let prewarmed_client_session = async {
@@ -72,29 +79,9 @@ impl SessionTask for RegularTask {
                 Some(*prewarmed_client_session)
             }
         };
-        let mut next_input = input;
-        let mut prewarmed_client_session = prewarmed_client_session;
-        let mut mcp_startup_requirements = McpStartupRequirements::default();
-        loop {
-            let last_agent_message = run_turn(
-                Arc::clone(&sess),
-                Arc::clone(&ctx),
-                next_input,
-                &mut mcp_startup_requirements,
-                prewarmed_client_session.take(),
-                cancellation_token.child_token(),
-            )
-            .instrument(run_turn_span.clone())
-            .await?;
-            // Terminal errors are already reported. Let task completion preserve pending
-            // input instead of restarting the failed turn for that same input.
-            if ctx.terminal_error.lock().await.is_some() {
-                return Ok(last_agent_message);
-            }
-            if !sess.input_queue.has_pending_input(&sess.active_turn).await {
-                return Ok(last_agent_message);
-            }
-            next_input = Vec::new();
-        }
+        let next_input = input;
+        let mut turn_state = TurnRunState::from_prewarmed_client_session(prewarmed_client_session);
+        turn_state.completion_claim = self.completion_claim;
+        completion_wake::run_turn_loop(sess, ctx, next_input, cancellation_token, turn_state).await
     }
 }

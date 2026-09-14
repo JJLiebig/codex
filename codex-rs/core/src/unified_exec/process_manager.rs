@@ -1081,6 +1081,7 @@ impl UnifiedExecProcessManager {
         let process_id = entry.process_id;
 
         if entry.process.has_exited() {
+            self.completion_wake.observed(process_id);
             let Some(entry) = store.remove(process_id) else {
                 return ProcessStatus::Unknown;
             };
