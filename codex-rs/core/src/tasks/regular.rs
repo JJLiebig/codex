@@ -99,8 +99,10 @@ impl SessionTask for RegularTask {
             let last_agent_message = match turn_result {
                 Ok(RunTurnResult::Completed(last_agent_message)) => last_agent_message,
                 Ok(RunTurnResult::Stopped(last_agent_message)) => {
-                    settle_completion_claim(&sess, &ctx, &mut turn_state).await;
-                    sess.services.unified_exec_manager.completion_wake.clear();
+                    if !cancellation_token.is_cancelled() {
+                        settle_completion_claim(&sess, &ctx, &mut turn_state).await;
+                        sess.services.unified_exec_manager.completion_wake.clear();
+                    }
                     return Ok(last_agent_message);
                 }
                 Err(err) => {
