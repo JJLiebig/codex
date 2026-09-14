@@ -151,11 +151,19 @@ pub(crate) struct TurnRunState {
     mcp_startup_requirements: McpStartupRequirements,
     turn_diff_tracker: Option<SharedTurnDiffTracker>,
     pub(crate) completion_claim: Option<u64>,
+    client_session: Option<ModelClientSession>,
+    pub(crate) stopped: bool,
 }
 
-pub(crate) enum RunTurnResult {
-    Completed(Option<String>),
-    Stopped(Option<String>),
+impl TurnRunState {
+    pub(crate) fn from_prewarmed_client_session(
+        client_session: Option<ModelClientSession>,
+    ) -> Self {
+        Self {
+            client_session,
+            ..Default::default()
+        }
+    }
 }
 
 /// Takes initial turn input and runs a loop where, at each sampling request,
@@ -177,15 +185,15 @@ pub(crate) async fn run_turn(
     turn_context: Arc<TurnContext>,
     input: Vec<TurnInput>,
     turn_state: &mut TurnRunState,
-    prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
-) -> CodexResult<RunTurnResult> {
+) -> CodexResult<Option<String>> {
     let is_continuation = turn_state.turn_diff_tracker.is_some();
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 
-    let mut client_session =
-        prewarmed_client_session.unwrap_or_else(|| sess.services.model_client.new_session());
+    let client_session = turn_state
+        .client_session
+        .get_or_insert_with(|| sess.services.model_client.new_session());
     let mut usage_limit_account_attempts = HashSet::new();
     // TODO(ccunningham): Pre-turn compaction runs before context updates and the
     // new user message are recorded. Estimate pending incoming items (context
@@ -194,7 +202,7 @@ pub(crate) async fn run_turn(
     if let Err(err) = run_pre_sampling_compact(
         &sess,
         &turn_context,
-        &mut client_session,
+        client_session,
         &mut usage_limit_account_attempts,
         &cancellation_token,
     )
@@ -212,7 +220,7 @@ pub(crate) async fn run_turn(
         sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
             .await;
         error!("Failed to run pre-sampling compact");
-        return Ok(RunTurnResult::Completed(None));
+        return Ok(None);
     }
 
     let user_input = turn_user_input(&input);
@@ -299,17 +307,19 @@ pub(crate) async fn run_turn(
         )
         .await
     }) else {
-        return Ok(RunTurnResult::Completed(None));
+        return Ok(None);
     };
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
-        return Ok(RunTurnResult::Stopped(None));
+        turn_state.stopped = true;
+        return Ok(None);
     }
     let mut can_drain_pending_input = input.is_empty();
     let stop_turn =
         run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::TurnStart).await;
     if stop_turn {
-        return Ok(RunTurnResult::Stopped(None));
+        turn_state.stopped = true;
+        return Ok(None);
     }
 
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
@@ -380,7 +390,8 @@ pub(crate) async fn run_turn(
             commit_completion_claim(&sess, &mut turn_state.completion_claim);
         }
         if stop_turn {
-            return Ok(RunTurnResult::Stopped(last_agent_message));
+            turn_state.stopped = true;
+            break;
         }
 
         let window_id = sess.current_window_id().await;
@@ -462,7 +473,7 @@ pub(crate) async fn run_turn(
                 Arc::clone(&step_context),
                 Arc::clone(&turn_context.extension_data),
                 Arc::clone(&turn_diff_tracker),
-                &mut client_session,
+                client_session,
                 &responses_metadata,
                 &mut usage_limit_account_attempts,
                 sampling_request_input,
@@ -552,7 +563,7 @@ pub(crate) async fn run_turn(
                         &sess,
                         Arc::clone(&step_context),
                         /*fallback_step_context*/ None,
-                        &mut client_session,
+                        client_session,
                         &mut usage_limit_account_attempts,
                         InitialContextInjection::BeforeLastUserMessage {
                             world_state: Arc::clone(&world_state),
@@ -569,10 +580,11 @@ pub(crate) async fn run_turn(
                         let error = err.to_codex_protocol_error();
                         sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
                             .await;
-                        return Ok(RunTurnResult::Completed(None));
+                        return Ok(None);
                     }
                     if run_pending_session_start_hooks(&sess, &turn_context).await {
-                        return Ok(RunTurnResult::Stopped(last_agent_message));
+                        turn_state.stopped = true;
+                        return Ok(last_agent_message);
                     }
                     can_drain_pending_input = !model_needs_follow_up;
                     continue;
@@ -625,7 +637,8 @@ pub(crate) async fn run_turn(
                         }
                     }
                     if stop_outcome.should_stop {
-                        return Ok(RunTurnResult::Stopped(last_agent_message));
+                        turn_state.stopped = true;
+                        break;
                     }
                     if run_legacy_after_agent_hook(
                         &sess,
@@ -635,7 +648,8 @@ pub(crate) async fn run_turn(
                     )
                     .await
                     {
-                        return Ok(RunTurnResult::Stopped(last_agent_message));
+                        turn_state.stopped = true;
+                        return Ok(last_agent_message);
                     }
                     break;
                 }
@@ -677,7 +691,7 @@ pub(crate) async fn run_turn(
         }
     }
 
-    Ok(RunTurnResult::Completed(last_agent_message))
+    Ok(last_agent_message)
 }
 
 fn commit_completion_claim(sess: &Session, completion_claim: &mut Option<u64>) {

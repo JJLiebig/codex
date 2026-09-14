@@ -4,7 +4,6 @@ use tokio_util::sync::CancellationToken;
 
 use crate::session::TurnInput;
 use crate::session::session::Session;
-use crate::session::turn::RunTurnResult;
 use crate::session::turn::TurnRunState;
 use crate::session::turn::run_hooks_and_record_inputs;
 use crate::session::turn::run_turn;
@@ -83,8 +82,7 @@ impl SessionTask for RegularTask {
             }
         };
         let mut next_input = input;
-        let mut prewarmed_client_session = prewarmed_client_session;
-        let mut turn_state = TurnRunState::default();
+        let mut turn_state = TurnRunState::from_prewarmed_client_session(prewarmed_client_session);
         turn_state.completion_claim = self.completion_claim;
         loop {
             let turn_result = run_turn(
@@ -92,23 +90,12 @@ impl SessionTask for RegularTask {
                 Arc::clone(&ctx),
                 next_input,
                 &mut turn_state,
-                prewarmed_client_session.take(),
                 cancellation_token.child_token(),
             )
             .instrument(run_turn_span.clone())
             .await;
             let last_agent_message = match turn_result {
-                Ok(RunTurnResult::Completed(last_agent_message)) => last_agent_message,
-                Ok(RunTurnResult::Stopped(last_agent_message)) => {
-                    completion_wake::settle_stopped_turn(
-                        &sess,
-                        &ctx,
-                        &mut turn_state,
-                        &cancellation_token,
-                    )
-                    .await;
-                    return Ok(last_agent_message);
-                }
+                Ok(last_agent_message) => last_agent_message,
                 Err(err) => {
                     if !cancellation_token.is_cancelled() {
                         sess.services.unified_exec_manager.completion_wake.clear();
@@ -116,6 +103,16 @@ impl SessionTask for RegularTask {
                     return Err(err);
                 }
             };
+            if turn_state.stopped {
+                completion_wake::settle_stopped_turn(
+                    &sess,
+                    &ctx,
+                    &mut turn_state,
+                    &cancellation_token,
+                )
+                .await;
+                return Ok(last_agent_message);
+            }
             // Terminal errors are already reported. Let task completion preserve pending
             // input instead of restarting the failed turn for that same input.
             if ctx.terminal_error.lock().await.is_some() {
@@ -125,13 +122,9 @@ impl SessionTask for RegularTask {
                 return Ok(last_agent_message);
             }
             if turn_state.completion_claim.is_some() {
-                completion_wake::settle_uncommitted_claim(
-                    &sess,
-                    &ctx,
-                    &mut turn_state,
-                    &cancellation_token,
-                )
-                .await;
+                if !cancellation_token.is_cancelled() {
+                    completion_wake::settle_completion_claim(&sess, &ctx, &mut turn_state).await;
+                }
                 return Ok(last_agent_message);
             }
             turn_state.completion_claim = sess

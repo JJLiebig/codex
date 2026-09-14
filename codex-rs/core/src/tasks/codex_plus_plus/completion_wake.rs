@@ -21,18 +21,7 @@ pub(crate) async fn settle_stopped_turn(
     sess.services.unified_exec_manager.completion_wake.clear();
 }
 
-pub(crate) async fn settle_uncommitted_claim(
-    sess: &Arc<Session>,
-    ctx: &Arc<TurnContext>,
-    turn_state: &mut TurnRunState,
-    cancellation_token: &CancellationToken,
-) {
-    if !cancellation_token.is_cancelled() {
-        settle_completion_claim(sess, ctx, turn_state).await;
-    }
-}
-
-async fn settle_completion_claim(
+pub(crate) async fn settle_completion_claim(
     sess: &Arc<Session>,
     ctx: &Arc<TurnContext>,
     turn_state: &mut TurnRunState,
