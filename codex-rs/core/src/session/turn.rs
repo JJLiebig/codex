@@ -366,7 +366,6 @@ pub(crate) async fn run_turn(
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
     // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
 
-    let injection_step_context = Arc::clone(&first_step_context);
     let mut next_step_context = Some(first_step_context);
     loop {
         // Note that pending_input would be something like a message the user
@@ -393,34 +392,6 @@ pub(crate) async fn run_turn(
             turn_state.stop();
             break;
         }
-        if is_continuation && !recorded_inputs.accepted.is_empty() {
-            let accepted_user_input = turn_user_input(&recorded_inputs.accepted);
-            let (_, accepted_plugins) =
-                required_mcp_servers_for_input(&sess, turn_context.as_ref(), &accepted_user_input)
-                    .await;
-            let Some((items, connectors)) = completion_wake::continuation_injections(
-                &sess,
-                injection_step_context.as_ref(),
-                &accepted_user_input,
-                &accepted_plugins,
-                &cancellation_token,
-            )
-            .await
-            else {
-                return Ok(None);
-            };
-            injection_items = items;
-            explicitly_enabled_connectors = connectors;
-        }
-        completion_wake::record_pending_injections(
-            &sess,
-            &turn_context,
-            &pending_input,
-            &mut injection_items,
-            &mut explicitly_enabled_connectors,
-        )
-        .await;
-
         let window_id = sess.current_window_id().await;
         super::rollout_budget::maybe_record_reminder(
             sess.as_ref(),
@@ -467,6 +438,33 @@ pub(crate) async fn run_turn(
                 .await?
             }
         };
+        if is_continuation && !recorded_inputs.accepted.is_empty() {
+            let accepted_user_input = turn_user_input(&recorded_inputs.accepted);
+            let (_, accepted_plugins) =
+                required_mcp_servers_for_input(&sess, turn_context.as_ref(), &accepted_user_input)
+                    .await;
+            let Some((items, connectors)) = completion_wake::continuation_injections(
+                &sess,
+                step_context.as_ref(),
+                &accepted_user_input,
+                &accepted_plugins,
+                &cancellation_token,
+            )
+            .await
+            else {
+                return Ok(None);
+            };
+            injection_items = items;
+            explicitly_enabled_connectors = connectors;
+        }
+        completion_wake::record_pending_injections(
+            &sess,
+            &turn_context,
+            &pending_input,
+            &mut injection_items,
+            &mut explicitly_enabled_connectors,
+        )
+        .await;
         let sampling_request_result: CodexResult<_> = async {
             super::time_reminder::maybe_record_current_time_reminder(
                 sess.as_ref(),
