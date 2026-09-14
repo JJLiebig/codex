@@ -86,7 +86,7 @@ impl CompletionWake {
         &self,
         session: &Session,
         cancellation: &tokio_util::sync::CancellationToken,
-    ) -> Vec<TurnInput> {
+    ) {
         let turn_state = session
             .active_turn
             .lock()
@@ -104,18 +104,30 @@ impl CompletionWake {
                 .await
                 || session.input_queue.has_trigger_turn_mailbox_items().await)
         {
-            return Vec::new();
+            return;
         }
         loop {
             let input = self.take_input(session.is_interrupted());
-            if !input.is_empty()
-                || self
-                    .processes
-                    .lock()
-                    .unwrap_or_else(std::sync::PoisonError::into_inner)
-                    .is_empty()
+            if !input.is_empty() {
+                if let Some(turn_state) = turn_state.as_deref() {
+                    turn_state
+                        .lock()
+                        .await
+                        .accept_mailbox_delivery_for_current_turn();
+                    session
+                        .input_queue
+                        .extend_pending_input_for_turn_state(turn_state, input)
+                        .await;
+                }
+                return;
+            }
+            if self
+                .processes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty()
             {
-                return input;
+                return;
             }
             tokio::select! {
                 _ = self.notify.notified() => {}
@@ -124,10 +136,10 @@ impl CompletionWake {
                         || session.input_queue.has_pending_input(&session.active_turn).await
                         || session.input_queue.has_trigger_turn_mailbox_items().await
                     {
-                        return Vec::new();
+                        return;
                     }
                 }
-                _ = cancellation.cancelled() => return Vec::new(),
+                _ = cancellation.cancelled() => return,
             }
         }
     }

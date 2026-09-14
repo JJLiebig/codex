@@ -91,16 +91,15 @@ impl SessionTask for RegularTask {
             if ctx.terminal_error.lock().await.is_some() {
                 return Ok(last_agent_message);
             }
-            next_input = sess
-                .services
+            sess.services
                 .unified_exec_manager
                 .completion_wake
                 .wait_for_input(&sess, &cancellation_token)
                 .await;
-            if next_input.is_empty() && !sess.input_queue.has_pending_input(&sess.active_turn).await
-            {
+            if !sess.input_queue.has_pending_input(&sess.active_turn).await {
                 return Ok(last_agent_message);
             }
+            next_input = Vec::new();
         }
     }
 }
