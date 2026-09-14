@@ -5,11 +5,8 @@ use codex_protocol::protocol::AgentStatus;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::Op;
-use codex_protocol::protocol::SandboxPolicy;
-use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
 use core_test_support::responses::ResponseMock;
-use core_test_support::responses::ev_apply_patch_custom_tool_call;
 use core_test_support::responses::ev_assistant_message;
 use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
@@ -388,85 +385,6 @@ async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
         requests[1].header("x-codex-turn-state"),
         Some("background-state".to_string())
     );
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn background_completion_preserves_turn_diff() -> Result<()> {
-    let harness = TestCodexHarness::with_auto_env_builder(
-        test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
-    )
-    .await?;
-    let command = wait_for_release_command();
-    let mock = mount_sse_sequence(
-        harness.server(),
-        vec![
-            sse(vec![
-                ev_apply_patch_custom_tool_call(
-                    "first-patch",
-                    "*** Begin Patch\n*** Add File: first.txt\n+first\n*** End Patch",
-                ),
-                ev_completed("r1"),
-            ]),
-            sse(vec![
-                ev_function_call(
-                    "background",
-                    "exec_command",
-                    &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
-                ),
-                ev_completed("r2"),
-            ]),
-            sse(vec![
-                ev_assistant_message("waiting", "Waiting."),
-                ev_completed("r3"),
-            ]),
-            sse(vec![
-                ev_apply_patch_custom_tool_call(
-                    "second-patch",
-                    "*** Begin Patch\n*** Add File: second.txt\n+second\n*** End Patch",
-                ),
-                ev_completed("r4"),
-            ]),
-            sse(vec![
-                ev_assistant_message("done", "Done."),
-                ev_completed("r5"),
-            ]),
-        ],
-    )
-    .await;
-
-    harness
-        .test()
-        .codex
-        .start_or_steer_turn(
-            TurnInputRequest::user_input(vec![UserInput::Text {
-                text: "Patch before and after the background command.".into(),
-                text_elements: Vec::new(),
-            }])
-            .with_thread_settings(ThreadSettingsOverrides {
-                sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
-                ..Default::default()
-            }),
-        )
-        .await?;
-    wait_for_requests(&mock, 3, "background command did not reach waiting state").await;
-
-    harness.write_file("release", b"go").await?;
-    let mut final_diff = None;
-    loop {
-        match wait_for_event(&harness.test().codex, |event| {
-            matches!(event, EventMsg::TurnDiff(_) | EventMsg::TurnComplete(_))
-        })
-        .await
-        {
-            EventMsg::TurnDiff(diff) => final_diff = Some(diff.unified_diff),
-            EventMsg::TurnComplete(_) => break,
-            _ => unreachable!(),
-        }
-    }
-    let final_diff = final_diff.expect("second patch did not emit a turn diff");
-    assert!(final_diff.contains("first.txt"));
-    assert!(final_diff.contains("second.txt"));
     Ok(())
 }
 

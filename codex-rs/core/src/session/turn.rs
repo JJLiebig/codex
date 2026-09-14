@@ -223,7 +223,27 @@ pub(crate) async fn run_turn(
         return Ok(None);
     }
 
-    let user_input = turn_user_input(&input);
+    let continuation_input = if is_continuation {
+        match sess
+            .input_queue
+            .turn_state_for_sub_id(&sess.active_turn, &turn_context.sub_id)
+            .await
+        {
+            Some(pending_turn_state) => {
+                sess.input_queue
+                    .pending_input_for_turn_state(pending_turn_state.as_ref())
+                    .await
+            }
+            None => Vec::new(),
+        }
+    } else {
+        Vec::new()
+    };
+    let user_input = turn_user_input(if is_continuation {
+        &continuation_input
+    } else {
+        &input
+    });
     let allow_plugin_mentions =
         !crate::guardian::is_basic_session_source(&turn_context.session_source);
     let McpStartupRequirements {
@@ -295,8 +315,8 @@ pub(crate) async fn run_turn(
     );
     let mut world_state = world_state?;
 
-    let Some((injection_items, explicitly_enabled_connectors)) =
-        (if is_continuation && input.is_empty() {
+    let Some((mut injection_items, mut explicitly_enabled_connectors)) =
+        (if is_continuation && user_input.is_empty() {
             Some(Default::default())
         } else {
             build_skills_and_plugins(
@@ -311,6 +331,19 @@ pub(crate) async fn run_turn(
     else {
         return Ok(None);
     };
+    if !is_continuation {
+        let Some(extension_items) = build_extension_turn_input_items(
+            &sess,
+            first_step_context.as_ref(),
+            &user_input,
+            &cancellation_token,
+        )
+        .await
+        else {
+            return Ok(None);
+        };
+        injection_items.extend(extension_items);
+    }
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
         turn_state.stopped = true;
@@ -323,9 +356,6 @@ pub(crate) async fn run_turn(
         turn_state.stopped = true;
         return Ok(None);
     }
-    if !input.is_empty() {
-        commit_completion_claim(&sess, &mut turn_state.completion_claim);
-    }
 
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
     {
@@ -336,19 +366,19 @@ pub(crate) async fn run_turn(
         }
     }
 
-    sess.merge_connector_selection(explicitly_enabled_connectors.clone())
-        .await;
     if !is_continuation {
+        sess.merge_connector_selection(std::mem::take(&mut explicitly_enabled_connectors))
+            .await;
         sess.set_previous_turn_settings(Some(PreviousTurnSettings {
             model: turn_context.model_info().slug.clone(),
             comp_hash: turn_context.model_info().comp_hash.clone(),
             realtime_active: Some(turn_context.realtime_active),
         }))
         .await;
-    }
-    for response_item in injection_items {
-        sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-            .await;
+        for response_item in injection_items.drain(..) {
+            sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
+                .await;
+        }
     }
 
     track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
@@ -397,6 +427,14 @@ pub(crate) async fn run_turn(
         if stop_turn {
             turn_state.stopped = true;
             break;
+        }
+        if !pending_input.is_empty() {
+            sess.merge_connector_selection(std::mem::take(&mut explicitly_enabled_connectors))
+                .await;
+            for response_item in injection_items.drain(..) {
+                sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
+                    .await;
+            }
         }
 
         let window_id = sess.current_window_id().await;
@@ -922,9 +960,6 @@ async fn build_skills_and_plugins(
     let skills_snapshot = turn_context.skills_snapshot();
     let skills_outcome = skills_snapshot.outcome();
     let connector_slug_counts = build_connector_slug_counts(&available_connectors);
-    let extension_injection_items =
-        build_extension_turn_input_items(sess, step_context, user_input, cancellation_token)
-            .await?;
     let skill_name_counts_lower =
         build_skill_name_counts(&skills_outcome.skills, &skills_outcome.disabled_paths).1;
     let mentioned_skills =
@@ -1012,7 +1047,6 @@ async fn build_skills_and_plugins(
         None => skill_items,
     };
     injection_items.extend(plugin_items);
-    injection_items.extend(extension_injection_items);
     Some((injection_items, explicitly_enabled_connectors))
 }
 
