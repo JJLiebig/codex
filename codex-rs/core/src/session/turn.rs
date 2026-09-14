@@ -198,7 +198,6 @@ pub(crate) async fn run_turn(
         if matches!(err.details(), CodexErrorDetails::TurnAborted) {
             run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
                 .await;
-            commit_completion_claim(&sess, &mut turn_state.completion_claim);
             return Err(err);
         }
         if matches!(err.details(), CodexErrorDetails::ToolCollision(_)) {
@@ -230,7 +229,6 @@ pub(crate) async fn run_turn(
             Err(err) => {
                 run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
                     .await;
-                commit_completion_claim(&sess, &mut turn_state.completion_claim);
                 return Err(err.into());
             }
         };
@@ -253,7 +251,6 @@ pub(crate) async fn run_turn(
         Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted) => {
             run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
                 .await;
-            commit_completion_claim(&sess, &mut turn_state.completion_claim);
             return Err(err);
         }
         Err(err) => return Err(err),
@@ -300,13 +297,12 @@ pub(crate) async fn run_turn(
         return Ok(None);
     };
 
-    if !is_continuation && run_pending_session_start_hooks(&sess, &turn_context).await {
+    if run_pending_session_start_hooks(&sess, &turn_context).await {
         return Ok(None);
     }
     let mut can_drain_pending_input = input.is_empty();
     let stop_turn =
         run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::TurnStart).await;
-    commit_completion_claim(&sess, &mut turn_state.completion_claim);
     if stop_turn {
         return Ok(None);
     }
@@ -368,14 +364,17 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
-        if run_hooks_and_record_inputs(
+        let stop_turn = run_hooks_and_record_inputs(
             &sess,
             &turn_context,
             &pending_input,
             PersistContext::Standard,
         )
-        .await
-        {
+        .await;
+        if !pending_input.is_empty() {
+            commit_completion_claim(&sess, &mut turn_state.completion_claim);
+        }
+        if stop_turn {
             break;
         }
 
