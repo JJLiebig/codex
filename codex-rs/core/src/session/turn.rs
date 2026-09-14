@@ -307,7 +307,7 @@ pub(crate) async fn run_turn(
     let mut world_state = world_state?;
 
     let Some((mut injection_items, mut explicitly_enabled_connectors)) =
-        completion_wake::injections(
+        completion_wake::initial_injections(
             &sess,
             first_step_context.as_ref(),
             &user_input,
@@ -353,7 +353,6 @@ pub(crate) async fn run_turn(
     completion_wake::track_initial_analytics(&sess, &turn_context, &input, is_continuation).await;
 
     let mut last_agent_message: Option<String> = None;
-    let mut stop_hook_active = false;
     // Although from the perspective of codex.rs, TurnDiffTracker has the lifecycle of a Task which contains
     // many turns, from the perspective of the user, it is a single turn.
     let turn_diff_tracker =
@@ -366,6 +365,7 @@ pub(crate) async fn run_turn(
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
     // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
 
+    let injection_step_context = Arc::clone(&first_step_context);
     let mut next_step_context = Some(first_step_context);
     loop {
         // Note that pending_input would be something like a message the user
@@ -380,16 +380,35 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
-        let stop_turn = run_hooks_and_record_inputs(
+        let recorded_inputs = run_hooks_and_collect_inputs(
             &sess,
             &turn_context,
             &pending_input,
             PersistContext::Standard,
         )
         .await;
-        if stop_turn {
+        if recorded_inputs.should_stop {
             turn_state.stop();
             break;
+        }
+        if is_continuation && !recorded_inputs.accepted.is_empty() {
+            let accepted_user_input = turn_user_input(&recorded_inputs.accepted);
+            let (_, accepted_plugins) =
+                required_mcp_servers_for_input(&sess, turn_context.as_ref(), &accepted_user_input)
+                    .await;
+            let Some((items, connectors)) = completion_wake::continuation_injections(
+                &sess,
+                injection_step_context.as_ref(),
+                &accepted_user_input,
+                &accepted_plugins,
+                &cancellation_token,
+            )
+            .await
+            else {
+                return Ok(None);
+            };
+            injection_items = items;
+            explicitly_enabled_connectors = connectors;
         }
         completion_wake::record_pending_injections(
             &sess,
@@ -602,7 +621,7 @@ pub(crate) async fn run_turn(
                     let stop_outcome = run_turn_stop_hooks(
                         &sess,
                         &step_context,
-                        stop_hook_active,
+                        turn_state.stop_hook_active,
                         last_agent_message.clone(),
                     )
                     .await;
@@ -631,7 +650,7 @@ pub(crate) async fn run_turn(
                                     &turn_context.sub_id,
                                 )
                                 .await;
-                            stop_hook_active = true;
+                            turn_state.stop_hook_active = true;
                             continue;
                         } else {
                             sess.send_event(
@@ -731,8 +750,25 @@ pub(crate) async fn run_hooks_and_record_inputs(
     input: &[TurnInput],
     persist_context: PersistContext,
 ) -> bool {
+    run_hooks_and_collect_inputs(sess, turn_context, input, persist_context)
+        .await
+        .should_stop
+}
+
+struct RecordedInputs {
+    should_stop: bool,
+    accepted: Vec<TurnInput>,
+}
+
+async fn run_hooks_and_collect_inputs(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    input: &[TurnInput],
+    persist_context: PersistContext,
+) -> RecordedInputs {
     let mut blocked_input = false;
     let mut accepted_user_input = false;
+    let mut accepted = Vec::new();
     for input_item in input {
         let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
         if hook_outcome.should_stop {
@@ -750,9 +786,13 @@ pub(crate) async fn run_hooks_and_record_inputs(
                 persist_context,
             )
             .await;
+            accepted.push(input_item.clone());
         }
     }
-    blocked_input && !accepted_user_input
+    RecordedInputs {
+        should_stop: blocked_input && !accepted_user_input,
+        accepted,
+    }
 }
 
 fn turn_user_input(input: &[TurnInput]) -> Vec<UserInput> {

@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use anyhow::Result;
+use codex_context_fragments::AdditionalContextUserFragment;
 use codex_core::TurnInputRequest;
 use codex_core::config::Config;
 use codex_extension_api::ContextualUserFragment;
@@ -62,8 +63,15 @@ impl TurnInputContributor for CountingTurnInputContributor {
         _thread_store: &'a ExtensionData,
         _turn_store: &'a ExtensionData,
     ) -> ExtensionFuture<'a, Vec<Box<dyn ContextualUserFragment + Send>>> {
-        self.0.fetch_add(1, Ordering::Relaxed);
-        Box::pin(async { Vec::new() })
+        let contribution = self.0.fetch_add(1, Ordering::Relaxed) + 1;
+        Box::pin(async move {
+            let fragment: Box<dyn ContextualUserFragment + Send> =
+                Box::new(AdditionalContextUserFragment::new(
+                    "wake_contributor".into(),
+                    format!("contribution-{contribution}"),
+                ));
+            vec![fragment]
+        })
     }
 }
 
@@ -359,6 +367,11 @@ async fn background_completion(finish: Finish) -> Result<()> {
     }
     if matches!(finish, Finish::Steer) {
         assert_eq!(contributions.load(Ordering::Relaxed), 2);
+        assert!(
+            requests[2].body_json()["input"]
+                .to_string()
+                .contains("contribution-2")
+        );
     }
     if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
         assert!(

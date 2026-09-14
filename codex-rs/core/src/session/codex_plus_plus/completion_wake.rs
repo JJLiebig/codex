@@ -6,6 +6,7 @@ pub(crate) struct TurnRunState {
     pub(super) turn_diff_tracker: Option<SharedTurnDiffTracker>,
     pub(crate) completion_claim: Option<u64>,
     pub(super) client_session: Option<ModelClientSession>,
+    pub(super) stop_hook_active: bool,
     pub(crate) stopped: bool,
 }
 
@@ -93,7 +94,7 @@ pub(super) async fn record_cancelled_input(
     }
 }
 
-pub(super) async fn injections(
+pub(super) async fn initial_injections(
     sess: &Arc<Session>,
     step_context: &StepContext,
     user_input: &[UserInput],
@@ -101,24 +102,57 @@ pub(super) async fn injections(
     cancellation_token: &CancellationToken,
     is_continuation: bool,
 ) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
-    let extension_items = if !is_continuation || !user_input.is_empty() {
-        build_extension_turn_input_items(sess, step_context, user_input, cancellation_token).await?
-    } else {
-        Vec::new()
-    };
-    let (mut injection_items, explicitly_enabled_connectors) =
-        if is_continuation && user_input.is_empty() {
-            Default::default()
-        } else {
-            build_skills_and_plugins(
-                sess,
-                step_context,
-                user_input,
-                mentioned_plugins,
-                cancellation_token,
-            )
-            .await?
-        };
+    if is_continuation {
+        return Some(Default::default());
+    }
+    build_injections(
+        sess,
+        step_context,
+        user_input,
+        mentioned_plugins,
+        cancellation_token,
+    )
+    .await
+}
+
+pub(super) async fn continuation_injections(
+    sess: &Arc<Session>,
+    step_context: &StepContext,
+    user_input: &[UserInput],
+    mentioned_plugins: &[crate::plugins::PluginCapabilitySummary],
+    cancellation_token: &CancellationToken,
+) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
+    if user_input.is_empty() {
+        return Some(Default::default());
+    }
+    build_injections(
+        sess,
+        step_context,
+        user_input,
+        mentioned_plugins,
+        cancellation_token,
+    )
+    .await
+}
+
+async fn build_injections(
+    sess: &Arc<Session>,
+    step_context: &StepContext,
+    user_input: &[UserInput],
+    mentioned_plugins: &[crate::plugins::PluginCapabilitySummary],
+    cancellation_token: &CancellationToken,
+) -> Option<(Vec<ResponseItem>, HashSet<String>)> {
+    let extension_items =
+        build_extension_turn_input_items(sess, step_context, user_input, cancellation_token)
+            .await?;
+    let (mut injection_items, explicitly_enabled_connectors) = build_skills_and_plugins(
+        sess,
+        step_context,
+        user_input,
+        mentioned_plugins,
+        cancellation_token,
+    )
+    .await?;
     injection_items.extend(extension_items);
     Some((injection_items, explicitly_enabled_connectors))
 }
