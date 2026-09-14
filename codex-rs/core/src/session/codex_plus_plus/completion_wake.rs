@@ -1,4 +1,5 @@
 use super::*;
+use crate::context::codex_plus_plus::BackgroundCompletion;
 
 #[derive(Default)]
 pub(crate) struct TurnRunState {
@@ -85,13 +86,14 @@ pub(super) async fn record_cancelled_input(
     } else {
         input
     };
-    run_hooks_and_record_inputs(sess, turn_context, input, PersistContext::Standard).await;
-    if records_continuation && let Some(claim) = completion_claim.take() {
-        sess.services
-            .unified_exec_manager
-            .completion_wake
-            .commit_claim(claim);
-    }
+    run_hooks_and_collect_inputs(
+        sess,
+        turn_context,
+        input,
+        PersistContext::Standard,
+        completion_claim,
+    )
+    .await;
 }
 
 pub(super) async fn initial_injections(
@@ -198,7 +200,7 @@ pub(super) fn commit_recorded_completion(
     pending_input: &[TurnInput],
     completion_claim: &mut Option<u64>,
 ) {
-    if !pending_input.is_empty()
+    if pending_input.iter().any(is_background_completion)
         && let Some(claim) = completion_claim.take()
     {
         sess.services
@@ -206,6 +208,18 @@ pub(super) fn commit_recorded_completion(
             .completion_wake
             .commit_claim(claim);
     }
+}
+
+fn is_background_completion(input: &TurnInput) -> bool {
+    let TurnInput::ResponseItem(envelope) = input else {
+        return false;
+    };
+    let ResponseItem::Message { content, .. } = &envelope.item else {
+        return false;
+    };
+    content.iter().any(|item| {
+        matches!(item, ContentItem::InputText { text } if BackgroundCompletion::matches_text(text))
+    })
 }
 
 async fn record_injections(
