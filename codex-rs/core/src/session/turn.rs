@@ -153,6 +153,11 @@ pub(crate) struct TurnRunState {
     pub(crate) completion_claim: Option<u64>,
 }
 
+pub(crate) enum RunTurnResult {
+    Completed(Option<String>),
+    Stopped(Option<String>),
+}
+
 /// Takes initial turn input and runs a loop where, at each sampling request,
 /// the model replies with either:
 ///
@@ -174,7 +179,7 @@ pub(crate) async fn run_turn(
     turn_state: &mut TurnRunState,
     prewarmed_client_session: Option<ModelClientSession>,
     cancellation_token: CancellationToken,
-) -> CodexResult<Option<String>> {
+) -> CodexResult<RunTurnResult> {
     let is_continuation = turn_state.turn_diff_tracker.is_some();
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
@@ -207,7 +212,7 @@ pub(crate) async fn run_turn(
         sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
             .await;
         error!("Failed to run pre-sampling compact");
-        return Ok(None);
+        return Ok(RunTurnResult::Completed(None));
     }
 
     let user_input = turn_user_input(&input);
@@ -294,17 +299,17 @@ pub(crate) async fn run_turn(
         )
         .await
     }) else {
-        return Ok(None);
+        return Ok(RunTurnResult::Completed(None));
     };
 
     if run_pending_session_start_hooks(&sess, &turn_context).await {
-        return Ok(None);
+        return Ok(RunTurnResult::Stopped(None));
     }
     let mut can_drain_pending_input = input.is_empty();
     let stop_turn =
         run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::TurnStart).await;
     if stop_turn {
-        return Ok(None);
+        return Ok(RunTurnResult::Stopped(None));
     }
 
     // Only speculate after hooks accept the turn, using its finalized tools and permissions.
@@ -375,7 +380,7 @@ pub(crate) async fn run_turn(
             commit_completion_claim(&sess, &mut turn_state.completion_claim);
         }
         if stop_turn {
-            break;
+            return Ok(RunTurnResult::Stopped(last_agent_message));
         }
 
         let window_id = sess.current_window_id().await;
@@ -564,10 +569,10 @@ pub(crate) async fn run_turn(
                         let error = err.to_codex_protocol_error();
                         sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
                             .await;
-                        return Ok(None);
+                        return Ok(RunTurnResult::Completed(None));
                     }
                     if run_pending_session_start_hooks(&sess, &turn_context).await {
-                        return Ok(None);
+                        return Ok(RunTurnResult::Stopped(last_agent_message));
                     }
                     can_drain_pending_input = !model_needs_follow_up;
                     continue;
@@ -620,7 +625,7 @@ pub(crate) async fn run_turn(
                         }
                     }
                     if stop_outcome.should_stop {
-                        break;
+                        return Ok(RunTurnResult::Stopped(last_agent_message));
                     }
                     if run_legacy_after_agent_hook(
                         &sess,
@@ -630,7 +635,7 @@ pub(crate) async fn run_turn(
                     )
                     .await
                     {
-                        return Ok(None);
+                        return Ok(RunTurnResult::Stopped(last_agent_message));
                     }
                     break;
                 }
@@ -672,7 +677,7 @@ pub(crate) async fn run_turn(
         }
     }
 
-    Ok(last_agent_message)
+    Ok(RunTurnResult::Completed(last_agent_message))
 }
 
 fn commit_completion_claim(sess: &Session, completion_claim: &mut Option<u64>) {
