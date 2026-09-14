@@ -172,6 +172,8 @@ pub(crate) async fn run_turn(
     cancellation_token: CancellationToken,
 ) -> CodexResult<Option<String>> {
     let is_continuation = turn_state.is_continuation();
+    let continuation_input =
+        completion_wake::pending_input(&sess, &turn_context, is_continuation).await;
     // Record results from hooks that finished after the previous turn before this turn's user prompt.
     drain_async_hook_results(&sess, &turn_context, /*before_user_prompt*/ true).await;
 
@@ -193,8 +195,14 @@ pub(crate) async fn run_turn(
     .await
     {
         if matches!(err.details(), CodexErrorDetails::TurnAborted) {
-            run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
-                .await;
+            completion_wake::record_cancelled_input(
+                &sess,
+                &turn_context,
+                &input,
+                &continuation_input,
+                &cancellation_token,
+            )
+            .await;
             return Err(err);
         }
         if matches!(err.details(), CodexErrorDetails::ToolCollision(_)) {
@@ -207,8 +215,11 @@ pub(crate) async fn run_turn(
         return Ok(None);
     }
 
-    let user_input =
-        completion_wake::user_input(&sess, &turn_context, &input, is_continuation).await;
+    let user_input = turn_user_input(if is_continuation {
+        &continuation_input
+    } else {
+        &input
+    });
     let allow_plugin_mentions =
         !crate::guardian::is_basic_session_source(&turn_context.session_source);
     let McpStartupRequirements {
@@ -225,8 +236,14 @@ pub(crate) async fn run_turn(
         {
             Ok(requirements) => requirements,
             Err(err) => {
-                run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
-                    .await;
+                completion_wake::record_cancelled_input(
+                    &sess,
+                    &turn_context,
+                    &input,
+                    &continuation_input,
+                    &cancellation_token,
+                )
+                .await;
                 return Err(err.into());
             }
         };
@@ -247,8 +264,14 @@ pub(crate) async fn run_turn(
     {
         Ok(step_context) => step_context,
         Err(err) if matches!(err.details(), CodexErrorDetails::TurnAborted) => {
-            run_hooks_and_record_inputs(&sess, &turn_context, &input, PersistContext::Standard)
-                .await;
+            completion_wake::record_cancelled_input(
+                &sess,
+                &turn_context,
+                &input,
+                &continuation_input,
+                &cancellation_token,
+            )
+            .await;
             return Err(err);
         }
         Err(err) => return Err(err),

@@ -50,14 +50,13 @@ pub(super) async fn track_initial_analytics(
     }
 }
 
-pub(super) async fn user_input(
+pub(super) async fn pending_input(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
-    input: &[TurnInput],
     is_continuation: bool,
-) -> Vec<UserInput> {
+) -> Vec<TurnInput> {
     if !is_continuation {
-        return turn_user_input(input);
+        return Vec::new();
     }
     let Some(pending_turn_state) = sess
         .input_queue
@@ -66,11 +65,24 @@ pub(super) async fn user_input(
     else {
         return Vec::new();
     };
-    let input = sess
-        .input_queue
+    sess.input_queue
         .pending_input_for_turn_state(pending_turn_state.as_ref())
-        .await;
-    turn_user_input(&input)
+        .await
+}
+
+pub(super) async fn record_cancelled_input(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    input: &[TurnInput],
+    continuation_input: &[TurnInput],
+    cancellation_token: &CancellationToken,
+) {
+    let input = if cancellation_token.is_cancelled() && !continuation_input.is_empty() {
+        continuation_input
+    } else {
+        input
+    };
+    run_hooks_and_record_inputs(sess, turn_context, input, PersistContext::Standard).await;
 }
 
 pub(super) async fn injections(
