@@ -19,6 +19,7 @@ use tracing::trace_span;
 
 use super::SessionTask;
 use super::SessionTaskResult;
+use super::codex_plus_plus::completion_wake;
 
 #[derive(Default)]
 pub(crate) struct RegularTask {
@@ -99,10 +100,13 @@ impl SessionTask for RegularTask {
             let last_agent_message = match turn_result {
                 Ok(RunTurnResult::Completed(last_agent_message)) => last_agent_message,
                 Ok(RunTurnResult::Stopped(last_agent_message)) => {
-                    if !cancellation_token.is_cancelled() {
-                        settle_completion_claim(&sess, &ctx, &mut turn_state).await;
-                        sess.services.unified_exec_manager.completion_wake.clear();
-                    }
+                    completion_wake::settle_stopped_turn(
+                        &sess,
+                        &ctx,
+                        &mut turn_state,
+                        &cancellation_token,
+                    )
+                    .await;
                     return Ok(last_agent_message);
                 }
                 Err(err) => {
@@ -121,9 +125,13 @@ impl SessionTask for RegularTask {
                 return Ok(last_agent_message);
             }
             if turn_state.completion_claim.is_some() {
-                if !cancellation_token.is_cancelled() {
-                    settle_completion_claim(&sess, &ctx, &mut turn_state).await;
-                }
+                completion_wake::settle_uncommitted_claim(
+                    &sess,
+                    &ctx,
+                    &mut turn_state,
+                    &cancellation_token,
+                )
+                .await;
                 return Ok(last_agent_message);
             }
             turn_state.completion_claim = sess
@@ -138,34 +146,4 @@ impl SessionTask for RegularTask {
             next_input = Vec::new();
         }
     }
-}
-
-async fn settle_completion_claim(
-    sess: &Arc<Session>,
-    ctx: &Arc<TurnContext>,
-    turn_state: &mut TurnRunState,
-) {
-    let Some(claim) = turn_state.completion_claim else {
-        return;
-    };
-    let Some(pending_turn_state) = sess
-        .input_queue
-        .turn_state_for_sub_id(&sess.active_turn, &ctx.sub_id)
-        .await
-    else {
-        return;
-    };
-    let pending_input = sess
-        .input_queue
-        .take_pending_input_for_turn_state(pending_turn_state.as_ref())
-        .await;
-    if pending_input.is_empty() {
-        return;
-    }
-    run_hooks_and_record_inputs(sess, ctx, &pending_input, PersistContext::Standard).await;
-    sess.services
-        .unified_exec_manager
-        .completion_wake
-        .commit_claim(claim);
-    turn_state.completion_claim = None;
 }

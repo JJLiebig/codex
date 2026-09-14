@@ -1,3 +1,4 @@
+mod codex_plus_plus;
 mod compact;
 mod lifecycle;
 mod regular;
