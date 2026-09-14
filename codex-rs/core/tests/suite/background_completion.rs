@@ -11,6 +11,7 @@ use core_test_support::responses::ev_completed;
 use core_test_support::responses::ev_function_call;
 use core_test_support::responses::mount_sse_sequence;
 use core_test_support::responses::sse;
+use core_test_support::responses::sse_failed;
 use core_test_support::test_codex::TestCodexHarness;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
@@ -281,6 +282,48 @@ async fn background_completion(finish: Finish) -> Result<()> {
                 .contains("<background_completion>")
         );
     }
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(test_codex().with_config(|config| {
+        config.model_provider.request_max_retries = Some(0);
+        config.model_provider.stream_max_retries = Some(0);
+    }))
+    .await?;
+    let command = match core_test_support::test_target_os() {
+        core_test_support::TestTargetOs::Windows => {
+            "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; exit 0"
+        }
+        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
+            "while [ ! -f release ]; do sleep 0.02; done; exit 0"
+        }
+    };
+    let mock = mount_sse_sequence(
+        harness.server(),
+        vec![
+            sse(vec![
+                ev_function_call(
+                    "background",
+                    "exec_command",
+                    &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
+                ),
+                ev_completed("r1"),
+            ]),
+            sse_failed("r2", "invalid_request_error", "request failed"),
+        ],
+    )
+    .await;
+
+    harness.submit("Run the background command.").await?;
+    harness.write_file("release", b"go").await?;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::ExecCommandEnd(_))
+    })
+    .await;
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(mock.requests().len(), 2);
     Ok(())
 }
 
