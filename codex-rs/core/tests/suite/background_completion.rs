@@ -327,6 +327,13 @@ async fn background_completion(finish: Finish) -> Result<()> {
                 .contains("<background_completion>")
         );
     }
+    if matches!(finish, Finish::DeferredMail | Finish::TriggeredMail) {
+        assert!(
+            requests[2].body_json()["input"]
+                .to_string()
+                .contains("late queue-only update")
+        );
+    }
     Ok(())
 }
 
