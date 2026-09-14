@@ -112,6 +112,34 @@ impl SessionTask for RegularTask {
                 }
                 return Ok(last_agent_message);
             }
+            if let Some(claim) = turn_state.completion_claim {
+                if !cancellation_token.is_cancelled()
+                    && let Some(pending_turn_state) = sess
+                        .input_queue
+                        .turn_state_for_sub_id(&sess.active_turn, &ctx.sub_id)
+                        .await
+                {
+                    let pending_input = sess
+                        .input_queue
+                        .take_pending_input_for_turn_state(pending_turn_state.as_ref())
+                        .await;
+                    if !pending_input.is_empty() {
+                        run_hooks_and_record_inputs(
+                            &sess,
+                            &ctx,
+                            &pending_input,
+                            PersistContext::Standard,
+                        )
+                        .await;
+                        sess.services
+                            .unified_exec_manager
+                            .completion_wake
+                            .commit_claim(claim);
+                        turn_state.completion_claim = None;
+                    }
+                }
+                return Ok(last_agent_message);
+            }
             turn_state.completion_claim = sess
                 .services
                 .unified_exec_manager
