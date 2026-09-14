@@ -20,11 +20,19 @@ use super::SessionTask;
 use super::SessionTaskResult;
 
 #[derive(Default)]
-pub(crate) struct RegularTask;
+pub(crate) struct RegularTask {
+    completion_claim: Option<u64>,
+}
 
 impl RegularTask {
     pub(crate) fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub(crate) fn with_completion_claim(completion_claim: u64) -> Self {
+        Self {
+            completion_claim: Some(completion_claim),
+        }
     }
 }
 
@@ -76,6 +84,7 @@ impl SessionTask for RegularTask {
         let mut prewarmed_client_session = prewarmed_client_session;
         let mut mcp_startup_requirements = McpStartupRequirements::default();
         let mut turn_diff_tracker = None;
+        let mut completion_claim = self.completion_claim;
         loop {
             let turn_result = run_turn(
                 Arc::clone(&sess),
@@ -105,7 +114,14 @@ impl SessionTask for RegularTask {
                 }
                 return Ok(last_agent_message);
             }
-            sess.services
+            if let Some(claim) = completion_claim.take() {
+                sess.services
+                    .unified_exec_manager
+                    .completion_wake
+                    .commit_claim(claim);
+            }
+            completion_claim = sess
+                .services
                 .unified_exec_manager
                 .completion_wake
                 .wait_for_input(&sess, &cancellation_token)

@@ -455,21 +455,28 @@ impl Session {
             return;
         }
 
-        let (turn_state, completions) = {
+        let (turn_state, completion_claim, completions) = {
             let mut active_turn = self.active_turn.lock().await;
             if active_turn.is_some() {
                 return;
             }
-            let completions = self
+            let claimed_completion = self
                 .services
                 .unified_exec_manager
                 .completion_wake
-                .take_input(self.is_interrupted());
-            if completions.is_empty() && !mailbox_ready {
+                .claim_input(self.is_interrupted());
+            if claimed_completion.is_none() && !mailbox_ready {
                 return;
             }
+            let (completion_claim, completions) = claimed_completion
+                .map(|(claim, input)| (Some(claim), input))
+                .unwrap_or_default();
             let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-            (Arc::clone(&active_turn.turn_state), completions)
+            (
+                Arc::clone(&active_turn.turn_state),
+                completion_claim,
+                completions,
+            )
         };
 
         let (mut input, mut start_options) =
@@ -517,8 +524,17 @@ impl Session {
         self.input_queue
             .extend_pending_input_for_turn_state(turn_state.as_ref(), input)
             .await;
-        self.start_task(turn_context, Vec::new(), RegularTask::new())
+        if let Some(completion_claim) = completion_claim {
+            self.start_task(
+                turn_context,
+                Vec::new(),
+                RegularTask::with_completion_claim(completion_claim),
+            )
             .await;
+        } else {
+            self.start_task(turn_context, Vec::new(), RegularTask::new())
+                .await;
+        }
     }
 
     pub async fn abort_all_tasks(self: &Arc<Self>, reason: TurnAbortReason) {

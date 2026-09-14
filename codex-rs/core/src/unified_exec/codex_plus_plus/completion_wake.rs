@@ -12,6 +12,8 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Weak;
+use std::sync::atomic::AtomicU64;
+use std::sync::atomic::Ordering;
 use tokio::sync::Notify;
 
 #[derive(Debug, Deserialize, PartialEq)]
@@ -23,14 +25,30 @@ pub(crate) enum OnExit {
 #[derive(Default)]
 pub(crate) struct CompletionWake {
     // Entries are bounded by the existing background-process store. Removal disarms a wake.
-    processes: Mutex<BTreeMap<i32, Weak<UnifiedExecProcess>>>,
+    processes: Mutex<BTreeMap<i32, CompletionEntry>>,
+    next_claim: AtomicU64,
     pub(crate) notify: Notify,
     idle_notify: Notify,
 }
 
+struct CompletionEntry {
+    process: Weak<UnifiedExecProcess>,
+    claim: Option<u64>,
+}
+
 impl CompletionWake {
     pub(crate) fn cancel_for_abort(&self, reason: &codex_protocol::protocol::TurnAbortReason) {
-        if *reason != codex_protocol::protocol::TurnAbortReason::Replaced {
+        if *reason == codex_protocol::protocol::TurnAbortReason::Replaced {
+            for entry in self
+                .processes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .values_mut()
+            {
+                entry.claim = None;
+            }
+            self.notify.notify_one();
+        } else {
             self.clear();
         }
     }
@@ -53,34 +71,56 @@ impl CompletionWake {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
-            .any(|p| p.upgrade().is_some_and(|p| p.completion().is_some()))
+            .any(|entry| {
+                entry.claim.is_none()
+                    && entry
+                        .process
+                        .upgrade()
+                        .is_some_and(|process| process.completion().is_some())
+            })
     }
-    pub(crate) fn take_input(&self, interrupted: bool) -> Vec<TurnInput> {
+    pub(crate) fn claim_input(&self, interrupted: bool) -> Option<(u64, Vec<TurnInput>)> {
         if interrupted {
             self.clear();
-            return Vec::new();
+            return None;
         }
         let mut pending = self
             .processes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let claim = self.next_claim.fetch_add(1, Ordering::Relaxed);
         let ready: Vec<_> = pending
-            .iter()
-            .filter_map(|(&id, process)| {
-                let process = process.upgrade()?;
+            .iter_mut()
+            .filter_map(|(&id, entry)| {
+                if entry.claim.is_some() {
+                    return None;
+                }
+                let process = entry.process.upgrade()?;
                 process.completion().map(|code| (id, code))
             })
             .take(8)
             .collect();
         for (id, _) in &ready {
-            pending.remove(id);
+            if let Some(entry) = pending.get_mut(id) {
+                entry.claim = Some(claim);
+            }
         }
         if ready.is_empty() {
-            return Vec::new();
+            return None;
         }
-        vec![TurnInput::ResponseItem(ResponseItemEnvelope::new(
-            ContextualUserFragment::into(BackgroundCompletion(ready)),
-        ))]
+        Some((
+            claim,
+            vec![TurnInput::ResponseItem(ResponseItemEnvelope::new(
+                ContextualUserFragment::into(BackgroundCompletion(ready)),
+            ))],
+        ))
+    }
+
+    pub(crate) fn commit_claim(&self, claim: u64) {
+        self.processes
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, entry| entry.claim != Some(claim));
     }
 
     #[expect(
@@ -91,7 +131,7 @@ impl CompletionWake {
         &self,
         session: &Session,
         cancellation: &tokio_util::sync::CancellationToken,
-    ) {
+    ) -> Option<u64> {
         let turn_state = session
             .active_turn
             .lock()
@@ -108,7 +148,7 @@ impl CompletionWake {
             .await
             || session.input_queue.has_trigger_turn_mailbox_items().await
         {
-            return;
+            return None;
         }
         loop {
             let active_turn = session.active_turn.lock().await;
@@ -117,10 +157,9 @@ impl CompletionWake {
                     .as_ref()
                     .is_some_and(|turn_state| Arc::ptr_eq(&active_turn.turn_state, turn_state))
             }) {
-                return;
+                return None;
             }
-            let input = self.take_input(session.is_interrupted());
-            if !input.is_empty() {
+            if let Some((claim, input)) = self.claim_input(session.is_interrupted()) {
                 if let Some(turn_state) = turn_state.as_deref() {
                     turn_state
                         .lock()
@@ -131,7 +170,7 @@ impl CompletionWake {
                         .extend_pending_input_for_turn_state(turn_state, input)
                         .await;
                 }
-                return;
+                return Some(claim);
             }
             drop(active_turn);
             if self
@@ -140,7 +179,7 @@ impl CompletionWake {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty()
             {
-                return;
+                return None;
             }
             tokio::select! {
                 _ = self.notify.notified() => {}
@@ -152,10 +191,10 @@ impl CompletionWake {
                             .await
                         || session.input_queue.has_trigger_turn_mailbox_items().await
                     {
-                        return;
+                        return None;
                     }
                 }
-                _ = cancellation.cancelled() => return,
+                _ = cancellation.cancelled() => return None,
             }
         }
     }
@@ -181,7 +220,13 @@ impl UnifiedExecProcessManager {
         if cancellation.is_cancelled() || session.is_interrupted() {
             return;
         }
-        pending.insert(id, Arc::downgrade(&process));
+        pending.insert(
+            id,
+            CompletionEntry {
+                process: Arc::downgrade(&process),
+                claim: None,
+            },
+        );
         drop(pending);
         let completion = process.wait_for_completion();
         let session = Arc::downgrade(session);
