@@ -69,7 +69,7 @@ pub(crate) async fn run_turn_loop(
             .services
             .unified_exec_manager
             .completion_wake
-            .wait_for_input(&sess, &cancellation_token)
+            .wait_for_input(&sess, &ctx, &cancellation_token)
             .await;
         if !sess.input_queue.has_pending_input(&sess.active_turn).await {
             return Ok(last_agent_message);

@@ -5158,6 +5158,7 @@ async fn side_thread_snapshot_hides_forked_parent_transcript() {
     let side_thread_id = ThreadId::new();
     let mut store = ThreadEventStore::new(/*capacity*/ 4);
     let session = ThreadSessionState {
+        background_completion_waiting: false,
         forked_from_id: Some(parent_thread_id),
         fork_parent_title: None,
         ..test_thread_session(side_thread_id, test_path_buf("/tmp/side"))
@@ -5225,6 +5226,7 @@ async fn side_thread_snapshot_skips_session_header_preamble() {
     let snapshot = ThreadEventSnapshot {
         delegated_turns: Vec::new(),
         session: Some(ThreadSessionState {
+            background_completion_waiting: false,
             forked_from_id: Some(parent_thread_id),
             fork_parent_title: None,
             ..test_thread_session(side_thread_id, test_path_buf("/tmp/side"))
@@ -5806,6 +5808,7 @@ async fn render_clear_ui_header_after_long_transcript_for_snapshot() -> String {
     };
     let make_header = |is_first| -> Arc<dyn HistoryCell> {
         let session = ThreadSessionState {
+            background_completion_waiting: false,
             thread_id: ThreadId::new(),
             forked_from_id: None,
             fork_parent_title: None,
@@ -6354,6 +6357,7 @@ async fn replace_goal_confirmation_snapshot() {
 
 fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
     ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -7410,6 +7414,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
 
     let make_header = |is_first| {
         let session = ThreadSessionState {
+            background_completion_waiting: false,
             thread_id: ThreadId::new(),
             forked_from_id: None,
             fork_parent_title: None,
@@ -7482,6 +7487,7 @@ async fn backtrack_selection_preserves_selected_prompt_and_requests_branch() {
     let base_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            background_completion_waiting: false,
             thread_id: base_id,
             forked_from_id: None,
             fork_parent_title: None,
@@ -8653,6 +8659,7 @@ async fn new_session_requests_shutdown_for_previous_conversation() {
 
         let thread_id = ThreadId::new();
         let event = crate::session_state::ThreadSessionState {
+            background_completion_waiting: false,
             thread_id,
             forked_from_id: None,
             fork_parent_title: None,
@@ -9385,6 +9392,7 @@ async fn clear_only_ui_reset_preserves_chat_session_state() {
     let thread_id = ThreadId::new();
     app.chat_widget
         .handle_thread_session(crate::session_state::ThreadSessionState {
+            background_completion_waiting: false,
             thread_id,
             forked_from_id: None,
             fork_parent_title: None,

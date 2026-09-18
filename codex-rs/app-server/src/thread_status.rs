@@ -15,6 +15,9 @@ use tokio::sync::Mutex;
 use tokio::sync::mpsc;
 use tokio::sync::watch;
 
+#[path = "codex_plus_plus/completion_wait.rs"]
+mod completion_wait;
+
 #[derive(Clone)]
 pub(crate) struct ThreadWatchManager {
     state: Arc<Mutex<ThreadWatchState>>,
@@ -148,6 +151,7 @@ impl ThreadWatchManager {
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.is_loaded = true;
             runtime.running = true;
+            runtime.background_completion_waiting = false;
             runtime.has_system_error = false;
         })
         .await;
@@ -164,6 +168,7 @@ impl ThreadWatchManager {
     pub(crate) async fn note_thread_shutdown(&self, thread_id: &str) {
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.running = false;
+            runtime.background_completion_waiting = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
             runtime.is_loaded = false;
@@ -174,6 +179,7 @@ impl ThreadWatchManager {
     pub(crate) async fn note_system_error(&self, thread_id: &str) {
         self.update_runtime_for_thread(thread_id, |runtime| {
             runtime.running = false;
+            runtime.background_completion_waiting = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
             runtime.has_system_error = true;
@@ -184,6 +190,7 @@ impl ThreadWatchManager {
     async fn clear_active_state(&self, thread_id: &str) {
         self.update_runtime_for_thread(thread_id, move |runtime| {
             runtime.running = false;
+            runtime.background_completion_waiting = false;
             runtime.pending_permission_requests = 0;
             runtime.pending_user_input_requests = 0;
         })
@@ -433,6 +440,7 @@ struct RuntimeFacts {
     pending_permission_requests: u32,
     pending_user_input_requests: u32,
     has_system_error: bool,
+    background_completion_waiting: bool,
 }
 
 fn loaded_thread_status(runtime: &RuntimeFacts) -> ThreadStatus {
@@ -448,6 +456,7 @@ fn loaded_thread_status(runtime: &RuntimeFacts) -> ThreadStatus {
         active_flags.push(ThreadActiveFlag::WaitingOnUserInput);
     }
 
+    completion_wait::add_active_flag(runtime, &mut active_flags);
     if runtime.running || !active_flags.is_empty() {
         return ThreadStatus::Active { active_flags };
     }

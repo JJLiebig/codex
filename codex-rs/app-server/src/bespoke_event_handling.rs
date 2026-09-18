@@ -162,6 +162,16 @@ pub(crate) async fn apply_bespoke_event_handling(
         msg,
     } = event;
     match msg {
+        EventMsg::BackgroundCompletionWaiting { waiting } => {
+            thread_watch_manager
+                .on_background_completion_wait(
+                    &conversation_id.to_string(),
+                    &event_turn_id,
+                    &thread_state,
+                    waiting,
+                )
+                .await;
+        }
         EventMsg::TurnStarted(payload) => {
             // While not technically necessary as it was already done on TurnComplete, be extra cautios and abort any pending server requests.
             outgoing.abort_pending_server_requests().await;

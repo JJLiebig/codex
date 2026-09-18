@@ -1659,6 +1659,7 @@ pub enum ThreadStatus {
 pub enum ThreadActiveFlag {
     WaitingOnApproval,
     WaitingOnUserInput,
+    WaitingOnBackgroundCompletion,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

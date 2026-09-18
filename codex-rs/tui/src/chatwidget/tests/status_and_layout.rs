@@ -4349,6 +4349,7 @@ async fn session_configured_clears_goal_status_footer() {
 
     let rollout_file = NamedTempFile::new().unwrap();
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,
@@ -5851,4 +5852,80 @@ async fn chatwidget_tall() {
         "chatwidget_tall",
         normalize_snapshot_paths(term.backend().vt100().screen().contents())
     );
+}
+
+#[tokio::test]
+async fn background_completion_wait_restores_working_until_completion_or_cancel() {
+    use codex_app_server_protocol::ThreadActiveFlag;
+    use codex_app_server_protocol::ThreadStatus;
+    use codex_app_server_protocol::ThreadStatusChangedNotification;
+
+    for interrupted in [false, true] {
+        let (mut chat, _rx, _ops) = make_chatwidget_manual(Some("gpt-5")).await;
+        let thread_id = ThreadId::new();
+        chat.thread_id = Some(thread_id);
+        chat.on_task_started();
+        chat.unified_exec_processes.push(UnifiedExecProcessSummary {
+            key: "proc-1".to_string(),
+            call_id: "call-1".to_string(),
+            command_display: "server".to_string(),
+            recent_chunks: Vec::new(),
+        });
+        complete_assistant_message(
+            &mut chat,
+            "handoff",
+            "I will resume when the command completes.",
+            Some(MessagePhase::FinalAnswer),
+        );
+        assert!(!chat.bottom_pane.status_indicator_visible());
+        let status = |active_flags| {
+            ServerNotification::ThreadStatusChanged(ThreadStatusChangedNotification {
+                thread_id: thread_id.to_string(),
+                status: ThreadStatus::Active { active_flags },
+            })
+        };
+        chat.handle_server_notification(status(vec![]), /*replay_kind*/ None);
+        assert!(!chat.bottom_pane.status_indicator_visible());
+        assert_eq!(
+            chat.unified_exec_processes.len(),
+            1,
+            "background process may remain after the turn finishes"
+        );
+        chat.handle_server_notification(
+            status(vec![ThreadActiveFlag::WaitingOnBackgroundCompletion]),
+            /*replay_kind*/ None,
+        );
+        assert!(chat.bottom_pane.status_indicator_visible());
+        if !interrupted {
+            let mut terminal =
+                Terminal::new(TestBackend::new(70, chat.desired_height(70))).expect("terminal");
+            terminal
+                .draw(|frame| chat.render(frame.area(), frame.buffer_mut()))
+                .expect("render working wait");
+            assert_chatwidget_snapshot!(
+                "background_completion_wait_working",
+                normalized_backend_snapshot(terminal.backend())
+            );
+            chat.on_task_complete(
+                /*last_agent_message*/ None, /*completion*/ None,
+                /*from_replay*/ false,
+            );
+        } else {
+            handle_turn_interrupted(&mut chat, "turn-1");
+        }
+        assert!(!chat.bottom_pane.status_indicator_visible());
+        assert_eq!(
+            chat.unified_exec_processes.len(),
+            1,
+            "background process may remain after the turn finishes"
+        );
+        chat.handle_server_notification(
+            status(vec![ThreadActiveFlag::WaitingOnBackgroundCompletion]),
+            /*replay_kind*/ None,
+        );
+        assert!(
+            !chat.bottom_pane.status_indicator_visible(),
+            "late waiting state must not restart a finished turn"
+        );
+    }
 }

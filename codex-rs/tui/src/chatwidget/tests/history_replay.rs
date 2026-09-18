@@ -45,6 +45,7 @@ async fn resumed_initial_messages_render_history() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -159,6 +160,7 @@ async fn restored_conversation_ultra_remains_selected_after_switching_to_plan() 
     chat.set_plan_mode_reasoning_effort(Some(ReasoningEffortConfig::High));
 
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,
@@ -446,6 +448,7 @@ async fn replayed_user_message_preserves_text_elements_and_local_images() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -518,6 +521,7 @@ async fn replayed_user_message_preserves_remote_image_urls() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -622,6 +626,7 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         .expect("permission profile should project to legacy sandbox policy");
     let expected_sandbox = SandboxPolicy::from(expected_core_sandbox);
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,
@@ -695,6 +700,7 @@ async fn session_configured_preserves_profile_workspace_roots() {
     let session_permission_profile = PermissionProfile::workspace_write()
         .materialize_project_roots_with_workspace_roots(&session_effective_workspace_roots);
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,
@@ -742,6 +748,7 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
         network_access: NetworkAccess::Restricted,
     };
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,
@@ -783,6 +790,7 @@ async fn replayed_user_message_with_only_remote_images_renders_history_cell() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -841,6 +849,7 @@ async fn replayed_user_message_with_only_local_images_renders_history_cell() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -1138,6 +1147,7 @@ async fn replayed_reasoning_item_preserves_summary_parts_and_hides_raw_reasoning
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.config.show_raw_agent_reasoning = false;
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,
@@ -1189,6 +1199,7 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     chat.config.show_raw_agent_reasoning = true;
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,

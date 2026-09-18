@@ -43,6 +43,7 @@ fn thread_settings_for_test(
 
 fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,

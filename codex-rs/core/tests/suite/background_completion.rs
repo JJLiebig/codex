@@ -755,3 +755,103 @@ async fn background_completion_interrupts_idle_wait(
     );
     Ok(())
 }
+
+#[test_case(Finish::Wake; "completion wait reports entry and exit")]
+#[test_case(Finish::Cancel; "completion wait can be cancelled")]
+#[test_case(Finish::Ordinary; "ordinary background process never reports completion wait")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_completion_wait_status_matches_runtime(finish: Finish) -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(
+        test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
+    )
+    .await?;
+    let mut args = json!({"cmd": wait_for_release_command(), "yield_time_ms": 250});
+    if !matches!(finish, Finish::Ordinary) {
+        args["on_exit"] = json!("wake");
+    }
+    let _mock = mount_sse_sequence(
+        harness.server(),
+        vec![
+            sse(vec![
+                ev_function_call("background", "exec_command", &args.to_string()),
+                ev_completed("r1"),
+            ]),
+            sse(vec![
+                ev_assistant_message("handoff", "I will resume when the command completes."),
+                ev_completed("r2"),
+            ]),
+            sse(vec![
+                ev_assistant_message("done", "Done."),
+                ev_completed("r3"),
+            ]),
+        ]
+        .into_iter()
+        .take(if matches!(finish, Finish::Wake) { 3 } else { 2 })
+        .collect(),
+    )
+    .await;
+    harness
+        .test()
+        .codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run the command.".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                approval_policy: Some(codex_protocol::protocol::AskForApproval::Never),
+                sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+                permission_profile: Some(codex_protocol::models::PermissionProfile::Disabled),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    let mut transitions = Vec::new();
+    loop {
+        let event = core_test_support::wait_for_event_with_timeout(
+            &harness.test().codex,
+            |_| true,
+            std::time::Duration::from_secs(20),
+        )
+        .await;
+        match event {
+            EventMsg::BackgroundCompletionWaiting { waiting } => {
+                transitions.push(waiting);
+                if waiting {
+                    break;
+                }
+            }
+            EventMsg::TurnComplete(_) => break,
+            _ => {}
+        }
+    }
+    if matches!(finish, Finish::Ordinary) {
+        assert_eq!(transitions, Vec::<bool>::new());
+        harness.write_file("release", b"go").await?;
+        return Ok(());
+    }
+    assert_eq!(transitions, vec![true]);
+    if matches!(finish, Finish::Cancel) {
+        harness.test().codex.submit(Op::Interrupt).await?;
+    } else {
+        harness.write_file("release", b"go").await?;
+    }
+    loop {
+        let event = core_test_support::wait_for_event_with_timeout(
+            &harness.test().codex,
+            |_| true,
+            std::time::Duration::from_secs(20),
+        )
+        .await;
+        match event {
+            EventMsg::BackgroundCompletionWaiting { waiting } => transitions.push(waiting),
+            EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_) => break,
+            _ => {}
+        }
+    }
+    if matches!(finish, Finish::Wake) {
+        assert_eq!(transitions, vec![true, false]);
+    }
+    harness.write_file("release", b"go").await?;
+    Ok(())
+}

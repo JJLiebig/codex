@@ -87,6 +87,7 @@ impl App {
             session
         } else {
             ThreadSessionState {
+                background_completion_waiting: false,
                 thread_id,
                 forked_from_id: None,
                 fork_parent_title: None,
@@ -125,7 +126,7 @@ impl App {
             session.model.clear();
         }
         session.message_history = None;
-        session
+        session.with_completion_wait_status(&thread.status)
     }
 
     fn current_permission_profile(&self) -> PermissionProfile {
@@ -169,6 +170,7 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            background_completion_waiting: false,
             thread_id,
             forked_from_id: None,
             fork_parent_title: None,

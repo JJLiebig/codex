@@ -1805,6 +1805,7 @@ enabled = false
 
         app.chat_widget
             .handle_thread_session(crate::session_state::ThreadSessionState {
+                background_completion_waiting: false,
                 thread_id: ThreadId::new(),
                 forked_from_id: None,
                 fork_parent_title: None,

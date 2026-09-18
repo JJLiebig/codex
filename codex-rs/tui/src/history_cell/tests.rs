@@ -614,6 +614,7 @@ fn image_generation_call_renders_saved_path() {
 
 fn session_configured_event(model: &str) -> ThreadSessionState {
     ThreadSessionState {
+        background_completion_waiting: false,
         thread_id: ThreadId::new(),
         forked_from_id: None,
         fork_parent_title: None,

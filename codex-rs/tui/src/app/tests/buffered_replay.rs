@@ -802,3 +802,85 @@ async fn misalignment_replay_blocks_when_turn_start_was_evicted() {
         }
     }
 }
+
+#[tokio::test]
+async fn completion_wait_survives_thread_switch_and_refresh_without_reviving_finished_turns() {
+    use codex_app_server_protocol::ThreadActiveFlag;
+    use codex_app_server_protocol::ThreadStatus;
+    use codex_app_server_protocol::ThreadStatusChangedNotification;
+    for (waiting, finished, refresh) in [
+        (true, false, false),
+        (true, false, true),
+        (false, false, false),
+        (false, true, false),
+    ] {
+        let (mut app, _events, _ops) = make_test_app_with_channels().await;
+        let thread_id = ThreadId::new();
+        let mut session = test_thread_session(thread_id, app.config.cwd.to_path_buf());
+        let mut turn = test_turn(
+            "turn",
+            TurnStatus::InProgress,
+            vec![ThreadItem::AgentMessage {
+                id: "answer".into(),
+                text: "I will resume when the command completes.".into(),
+                phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),
+                memory_citation: None,
+                delivery: None,
+                questions: None,
+            }],
+        );
+        let status = ThreadStatus::Active {
+            active_flags: if waiting {
+                vec![ThreadActiveFlag::WaitingOnBackgroundCompletion]
+            } else {
+                vec![]
+            },
+        };
+        let channel = ThreadEventChannel::new_with_session(
+            /*capacity*/ 1,
+            session.clone(),
+            vec![turn.clone()],
+        );
+        {
+            let mut store = channel.store.lock().await;
+            store.push_notification(ServerNotification::ThreadStatusChanged(
+                ThreadStatusChangedNotification {
+                    thread_id: thread_id.to_string(),
+                    status: status.clone(),
+                },
+            ));
+            // Evict the live status notification: the session snapshot must retain the fact.
+            store.push_notification(completed(&thread_id.to_string()));
+            if finished {
+                turn.status = TurnStatus::Completed;
+                store.push_notification(ServerNotification::TurnCompleted(
+                    codex_app_server_protocol::TurnCompletedNotification {
+                        thread_id: thread_id.to_string(),
+                        turn: turn.clone(),
+                    },
+                ));
+            }
+        }
+        let mut snapshot = channel.store.lock().await.snapshot();
+        app.thread_event_channels.insert(thread_id, channel);
+        if refresh {
+            session = session.with_completion_wait_status(&status);
+            app.apply_refreshed_snapshot_thread(
+                thread_id,
+                AppServerStartedThread {
+                    session,
+                    turns: vec![turn],
+                    blocks_direct_input: false,
+                    task_tools_available: false,
+                },
+                &mut snapshot,
+            )
+            .await;
+        }
+        app.replay_thread_snapshot(snapshot, /*resume_restored_queue*/ false);
+        assert_eq!(
+            render_bottom_popup(&app.chat_widget, 80).contains("Working"),
+            waiting && !finished
+        );
+    }
+}

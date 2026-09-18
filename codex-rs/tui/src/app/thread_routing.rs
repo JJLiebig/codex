@@ -1362,7 +1362,10 @@ impl App {
         thread_id: ThreadId,
         notification: &ThreadStartedNotification,
     ) -> Option<ThreadSessionState> {
-        let mut session = self.primary_session_configured.clone()?;
+        let mut session = self
+            .primary_session_configured
+            .clone()?
+            .with_completion_wait_status(&notification.thread.status);
         session.thread_id = thread_id;
         session.thread_name = notification.thread.name.clone();
         session.model.clear();
@@ -1510,6 +1513,7 @@ impl App {
         }
         self.config.approvals_reviewer = session.approvals_reviewer;
 
+        let background_completion_waiting = session.background_completion_waiting;
         let thread_id = session.thread_id;
         self.pending_server_profiles.remove(&thread_id);
         if self.primary_thread_id != Some(thread_id) {
@@ -1556,6 +1560,8 @@ impl App {
 
         self.chat_widget
             .replay_thread_turns(turns, ReplayKind::ResumeInitialMessages);
+        self.chat_widget
+            .restore_background_completion_wait(background_completion_waiting);
         if should_buffer_initial_replay {
             self.app_event_tx
                 .send(AppEvent::EndInitialHistoryReplayBuffer);
@@ -1778,6 +1784,10 @@ impl App {
         mut snapshot: ThreadEventSnapshot,
         resume_restored_queue: bool,
     ) {
+        let background_completion_waiting = snapshot
+            .session
+            .as_ref()
+            .is_some_and(|session| session.background_completion_waiting);
         let mut reasoning_replay = reasoning_replay::ReasoningReplay::new(&mut snapshot);
         let replayed_final_items = realtime_delivery::completed_agent_items(&snapshot);
         let replayed_voice_texts = realtime_delivery::replayed_voice_texts(&snapshot);
@@ -1857,6 +1867,8 @@ impl App {
             }
         }
         reasoning_replay.restore(&mut self.chat_widget);
+        self.chat_widget
+            .restore_background_completion_wait(background_completion_waiting);
         if should_buffer_replay {
             self.app_event_tx
                 .send(AppEvent::EndInitialHistoryReplayBuffer);
