@@ -159,6 +159,7 @@ mod ide_context;
 mod inline_visualization;
 pub(crate) mod insert_history;
 pub use insert_history::insert_history_lines;
+mod footer_hint;
 mod key_hint;
 mod keymap;
 mod keymap_setup;
@@ -229,7 +230,6 @@ pub use update_action::UpdateAction;
 #[cfg(not(debug_assertions))]
 pub use update_action::get_update_action;
 mod update_prompt;
-#[cfg(any(not(debug_assertions), test))]
 mod update_versions;
 mod updates;
 #[cfg(any(not(debug_assertions), test))]
@@ -1839,7 +1839,9 @@ async fn run_ratatui_app(
         Ok(StartupHooksReviewOutcome::OpenHooksBrowser(data)) => Some(data),
     };
 
-    let app_result = App::run(
+    // Keep the large event-loop future out of the enclosing startup futures so session
+    // transitions have enough stack headroom to rebuild configuration and the chat widget.
+    let app_result = Box::pin(App::run(
         &mut tui,
         app_server,
         config,
@@ -1862,7 +1864,7 @@ async fn run_ratatui_app(
         startup_hooks_browser,
         startup_draft,
         managed_worktree,
-    )
+    ))
     .await;
 
     terminal_restore_guard.restore_silently();

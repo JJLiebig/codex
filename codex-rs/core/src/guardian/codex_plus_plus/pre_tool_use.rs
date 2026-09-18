@@ -2,10 +2,10 @@ use super::ApprovalRequestReasons;
 use super::GuardianApprovalRequest;
 use super::GuardianReviewContext;
 use super::GuardianReviewOptions;
-use super::review::run_synchronous_review;
 use super::runtime::ReviewRuntime;
 use crate::session::session::Session;
 use codex_analytics::GuardianApprovalRequestSource;
+use codex_extension_api::SynchronousApprovalReviewer;
 use codex_protocol::approvals::GuardianReviewReason;
 use codex_protocol::protocol::ReviewDecision;
 use futures::future::BoxFuture;
@@ -19,8 +19,8 @@ pub(crate) fn review(
 ) -> BoxFuture<'static, ReviewDecision> {
     // A hook's explicit ask requires a fresh review even under full access.
     // Erase the reviewer future to keep recursive session/auth futures bounded.
-    Box::pin(run_synchronous_review(
-        ReviewRuntime {
+    Box::pin(async move {
+        codex_guardian_reviewer::SynchronousReview::new(ReviewRuntime {
             session,
             context,
             review_id,
@@ -33,7 +33,11 @@ pub(crate) fn review(
                 external_cancel: None,
                 require_synchronous_review: true,
             },
-        },
-        GuardianReviewReason::FreshRequired,
-    ))
+        })
+        .review(GuardianReviewReason::FreshRequired)
+        .await
+        .unwrap_or_else(|| {
+            ReviewDecision::denied("automatic approval review did not return a decision")
+        })
+    })
 }

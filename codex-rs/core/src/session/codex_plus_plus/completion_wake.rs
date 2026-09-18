@@ -90,6 +90,7 @@ pub(super) async fn record_cancelled_input(
     run_hooks_and_collect_inputs(
         sess,
         turn_context,
+        &turn_context.capture_current_model_info(),
         input,
         PersistContext::Standard,
         completion_claim,
@@ -163,6 +164,7 @@ async fn build_injections(
 pub(super) async fn record_initial_injections(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    model_info: &ModelInfo,
     injection_items: &mut Vec<ResponseItem>,
     explicitly_enabled_connectors: &mut HashSet<String>,
     is_continuation: bool,
@@ -173,17 +175,18 @@ pub(super) async fn record_initial_injections(
     sess.merge_connector_selection(std::mem::take(explicitly_enabled_connectors))
         .await;
     sess.set_previous_turn_settings(Some(PreviousTurnSettings {
-        model: turn_context.model_info().slug.clone(),
-        comp_hash: turn_context.model_info().comp_hash.clone(),
+        model: model_info.slug.clone(),
+        comp_hash: model_info.comp_hash.clone(),
         realtime_active: Some(turn_context.realtime_active),
     }))
     .await;
-    record_injections(sess, turn_context, injection_items).await;
+    record_injections(sess, turn_context, model_info, injection_items).await;
 }
 
 pub(super) async fn record_pending_injections(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    model_info: &ModelInfo,
     pending_input: &[TurnInput],
     injection_items: &mut Vec<ResponseItem>,
     explicitly_enabled_connectors: &mut HashSet<String>,
@@ -193,12 +196,13 @@ pub(super) async fn record_pending_injections(
     }
     sess.merge_connector_selection(std::mem::take(explicitly_enabled_connectors))
         .await;
-    record_injections(sess, turn_context, injection_items).await;
+    record_injections(sess, turn_context, model_info, injection_items).await;
 }
 
 pub(super) async fn record_claimed_completion(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    model_info: &ModelInfo,
     input: &TurnInput,
     completion_claim: &mut Option<u64>,
 ) -> bool {
@@ -209,12 +213,17 @@ pub(super) async fn record_claimed_completion(
         return false;
     }
     completion_claim.take();
-    sess.record_conversation_items_then(turn_context, std::slice::from_ref(&envelope.item), || {
-        sess.services
-            .unified_exec_manager
-            .completion_wake
-            .commit_claim(claim);
-    })
+    sess.record_conversation_items_then(
+        turn_context,
+        model_info,
+        std::slice::from_ref(&envelope.item),
+        || {
+            sess.services
+                .unified_exec_manager
+                .completion_wake
+                .commit_claim(claim);
+        },
+    )
     .await;
     true
 }
@@ -240,6 +249,7 @@ pub(crate) async fn record_claimed_input(
     run_hooks_and_collect_inputs(
         sess,
         turn_context,
+        &turn_context.capture_current_model_info(),
         input,
         PersistContext::Standard,
         completion_claim,
@@ -251,10 +261,15 @@ pub(crate) async fn record_claimed_input(
 async fn record_injections(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
+    model_info: &ModelInfo,
     injection_items: &mut Vec<ResponseItem>,
 ) {
     for response_item in injection_items.drain(..) {
-        sess.record_conversation_items(turn_context, std::slice::from_ref(&response_item))
-            .await;
+        sess.record_conversation_items(
+            turn_context,
+            model_info,
+            std::slice::from_ref(&response_item),
+        )
+        .await;
     }
 }

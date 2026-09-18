@@ -1,7 +1,7 @@
 use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::format_guardian_action_pretty;
 use crate::guardian::guardian_timeout_message;
 use crate::guardian::new_guardian_review_id;
+use crate::guardian::preflight_guardian_action;
 use crate::guardian::review_pre_tool_use;
 use crate::shell::ShellType;
 use crate::tools::context::ToolInvocation;
@@ -95,7 +95,7 @@ pub(crate) fn review<'a>(
             #[allow(deprecated)]
             cwd: invocation.turn.cwd.clone(),
         };
-        let action = format_guardian_action_pretty(&request).map_err(|_| {
+        let action = preflight_guardian_action(&request).map_err(|_| {
             "The action could not be prepared for an exact automatic approval review. The tool call was blocked."
                 .to_string()
         })?;

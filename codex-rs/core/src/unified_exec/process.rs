@@ -34,6 +34,7 @@ use super::UNIFIED_EXEC_OUTPUT_MAX_TOKENS;
 use super::UnifiedExecError;
 use super::head_tail_buffer::HeadTailBuffer;
 use super::process_state::ProcessState;
+use crate::shell_snapshot::ShellSnapshotFile;
 
 #[path = "codex_plus_plus/process_completion.rs"]
 mod process_completion;
@@ -102,6 +103,8 @@ pub(crate) struct UnifiedExecProcess {
     sandbox_type: SandboxType,
     timed_out: AtomicBool,
     _spawn_lifecycle: Option<SpawnLifecycleHandle>,
+    // The shell may still need to replay this file after process startup returns.
+    pub(crate) _shell_snapshot: Option<Arc<ShellSnapshotFile>>,
 }
 
 impl std::fmt::Debug for UnifiedExecProcess {
@@ -143,6 +146,7 @@ impl UnifiedExecProcess {
             sandbox_type,
             timed_out: AtomicBool::new(false),
             _spawn_lifecycle: spawn_lifecycle,
+            _shell_snapshot: None,
         }
     }
 
