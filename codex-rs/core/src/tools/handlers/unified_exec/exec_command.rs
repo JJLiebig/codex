@@ -501,7 +501,9 @@ impl ExecCommandHandler {
                         .await
                 {
                     return Ok(boxed_tool_output(
-                        crate::unified_exec::codex_plus_plus::wake_output::WakeOutput(response),
+                        crate::unified_exec::codex_plus_plus::wake_output::WakeOutput::new(
+                            response,
+                        ),
                     ));
                 }
                 Ok(boxed_tool_output(response))

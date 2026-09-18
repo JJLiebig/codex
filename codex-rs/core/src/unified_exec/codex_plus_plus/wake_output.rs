@@ -3,11 +3,24 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ResponseInputItem;
 use codex_tools::ToolOutput;
 use codex_tools::ToolPayload;
+use codex_utils_output_truncation::TruncationPolicy;
 use serde_json::Value;
 
 const NOTICE: &str = "Completion will resume you automatically. Do independent work or end this turn. Do not sleep, wait, or poll for this session.";
 
-pub(crate) struct WakeOutput(pub(crate) ExecCommandToolOutput);
+pub(crate) struct WakeOutput(ExecCommandToolOutput);
+
+impl WakeOutput {
+    pub(crate) fn new(mut output: ExecCommandToolOutput) -> Self {
+        output.truncation_policy = TruncationPolicy::Bytes(
+            output
+                .truncation_policy
+                .byte_budget()
+                .saturating_sub(NOTICE.len() + 1),
+        );
+        Self(output)
+    }
+}
 
 impl ToolOutput for WakeOutput {
     fn log_output(&self) -> String {
@@ -41,3 +54,7 @@ impl ToolOutput for WakeOutput {
         self.0.post_tool_use_response(call_id, payload)
     }
 }
+
+#[cfg(test)]
+#[path = "wake_output_tests.rs"]
+mod tests;
