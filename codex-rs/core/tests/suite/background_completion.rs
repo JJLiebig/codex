@@ -252,6 +252,10 @@ async fn background_completion(finish: Finish) -> Result<()> {
         .function_call_output_text("background")
         .expect("background tool result");
     assert!(output.contains("Process running with session ID 1000"));
+    assert_eq!(
+        output.contains("Completion will resume you automatically."),
+        waits_for_completion
+    );
     if waits_for_completion {
         assert_eq!(
             harness.test().codex.agent_status().await,
@@ -354,6 +358,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         let input = request.body_json()["input"].to_string();
         assert!(input.contains("<background_completion>"));
         assert!(input.contains("exit_code=7"));
+        assert!(input.contains("completed"));
         if matches!(finish, Finish::Wake) {
             assert_eq!(input.matches("<permissions instructions>").count(), 1);
         }
@@ -603,5 +608,150 @@ async fn background_completion_progress_instructions(setting: Option<bool>) -> R
                 .contains("Do not send updates or check status merely because time passed.")
         );
     }
+    Ok(())
+}
+
+#[test_case(false, false; "completion interrupts active sleep")]
+#[test_case(true, false; "ready completion interrupts new sleep")]
+#[test_case(false, true; "completion interrupts active agent wait")]
+#[test_case(true, true; "ready completion interrupts new agent wait")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn background_completion_interrupts_idle_wait(
+    exit_before_sleep: bool,
+    agent_wait: bool,
+) -> Result<()> {
+    use codex_core::config::CurrentTimeReminderConfig;
+    use codex_extension_items::ExtensionItem;
+    use codex_features::Feature;
+    use codex_protocol::items::TurnItem;
+    use core_test_support::responses::ev_function_call_with_namespace;
+
+    let harness = TestCodexHarness::with_auto_env_builder(
+        test_codex()
+            .with_session_source(codex_protocol::protocol::SessionSource::Cli)
+            .with_config(move |config| {
+                if agent_wait {
+                    config.features.enable(Feature::MultiAgentV2).unwrap();
+                }
+                config
+                    .features
+                    .enable(Feature::CurrentTimeReminder)
+                    .unwrap();
+                config.current_time_reminder = Some(CurrentTimeReminderConfig {
+                    sleep_tool: true,
+                    ..Default::default()
+                });
+            }),
+    )
+    .await?;
+    let command = match core_test_support::test_target_os() {
+        core_test_support::TestTargetOs::Windows => {
+            "while (!(Test-Path release)) { Start-Sleep -Milliseconds 20 }; Write-Output sleep-result; exit 7"
+        }
+        core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
+            "while [ ! -f release ]; do sleep 0.02; done; echo sleep-result; exit 7"
+        }
+    };
+    let mut responses = vec![sse(vec![
+        ev_function_call(
+            "background",
+            "exec_command",
+            &json!({"cmd":command,"yield_time_ms":250,"on_exit":"wake"}).to_string(),
+        ),
+        ev_completed("r1"),
+    ])];
+    if exit_before_sleep {
+        let release = match core_test_support::test_target_os() {
+            core_test_support::TestTargetOs::Windows => {
+                "Set-Content release go; Start-Sleep -Seconds 1"
+            }
+            core_test_support::TestTargetOs::Linux | core_test_support::TestTargetOs::MacOs => {
+                "touch release; sleep 1"
+            }
+        };
+        responses.push(sse(vec![
+            ev_function_call(
+                "release",
+                "exec_command",
+                &json!({"cmd":release,"yield_time_ms":10000}).to_string(),
+            ),
+            ev_completed("release"),
+        ]));
+    }
+    responses.extend([
+        sse(vec![
+            if agent_wait {
+                ev_function_call_with_namespace(
+                    "idle",
+                    "collaboration",
+                    "wait_agent",
+                    r#"{"timeout_ms":3600000}"#,
+                )
+            } else {
+                ev_function_call_with_namespace(
+                    "idle",
+                    "clock",
+                    "sleep",
+                    r#"{"duration_ms":3600000}"#,
+                )
+            },
+            ev_completed("r2"),
+        ]),
+        sse(vec![
+            ev_assistant_message("done", "Done."),
+            ev_completed("r3"),
+        ]),
+    ]);
+    let mock = mount_sse_sequence(harness.server(), responses).await;
+    harness
+        .test()
+        .codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run the command, then sleep.".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                approval_policy: Some(codex_protocol::protocol::AskForApproval::Never),
+                sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+                permission_profile: Some(codex_protocol::models::PermissionProfile::Disabled),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    wait_for_requests(&mock, 2, "background command did not yield").await;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::ItemStarted(event) if matches!(&event.item, TurnItem::Extension(ExtensionItem::Sleep(_))))
+            || matches!(event, EventMsg::CollabWaitingBegin(_))
+    }).await;
+    if !exit_before_sleep {
+        harness.write_file("release", b"go").await?;
+    }
+    wait_for_requests(
+        &mock,
+        if exit_before_sleep { 4 } else { 3 },
+        "completion stranded behind idle wait",
+    )
+    .await;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    let requests = mock.requests();
+    let request = requests.last().unwrap();
+    let input = request.body_json()["input"].to_string();
+    assert_eq!(input.matches("<background_completion>").count(), 1);
+    assert!(input.contains("sleep-result"));
+    assert!(input.contains("exit_code=7"));
+    assert!(
+        request
+            .function_call_output_text("idle")
+            .unwrap()
+            .contains(if agent_wait {
+                "Wait completed."
+            } else {
+                "Sleep interrupted"
+            })
+    );
     Ok(())
 }

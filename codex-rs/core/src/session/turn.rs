@@ -445,7 +445,7 @@ pub(crate) async fn run_turn(
         // Note that pending_input would be something like a message the user
         // submitted through the UI while the model was running. Though the UI
         // may support this, the model might not.
-        let pending_input = if can_drain_pending_input {
+        let mut pending_input = if can_drain_pending_input {
             sess.input_queue
                 .get_pending_input(&sess.active_turn)
                 .await
@@ -454,6 +454,12 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
+        pending_input.extend(
+            sess.services
+                .unified_exec_manager
+                .completion_wake
+                .input_after_idle_wait(sess.is_interrupted(), &mut turn_state.completion_claim),
+        );
         let recorded_inputs = run_hooks_and_collect_inputs(
             &sess,
             &turn_context,
