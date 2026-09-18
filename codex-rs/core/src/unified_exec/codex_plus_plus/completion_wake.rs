@@ -2,6 +2,7 @@ use super::super::UnifiedExecProcess;
 use super::super::UnifiedExecProcessManager;
 use crate::context::ContextualUserFragment;
 use crate::context::codex_plus_plus::BackgroundCompletion;
+use crate::context::codex_plus_plus::BackgroundProcessExit;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use codex_history::ResponseItemEnvelope;
@@ -12,6 +13,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Weak;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::Notify;
@@ -29,10 +31,12 @@ pub(crate) struct CompletionWake {
     next_claim: AtomicU64,
     pub(crate) notify: Notify,
     idle_notify: Notify,
+    idle_wait_interrupted: AtomicBool,
 }
 
 struct CompletionEntry {
     process: Weak<UnifiedExecProcess>,
+    result: Option<BackgroundProcessExit>,
     claim: Option<u64>,
 }
 
@@ -53,6 +57,7 @@ impl CompletionWake {
         }
     }
     pub(crate) fn clear(&self) {
+        self.idle_wait_interrupted.store(false, Ordering::Release);
         self.processes
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -71,13 +76,7 @@ impl CompletionWake {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .values()
-            .any(|entry| {
-                entry.claim.is_none()
-                    && entry
-                        .process
-                        .upgrade()
-                        .is_some_and(|process| process.completion().is_some())
-            })
+            .any(|entry| entry.claim.is_none() && entry.result.is_some())
     }
     pub(crate) fn claim_input(&self, interrupted: bool) -> Option<(u64, Vec<TurnInput>)> {
         if interrupted {
@@ -95,8 +94,7 @@ impl CompletionWake {
                 if entry.claim.is_some() {
                     return None;
                 }
-                let process = entry.process.upgrade()?;
-                process.completion().map(|code| (id, code))
+                entry.result.clone().map(|result| (id, result))
             })
             .take(8)
             .collect();
@@ -111,9 +109,40 @@ impl CompletionWake {
         Some((
             claim,
             vec![TurnInput::ResponseItem(ResponseItemEnvelope::new(
-                ContextualUserFragment::into(BackgroundCompletion(ready)),
+                ContextualUserFragment::into(BackgroundCompletion(
+                    ready.into_iter().map(|(_, result)| result).collect(),
+                )),
             ))],
         ))
+    }
+
+    /// Interrupt only the owned idle waits, never unrelated active tools.
+    pub(crate) async fn interrupt_idle_wait(&self) {
+        loop {
+            let notified = self.notify.notified();
+            tokio::pin!(notified);
+            notified.as_mut().enable();
+            if self.has_ready() {
+                self.idle_wait_interrupted.store(true, Ordering::Release);
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    pub(crate) fn input_after_idle_wait(
+        &self,
+        interrupted: bool,
+        claim: &mut Option<u64>,
+    ) -> Vec<TurnInput> {
+        if claim.is_some() || !self.idle_wait_interrupted.swap(false, Ordering::AcqRel) {
+            return Vec::new();
+        }
+        let Some((new_claim, input)) = self.claim_input(interrupted) else {
+            return Vec::new();
+        };
+        *claim = Some(new_claim);
+        input
     }
 
     pub(crate) fn commit_claim(&self, claim: u64) {
@@ -206,10 +235,10 @@ impl UnifiedExecProcessManager {
         session: &Arc<Session>,
         id: i32,
         cancellation: &tokio_util::sync::CancellationToken,
-    ) {
+    ) -> bool {
         let store = self.process_store.lock().await;
         let Some(entry) = store.processes.get(&id) else {
-            return;
+            return false;
         };
         let process = Arc::clone(&entry.process);
         let mut pending = self
@@ -218,26 +247,46 @@ impl UnifiedExecProcessManager {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if cancellation.is_cancelled() || session.is_interrupted() {
-            return;
+            return false;
         }
         pending.insert(
             id,
             CompletionEntry {
                 process: Arc::downgrade(&process),
+                result: None,
                 claim: None,
             },
         );
         drop(pending);
         let completion = process.wait_for_completion();
         let session = Arc::downgrade(session);
+        let process = Arc::downgrade(&process);
         tokio::spawn(async move {
             completion.await;
+            let Some(process) = process.upgrade() else {
+                return;
+            };
+            let Some(exit_code) = process.completion() else {
+                return;
+            };
+            let result = process.completion_output(id, exit_code).await;
             if let Some(session) = session.upgrade() {
                 let completion_wake = &session.services.unified_exec_manager.completion_wake;
+                if let Some(entry) = completion_wake
+                    .processes
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .get_mut(&id)
+                    && entry.process.ptr_eq(&Arc::downgrade(&process))
+                {
+                    entry.result = Some(result);
+                }
+                completion_wake.notify.notify_waiters();
                 completion_wake.notify.notify_one();
                 completion_wake.idle_notify.notify_one();
             }
         });
+        true
     }
 }
 
@@ -253,7 +302,7 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
     }
     if let ToolSpec::Function(spec) = &mut spec {
         spec.parameters.properties.get_or_insert_default().insert("on_exit".into(),
-            JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically. Do independent work or finish the turn; do not poll. Omit for servers and interactive commands.".into())));
+            JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically. Do independent work or end this turn. Do not sleep, wait, or poll for this session. Omit for servers and interactive commands.".into())));
     }
     spec
 }
@@ -273,3 +322,7 @@ pub(crate) async fn next_submission(
         }
     }
 }
+
+#[cfg(test)]
+#[path = "completion_wake_tests.rs"]
+mod tests;

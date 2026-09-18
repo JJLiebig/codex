@@ -496,10 +496,15 @@ impl ExecCommandHandler {
                 if self.options.completion_wake
                     && on_exit.is_some()
                     && let Some(id) = response.process_id
-                {
-                    manager
+                    && manager
                         .wake_on_exit(&context.session, id, &context.cancellation_token)
-                        .await;
+                        .await
+                {
+                    return Ok(boxed_tool_output(
+                        crate::unified_exec::codex_plus_plus::wake_output::WakeOutput::new(
+                            response,
+                        ),
+                    ));
                 }
                 Ok(boxed_tool_output(response))
             }

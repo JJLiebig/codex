@@ -21,6 +21,21 @@ async fn completion_does_not_wait_for_descendant_output_streams() {
     .expect("exit wakes without stream closure");
     assert_eq!(process.completion(), Some(Some(7)));
     assert!(!process.cancellation_token().is_cancelled());
+    let output = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        process.completion_output(/*session_id*/ 1000, Some(7)),
+    )
+    .await
+    .expect("output excerpt does not wait for inherited pipes");
+    assert_eq!(
+        (
+            output.session_id,
+            output.exit_code,
+            output.output_tail,
+            output.truncated
+        ),
+        (1000, Some(7), String::new(), false)
+    );
 }
 
 #[tokio::test]

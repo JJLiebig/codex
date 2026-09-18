@@ -120,6 +120,7 @@ impl ToolExecutor<ToolInvocation> for SleepHandler {
                     .sleep(session.thread_id, Duration::from_millis(args.duration_ms));
                 tokio::pin!(sleep);
                 tokio::select! {
+                    _ = session.services.unified_exec_manager.completion_wake.interrupt_idle_wait() => Ok(true),
                     result = &mut sleep => result
                         .map(|()| false)
                         .map_err(|err| {

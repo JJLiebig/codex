@@ -92,7 +92,10 @@ impl Handler {
             .await;
 
         let deadline = Instant::now() + Duration::from_millis(timeout_ms as u64);
-        let outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline).await;
+        let outcome = tokio::select! {
+            outcome = wait_for_activity(&mut activity_rx, pending_activity, deadline) => outcome,
+            _ = session.services.unified_exec_manager.completion_wake.interrupt_idle_wait() => WaitOutcome::Completion,
+        };
         let result = WaitAgentResult::from_outcome(outcome, requested_timeout_ms, timeout_ms);
 
         session
@@ -142,7 +145,7 @@ impl WaitAgentResult {
         timeout_ms: i64,
     ) -> Self {
         let message = match outcome {
-            WaitOutcome::MailboxActivity => "Wait completed.",
+            WaitOutcome::MailboxActivity | WaitOutcome::Completion => "Wait completed.",
             WaitOutcome::Steered => "Wait interrupted by new input.",
             WaitOutcome::TimedOut => "Wait timed out.",
         };
@@ -179,6 +182,7 @@ impl ToolOutput for WaitAgentResult {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WaitOutcome {
+    Completion,
     MailboxActivity,
     Steered,
     TimedOut,
