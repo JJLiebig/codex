@@ -5006,6 +5006,7 @@ class TextRange(BaseModel):
 class ThreadActiveFlag(Enum):
     waiting_on_approval = "waitingOnApproval"
     waiting_on_user_input = "waitingOnUserInput"
+    waiting_on_background_completion = "waitingOnBackgroundCompletion"
 
 
 class ThreadApproveGuardianDeniedActionParams(BaseModel):

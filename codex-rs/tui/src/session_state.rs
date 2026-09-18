@@ -26,9 +26,13 @@ pub(crate) struct MessageHistoryMetadata {
     pub(crate) entry_count: usize,
 }
 
+#[path = "codex_plus_plus/completion_wait.rs"]
+mod completion_wait;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadSessionState {
     pub(crate) thread_id: ThreadId,
+    pub(crate) background_completion_waiting: bool,
     pub(crate) forked_from_id: Option<ThreadId>,
     pub(crate) fork_parent_title: Option<String>,
     pub(crate) thread_name: Option<String>,

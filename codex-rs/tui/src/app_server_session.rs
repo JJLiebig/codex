@@ -2313,6 +2313,7 @@ async fn thread_session_state_from_thread_start_response(
         local_settings,
     )
     .await
+    .map(|session| session.with_completion_wait_status(&response.thread.status))
 }
 
 async fn thread_session_state_from_thread_resume_response(
@@ -2356,6 +2357,7 @@ async fn thread_session_state_from_thread_resume_response(
         local_settings,
     )
     .await
+    .map(|session| session.with_completion_wait_status(&response.thread.status))
 }
 
 async fn thread_session_state_from_thread_fork_response(
@@ -2390,6 +2392,7 @@ async fn thread_session_state_from_thread_fork_response(
         local_settings,
     )
     .await
+    .map(|session| session.with_completion_wait_status(&response.thread.status))
 }
 
 fn display_permission_profile_from_thread_response(
@@ -2453,6 +2456,7 @@ async fn thread_session_state_from_thread_response(
     );
     let (log_id, entry_count) = codex_message_history::history_metadata(&history_config).await;
     Ok(ThreadSessionState {
+        background_completion_waiting: false,
         thread_id,
         forked_from_id,
         fork_parent_title: None,

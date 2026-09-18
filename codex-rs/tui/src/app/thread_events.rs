@@ -180,6 +180,9 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        if let Some(session) = self.session.as_mut() {
+            session.observe_completion_wait(notification.as_ref());
+        }
         let user_item = match notification.as_ref() {
             ServerNotification::ItemStarted(n) => Some((&n.turn_id, &n.item)),
             ServerNotification::ItemCompleted(n) => Some((&n.turn_id, &n.item)),
@@ -661,6 +664,7 @@ mod tests {
 
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
+            background_completion_waiting: false,
             thread_id,
             forked_from_id: None,
             fork_parent_title: None,

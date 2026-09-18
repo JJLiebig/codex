@@ -159,6 +159,7 @@ impl CompletionWake {
     pub(crate) async fn wait_for_input(
         &self,
         session: &Session,
+        context: &crate::session::turn_context::TurnContext,
         cancellation: &tokio_util::sync::CancellationToken,
     ) -> Option<u64> {
         let turn_state = session
@@ -179,14 +180,15 @@ impl CompletionWake {
         {
             return None;
         }
-        loop {
+        let mut waiting = false;
+        let claim = loop {
             let active_turn = session.active_turn.lock().await;
             if !active_turn.as_ref().is_some_and(|active_turn| {
                 turn_state
                     .as_ref()
                     .is_some_and(|turn_state| Arc::ptr_eq(&active_turn.turn_state, turn_state))
             }) {
-                return None;
+                break None;
             }
             if let Some((claim, input)) = self.claim_input(session.is_interrupted()) {
                 if let Some(turn_state) = turn_state.as_deref() {
@@ -199,7 +201,7 @@ impl CompletionWake {
                         .extend_pending_input_for_turn_state(turn_state, input)
                         .await;
                 }
-                return Some(claim);
+                break Some(claim);
             }
             drop(active_turn);
             if self
@@ -208,7 +210,18 @@ impl CompletionWake {
                 .unwrap_or_else(std::sync::PoisonError::into_inner)
                 .is_empty()
             {
-                return None;
+                break None;
+            }
+            if !waiting {
+                session
+                    .send_event(
+                        context,
+                        codex_protocol::protocol::EventMsg::BackgroundCompletionWaiting {
+                            waiting: true,
+                        },
+                    )
+                    .await;
+                waiting = true;
             }
             tokio::select! {
                 _ = self.notify.notified() => {}
@@ -220,12 +233,23 @@ impl CompletionWake {
                             .await
                         || session.input_queue.has_trigger_turn_mailbox_items().await
                     {
-                        return None;
+                        break None;
                     }
                 }
-                _ = cancellation.cancelled() => return None,
+                _ = cancellation.cancelled() => break None,
             }
+        };
+        if waiting {
+            session
+                .send_event(
+                    context,
+                    codex_protocol::protocol::EventMsg::BackgroundCompletionWaiting {
+                        waiting: false,
+                    },
+                )
+                .await;
         }
+        claim
     }
 }
 

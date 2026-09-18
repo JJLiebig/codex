@@ -5,6 +5,7 @@ use crate::history_cell::McpToolCallCell;
 use crate::history_cell::WebSearchCell;
 
 mod compact_activity;
+mod completion_wait;
 mod usage_reset_resume;
 pub(super) use usage_reset_resume::UsageResetWait;
 

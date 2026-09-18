@@ -1417,6 +1417,11 @@ pub enum EventMsg {
     /// been applied to the session configuration.
     ThreadSettingsApplied(ThreadSettingsAppliedEvent),
 
+    /// The live turn entered or left its registered background-command completion wait.
+    BackgroundCompletionWaiting {
+        waiting: bool,
+    },
+
     /// Agent has completed all actions.
     /// v1 wire format uses `task_complete`; accept `turn_complete` for v2 interop.
     #[serde(rename = "task_complete", alias = "turn_complete")]

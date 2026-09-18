@@ -59,6 +59,7 @@ impl AppServerSession {
             local_settings,
         )
         .await
+        .map(|session| session.with_completion_wait_status(&thread.status))
         .map_err(color_eyre::eyre::Report::msg)?;
         Ok(AppServerStartedThread {
             session,
