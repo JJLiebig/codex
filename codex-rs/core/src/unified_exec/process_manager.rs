@@ -406,6 +406,7 @@ async fn emit_failed_initial_exec_end_if_unstored(
     emit_failed_exec_end_for_unified_exec(
         Arc::clone(&context.session),
         Arc::clone(&context.step_context.turn),
+        Arc::clone(&context.step_context.settings.model_info),
         context.call_id.clone(),
         request.command.clone(),
         cwd,
@@ -533,6 +534,7 @@ impl UnifiedExecProcessManager {
         let event_ctx = ToolEventCtx::new(
             context.session.as_ref(),
             context.step_context.turn.as_ref(),
+            &context.step_context.settings.model_info,
             &context.call_id,
             /*turn_diff_tracker*/ None,
         );
@@ -767,6 +769,7 @@ impl UnifiedExecProcessManager {
             emit_exec_end_for_unified_exec(
                 Arc::clone(&context.session),
                 Arc::clone(&context.step_context.turn),
+                Arc::clone(&context.step_context.settings.model_info),
                 context.call_id.clone(),
                 request.command.clone(),
                 cwd.clone(),
@@ -797,8 +800,8 @@ impl UnifiedExecProcessManager {
             raw_output: collected,
             truncation_policy: context
                 .step_context
-                .turn
-                .model_info()
+                .settings
+                .model_info
                 .truncation_policy
                 .into(),
             max_output_tokens: request.max_output_tokens,
@@ -863,11 +866,9 @@ impl UnifiedExecProcessManager {
             .map_err(|_| unreviewable_input_error())?;
             // Bound the entire serialized action plus its reason, including JSON
             // escaping. Reject, never execute an unreviewed tail.
-            let oversized = reviewed.text.len().saturating_add(approval_reason.len())
-                > MAX_STDIN_APPROVAL_BYTES;
-            let size_check_result = if reviewed.truncated {
-                "formatter_truncated"
-            } else if oversized {
+            let oversized =
+                reviewed.len().saturating_add(approval_reason.len()) > MAX_STDIN_APPROVAL_BYTES;
+            let size_check_result = if oversized {
                 "over_limit"
             } else {
                 "within_limit"
@@ -882,7 +883,7 @@ impl UnifiedExecProcessManager {
                 /*inc*/ 1,
                 &[("result", size_check_result), ("input_kind", input_kind)],
             );
-            if reviewed.truncated || oversized {
+            if oversized {
                 return Err(unreviewable_input_error());
             }
             let approval_context = ApprovalContext {
@@ -1185,9 +1186,7 @@ impl UnifiedExecProcessManager {
 
         spawn_exit_watcher(
             Arc::clone(&process),
-            Arc::clone(&context.session),
-            Arc::clone(&context.step_context.turn),
-            context.call_id.clone(),
+            context,
             command.to_vec(),
             cwd,
             process_id,

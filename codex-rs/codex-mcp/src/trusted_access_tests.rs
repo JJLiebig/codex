@@ -268,6 +268,7 @@ async fn rejects_auth_without_a_nonempty_account_id() -> anyhow::Result<()> {
         let auth = CodexAuth::from_auth_storage(
             home.path(),
             AuthCredentialsStoreMode::File,
+            /*forced_chatgpt_workspace_id*/ None,
             /*chatgpt_base_url*/ None,
             AuthKeyringBackendKind::default(),
             &codex_login::test_support::transport_default_auth_route_config(),

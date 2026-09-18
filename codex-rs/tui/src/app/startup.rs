@@ -3,6 +3,7 @@
 //! Owns the main app run loop from app-server bootstrap through terminal shutdown. Startup input
 //! remains isolated from protected interactive requests until the initialized composer owns it.
 
+use super::reconnect::ReconnectState;
 use super::*;
 use crate::session_start::SessionStartAction;
 use crate::session_start::cancel_session_start;
@@ -260,6 +261,19 @@ impl App {
             &app_server_target,
             app_server.server_version(),
         );
+        let initial_server_version_notice =
+            if !matches!(app_server_target, AppServerTarget::Embedded) {
+                crate::status::remote_connection::pending_server_version_notice(
+                    &local_settings.tui,
+                    &app_server_target,
+                    app_server.server_codex_home(),
+                    codex_cli_version(),
+                    app_server.server_version(),
+                    /*last_shown*/ None,
+                )
+            } else {
+                None
+            };
         if let Err(err) = startup_draft.flush_pending_events(tui).await {
             return shutdown_on_startup_error(app_server, err).await;
         }
@@ -714,6 +728,7 @@ See the Codex keymap documentation for supported actions and examples."
             has_emitted_history_lines: false,
             transcript_reflow: TranscriptReflowState::default(),
             initial_history_replay_buffer: None,
+            pending_thread_switch_resets: 0,
             scrollback_has_older_history: false,
             commit_animation: None,
             status_line_invalid_items_warned: status_line_invalid_items_warned.clone(),
@@ -726,11 +741,19 @@ See the Codex keymap documentation for supported actions and examples."
             environment_manager,
             app_server_target,
             weekly_window_scheduler,
-            reconnect: Default::default(),
+            reconnect: ReconnectState {
+                seen_version_notice: initial_server_version_notice
+                    .as_ref()
+                    .map(|(_, key)| key.clone()),
+                ..Default::default()
+            },
             pending_update_action: None,
             pending_shutdown_exit_thread_id: None,
             windows_sandbox: WindowsSandboxState::default(),
             thread_event_channels: HashMap::new(),
+            pending_realtime_speech_replay: HashMap::new(),
+            pending_realtime_transcript_replay: HashMap::new(),
+            realtime_replay_order: VecDeque::new(),
             temporary_structured_requests: HashMap::new(),
             pending_thread_titles: HashSet::new(),
             thread_event_listener_tasks: HashMap::new(),
@@ -749,6 +772,13 @@ See the Codex keymap documentation for supported actions and examples."
             dynamic_tool_status_updates,
             dynamic_tool_tasks: HashMap::new(),
             pending_startup_thread_start,
+            pending_server_version_notice: if pending_startup_thread_start {
+                initial_server_version_notice
+                    .as_ref()
+                    .map(|(notice, _)| notice.clone())
+            } else {
+                None
+            },
             pending_open_resume_picker: false,
             pending_working_directory_change: None,
             pending_start_managed_worktree: None,
@@ -766,6 +796,14 @@ See the Codex keymap documentation for supported actions and examples."
         };
         if !tui.is_terminal_focused() {
             app.recap.note_focus_lost(Instant::now());
+        }
+        let _ =
+            app.initialize_server_version_notice(codex_cli_version(), app_server.server_version());
+        if initial_server_version_notice.is_none() {
+            app.update_server_version_overview_notice(
+                codex_cli_version(),
+                /*older_server*/ None,
+            );
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
@@ -815,6 +853,14 @@ See the Codex keymap documentation for supported actions and examples."
             {
                 return shutdown_on_startup_error(app_server, err).await;
             }
+        }
+        if !start_in_agents_overview
+            && !pending_startup_thread_start
+            && let Some((notice, _)) = &initial_server_version_notice
+        {
+            app.app_event_tx.send(AppEvent::InsertHistoryCell(Box::new(
+                history_cell::new_server_version_warning(notice.clone()),
+            )));
         }
         let initial_session_ms = initial_session_started_at.elapsed().as_millis();
 
@@ -1080,7 +1126,8 @@ See the Codex keymap documentation for supported actions and examples."
                         }
                         AppRunControl::Continue
                     }
-                    event = tui_events.next(), if app.reconnect.offline || !block_terminal_input_for_pending_startup_events => {
+                    event = tui_events.next(), if app.pending_thread_switch_resets == 0
+                        && (app.reconnect.offline || !block_terminal_input_for_pending_startup_events) => {
                         if let Some(event) = event {
                             if (matches!(
                                 &event,
@@ -1128,7 +1175,7 @@ See the Codex keymap documentation for supported actions and examples."
                         reconnect = None;
                         match result {
                             Ok(connected) => {
-                                app.finish_reconnect(tui, &mut app_server, &mut app_event_rx, connected).await?;
+                                app.finish_reconnect(tui, &mut app_server, &mut app_event_rx, connected, codex_cli_version()).await?;
                                 listen_for_app_server_events = true;
                                 waiting_for_initial_session_configured = false;
                             }
