@@ -19,7 +19,15 @@ fn batches_preserve_overflow_and_replaced_claims() {
             },
         );
     }
+    wake.idle_wait_interrupted.store(true, Ordering::Release);
+    wake.cancel_for_abort(&codex_protocol::protocol::TurnAbortReason::Replaced);
     let (first, _) = wake.claim_input(/*interrupted*/ false).unwrap();
+    let mut current_claim = Some(first);
+    assert!(
+        wake.input_after_idle_wait(/*interrupted*/ false, &mut current_claim)
+            .is_empty()
+    );
+    assert_eq!(current_claim, Some(first));
     assert_eq!(
         wake.processes
             .lock()
@@ -31,7 +39,13 @@ fn batches_preserve_overflow_and_replaced_claims() {
     );
     assert!(wake.has_ready());
     wake.commit_claim(first);
-    let (second, _) = wake.claim_input(/*interrupted*/ false).unwrap();
+    current_claim = None;
+    assert!(
+        !wake
+            .input_after_idle_wait(/*interrupted*/ false, &mut current_claim)
+            .is_empty()
+    );
+    let second = current_claim.unwrap();
     assert!(!wake.has_ready());
     wake.cancel_for_abort(&codex_protocol::protocol::TurnAbortReason::Replaced);
     let (replacement, _) = wake.claim_input(/*interrupted*/ false).unwrap();

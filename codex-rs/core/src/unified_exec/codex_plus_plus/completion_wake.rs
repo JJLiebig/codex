@@ -135,7 +135,7 @@ impl CompletionWake {
         interrupted: bool,
         claim: &mut Option<u64>,
     ) -> Vec<TurnInput> {
-        if !self.idle_wait_interrupted.swap(false, Ordering::AcqRel) {
+        if claim.is_some() || !self.idle_wait_interrupted.swap(false, Ordering::AcqRel) {
             return Vec::new();
         }
         let Some((new_claim, input)) = self.claim_input(interrupted) else {

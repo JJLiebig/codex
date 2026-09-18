@@ -38,8 +38,8 @@ impl ContextualUserFragment for BackgroundCompletion {
                 .exit_code
                 .map_or_else(|| "unknown".to_string(), |code| code.to_string());
             // Escape line breaks and fragment delimiters before applying the shared budget.
-            let escaped = serde_json::to_string(&result.output_tail)
-                .expect("string serialization")
+            let escaped = serde_json::Value::String(result.output_tail.clone())
+                .to_string()
                 .replace('<', "\\u003c")
                 .replace('>', "\\u003e");
             let truncated = result.truncated || escaped.len() > output_budget;
