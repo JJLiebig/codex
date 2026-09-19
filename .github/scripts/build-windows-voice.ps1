@@ -1,6 +1,11 @@
 param([Parameter(Mandatory = $true)][string]$Output)
 
 $ErrorActionPreference = 'Stop'
+# Resolve the runtime from this selected toolchain before downloading or building.
+$runtimeDlls = @(Get-ChildItem -Path (Join-Path $env:VCToolsRedistDir 'x64/Microsoft.VC*.CRT/vcruntime140.dll') -File)
+if ($runtimeDlls.Count -ne 1) { throw 'Expected one x64 Visual C++ runtime in VCToolsRedistDir' }
+$redist = $runtimeDlls[0].DirectoryName
+
 $Output = [IO.Path]::GetFullPath($Output)
 New-Item -ItemType Directory -Path $Output -Force | Out-Null
 $tools = Join-Path $Output 'tools'
@@ -50,7 +55,6 @@ python third_party/voice/build_native.py --archives $archives --output (Join-Pat
     --pkg-config $pkgconf --bootstrap-make $nmake --jobs 4
 if ($LASTEXITCODE -ne 0) { throw 'Native voice build failed' }
 
-$redist = Join-Path $env:VCToolsRedistDir 'x64/Microsoft.VC143.CRT'
 python scripts/codex_package/codex_plus_plus/voice.py prepare --work $Output --commit $commit --redist $redist
 if ($LASTEXITCODE -ne 0) { throw 'Voice runtime preparation failed' }
 

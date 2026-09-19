@@ -55,7 +55,7 @@ def prepare(work: Path, commit: str, redist: Path) -> None:
     manifest["libraries"].append(
         {
             "path": "bin/vcruntime140.dll",
-            "sourcePath": "Microsoft.VC143.CRT/vcruntime140.dll",
+            "sourcePath": f"{redist.name}/{source.name}",
             "sourceSha256": digest(source),
             "sha256": digest(destination),
             "imports": list(binary.imports),
