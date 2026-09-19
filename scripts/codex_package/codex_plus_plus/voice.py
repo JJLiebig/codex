@@ -116,6 +116,7 @@ def verify_app_identity(package: Path, commit: str, app_target: str) -> None:
 
 def smoke(package: Path, commit: str) -> None:
     """Relocated helper startup and plugin loading, without opening audio devices."""
+    package = package.resolve(strict=True)
     metadata = json.loads((package / "codex-package.json").read_text(encoding="utf-8"))
     app_target = metadata["target"]
     voice_target = app_target.replace("-musl", "-gnu")
