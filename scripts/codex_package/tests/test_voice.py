@@ -1,9 +1,11 @@
 """Fork archives must carry only the receipt-verified voice payload."""
 
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
+import struct
 import sys
 import tarfile
 import tempfile
@@ -151,6 +153,21 @@ class VoicePackageTests(unittest.TestCase):
                 archived["codex-resources/voice/licenses/LGPL-2.1.txt"],
                 (voice.REPO / "third_party/voice/licenses/LGPL-2.1.txt").read_bytes(),
             )
+            if not suffix:
+                # macOS temporary paths commonly traverse /var -> /private/var.
+                alias = root / "aliased-parent"
+                alias.symlink_to(root, target_is_directory=True)
+                replies = b""
+                for response in ("ready", "runtimeReady", "closed"):
+                    payload = json.dumps({"type": response}).encode()
+                    replies += struct.pack(">I", len(payload)) + payload
+                with (
+                    patch.object(voice, "verify_app_identity"),
+                    patch.object(voice.subprocess, "Popen") as spawn,
+                ):
+                    spawn.return_value.stdout = io.BytesIO(replies)
+                    spawn.return_value.wait.return_value = 0
+                    voice.smoke(alias / "output", commit)
             (runtime / files[-1]).write_bytes(b"changed")
             with self.assertRaisesRegex(ValueError, "digest mismatch"):
                 voice.package(app, work, root / "rejected", archive, commit)

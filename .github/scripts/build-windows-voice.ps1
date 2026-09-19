@@ -15,7 +15,7 @@ function Get-VerifiedFile([string]$Url, [string]$Path, [string]$Sha256) {
 
 # Public, versioned installers; Cygwin verifies its signed package metadata.
 $setup = Join-Path $tools 'setup.exe'
-Get-VerifiedFile 'https://cygwin.com/setup/setup-2.939.x86_64.exe' $setup '2c9f2fb56e1fb687b5d9680afa8f8b06e6214f0e483096af0eae1946431226c5'
+Get-VerifiedFile 'https://cygwin.com/setup/setup-2.939.x86_64.exe' $setup '73d9bf0be6b7adb8af8c2e709556159a45fa1892678f5105a619a1cdd056e51a'
 $cygwin = Join-Path $tools 'cygwin'
 $setupArgs = @('--quiet-mode', '--no-admin', '--no-desktop', '--no-shortcuts', '--no-startmenu',
     '--root', $cygwin, '--local-package-dir', (Join-Path $tools 'cache'), '--only-site',
