@@ -62,6 +62,7 @@ $VarsToExport = @(
     "UniversalCRTSdkDir",
     "VCINSTALLDIR",
     "VCToolsInstallDir",
+    "VCToolsRedistDir",
     "WindowsLibPath",
     "WindowsSdkBinPath",
     "WindowsSdkDir",

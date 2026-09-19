@@ -25,6 +25,8 @@ on:
       - "scripts/build_codex_plus_plus.py"
       - "scripts/build_codex_package.py"
       - "scripts/codex_package/**"
+      - ".github/scripts/build-windows-voice.ps1"
+      - "third_party/voice/**"
 
 permissions: {}
 
@@ -119,6 +121,7 @@ jobs:
           python scripts/codex_package/test_build_codex_plus_plus.py
           python scripts/codex_package/tests/test_source_mtime_cache.py
           python scripts/codex_package/tests/test_codex_plus_plus_release.py
+          python scripts/codex_package/tests/test_voice.py
           python -m py_compile \
             scripts/build_codex_plus_plus.py \
             scripts/codex_package/codex_plus_plus/source_mtime_cache.py \
@@ -302,6 +305,7 @@ jobs:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       TARGET: ${{ matrix.target }}
       VERSION: ${{ needs.prepare.outputs.version }}
+      STABLE_GIT_COMMIT: ${{ github.sha }}
       ARCHIVE_SUFFIX: ${{ matrix.archive_suffix }}
       LIBSQLITE3_FLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'SQLITE_DISABLE_INTRINSIC' || '' }}
       SOURCE_MTIME_STATE: codex-rs/target/codex-plus-plus-source-mtimes-${{ matrix.target }}.json
@@ -420,6 +424,20 @@ jobs:
             -- \
             --cargo-profile release \
             "${package_args[@]}"
+
+      - name: Build and package Windows voice
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP 'codex-plus-plus-voice'
+          & .github/scripts/build-windows-voice.ps1 -Output $work
+          if ($LASTEXITCODE -ne 0) { throw 'Voice build failed' }
+          $commit = git rev-parse HEAD
+          python scripts/codex_package/codex_plus_plus/voice.py package `
+            --work $work --commit $commit `
+            --app "dist/package-$env:TARGET" --output "dist/voice-package-$env:TARGET" `
+            --archive "dist/codex-plus-plus-$env:VERSION-$env:TARGET.$env:ARCHIVE_SUFFIX"
+          if ($LASTEXITCODE -ne 0) { throw 'Voice package or relocated startup smoke failed' }
 
       - name: Smoke package
         shell: bash
