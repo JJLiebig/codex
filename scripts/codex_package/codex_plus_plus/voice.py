@@ -1,4 +1,4 @@
-"""Prepare and verify the Windows x64 voice payload using upstream tooling."""
+"""Prepare and verify release voice payloads using upstream tooling."""
 
 # ruff: noqa: E402 -- upstream script imports require their sibling directory.
 
@@ -65,11 +65,12 @@ def prepare(work: Path, commit: str, redist: Path) -> None:
     seal(runtime, TARGET)
 
 
-def verify_app_identity(package: Path, commit: str) -> None:
+def verify_app_identity(package: Path, commit: str, app_target: str) -> None:
+    suffix = ".exe" if app_target.endswith("windows-msvc") else ""
     # exec-server and the TUI share this executable's compiled BuildInfo stamp.
     with tempfile.TemporaryDirectory(prefix="voice identity ") as home:
         process = subprocess.Popen(
-            [package / "bin/codex.exe", "exec-server", "--listen", "stdio"],
+            [package / f"bin/codex{suffix}", "exec-server", "--listen", "stdio"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
@@ -97,7 +98,7 @@ def verify_app_identity(package: Path, commit: str) -> None:
             )
             expected = (
                 "sha256:"
-                + hashlib.sha256(f"git:{commit}:{TARGET}".encode()).hexdigest()
+                + hashlib.sha256(f"git:{commit}:{app_target}".encode()).hexdigest()
             )
             if actual != expected:
                 raise RuntimeError(
@@ -115,22 +116,37 @@ def verify_app_identity(package: Path, commit: str) -> None:
 
 def smoke(package: Path, commit: str) -> None:
     """Relocated helper startup and plugin loading, without opening audio devices."""
-    runtime_files(package / "codex-resources/voice", TARGET, public_release=True)
-    verify_app_identity(package, commit)
-    environment = dict(os.environ)
+    metadata = json.loads((package / "codex-package.json").read_text(encoding="utf-8"))
+    app_target = metadata["target"]
+    voice_target = app_target.replace("-musl", "-gnu")
+    suffix = ".exe" if app_target.endswith("windows-msvc") else ""
+    runtime_files(package / "codex-resources/voice", voice_target, public_release=True)
+    verify_app_identity(package, commit, app_target)
+    # Prove relocation without build-machine loader paths or Bazel runfiles.
+    environment = {
+        key: value
+        for key, value in os.environ.items()
+        if not key.startswith(("LD_", "DYLD_", "RUNFILES_"))
+        and key not in ("JAVA_RUNFILES", "TEST_SRCDIR")
+    }
     environment.update(
         {
             "GST_PLUGIN_PATH": "",
             "GST_PLUGIN_PATH_1_0": "",
             "GST_PLUGIN_SYSTEM_PATH": "",
             "GST_PLUGIN_SYSTEM_PATH_1_0": "",
-            "GST_REGISTRY": "NUL",
+            # GStreamer recognizes the uppercase Windows null-device spelling.
+            "GST_REGISTRY": "NUL" if suffix else os.devnull,
             "GST_REGISTRY_UPDATE": "no",
             "GST_REGISTRY_FORK": "no",
-            "PATH": str(Path(os.environ["SystemRoot"]) / "System32"),
+            "PATH": (
+                str(Path(os.environ["SystemRoot"]) / "System32")
+                if suffix
+                else "/usr/bin:/bin"
+            ),
         }
     )
-    helper = package / "codex-resources/voice/bin/codex-voice-host.exe"
+    helper = package / f"codex-resources/voice/bin/codex-voice-host{suffix}"
     process = subprocess.Popen(
         [helper],
         stdin=subprocess.PIPE,
@@ -177,17 +193,17 @@ def smoke(package: Path, commit: str) -> None:
 
 
 def package(app: Path, work: Path, output: Path, archive: Path, commit: str) -> None:
-    version = json.loads((app / "codex-package.json").read_text(encoding="utf-8"))[
-        "version"
-    ]
+    metadata = json.loads((app / "codex-package.json").read_text(encoding="utf-8"))
+    voice_target = metadata["target"].replace("-musl", "-gnu")
+    suffix = ".exe" if voice_target.endswith("windows-msvc") else ""
     assemble(
         app,
-        work / "codex-voice-host.exe",
-        TARGET,
+        work / f"codex-voice-host{suffix}",
+        voice_target,
         commit,
         output,
         runtime=work / "runtime",
-        release_version=version,
+        release_version=metadata["version"],
     )
     with tempfile.TemporaryDirectory(prefix="codex voice moved ") as temporary:
         moved = Path(temporary) / "package"
