@@ -3,6 +3,7 @@
 # ruff: noqa: E402 -- upstream script imports require their sibling directory.
 
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,9 +65,58 @@ def prepare(work: Path, commit: str, redist: Path) -> None:
     seal(runtime, TARGET)
 
 
+def verify_app_identity(package: Path, commit: str) -> None:
+    # exec-server and the TUI share this executable's compiled BuildInfo stamp.
+    with tempfile.TemporaryDirectory(prefix="voice identity ") as home:
+        process = subprocess.Popen(
+            [package / "bin/codex.exe", "exec-server", "--listen", "stdio"],
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env={**os.environ, "CODEX_HOME": home},
+        )
+        replies = queue.Queue()
+        threading.Thread(
+            target=lambda: replies.put(process.stdout.readline()), daemon=True
+        ).start()
+        try:
+            request = {
+                "id": 1,
+                "method": "initialize",
+                "params": {
+                    "clientName": "voice-package-check",
+                    "resumeSessionId": None,
+                },
+            }
+            process.stdin.write(json.dumps(request) + "\n")
+            process.stdin.flush()
+            response = json.loads(replies.get(timeout=30))
+            actual = (
+                response.get("result", {}).get("environmentInfo", {}).get("providerId")
+            )
+            expected = (
+                "sha256:"
+                + hashlib.sha256(f"git:{commit}:{TARGET}".encode()).hexdigest()
+            )
+            if actual != expected:
+                raise RuntimeError(
+                    "App and voice helper must have the same compiled commit"
+                )
+        finally:
+            process.stdin.close()
+            process.stdin = None
+            try:
+                process.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate()
+
+
 def smoke(package: Path, commit: str) -> None:
     """Relocated helper startup and plugin loading, without opening audio devices."""
     runtime_files(package / "codex-resources/voice", TARGET, public_release=True)
+    verify_app_identity(package, commit)
     environment = dict(os.environ)
     environment.update(
         {

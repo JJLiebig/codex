@@ -14,6 +14,28 @@ from runtime import digest
 
 
 class VoicePackageTests(unittest.TestCase):
+    def test_application_stamp_must_match_the_helper_commit(self):
+        for provider_id in (
+            None,
+            "sha256:wrong-build",
+            "sha256:4228eeacc3620c9dd7db4d8554ef15f025dbbc5064746268f7c5b91a409fed5d",
+        ):
+            with (
+                self.subTest(provider_id=provider_id),
+                patch.object(voice.subprocess, "Popen") as spawn,
+            ):
+                spawn.return_value.stdout.readline.return_value = json.dumps(
+                    {
+                        "id": 1,
+                        "result": {"environmentInfo": {"providerId": provider_id}},
+                    }
+                )
+                if provider_id is None or provider_id.endswith("wrong-build"):
+                    with self.assertRaisesRegex(RuntimeError, "same compiled commit"):
+                        voice.verify_app_identity(Path("package"), "a" * 40)
+                else:
+                    voice.verify_app_identity(Path("package"), "a" * 40)
+
     def test_fork_archive_keeps_verified_runtime_and_rejects_tampering(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

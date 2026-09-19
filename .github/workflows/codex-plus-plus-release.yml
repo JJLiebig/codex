@@ -305,6 +305,7 @@ jobs:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       TARGET: ${{ matrix.target }}
       VERSION: ${{ needs.prepare.outputs.version }}
+      STABLE_GIT_COMMIT: ${{ github.sha }}
       ARCHIVE_SUFFIX: ${{ matrix.archive_suffix }}
       LIBSQLITE3_FLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'SQLITE_DISABLE_INTRINSIC' || '' }}
       SOURCE_MTIME_STATE: codex-rs/target/codex-plus-plus-source-mtimes-${{ matrix.target }}.json
