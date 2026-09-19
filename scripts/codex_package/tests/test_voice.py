@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -19,6 +20,43 @@ from runtime import PLUGINS, digest, required_library_paths
 
 
 class VoicePackageTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows build prerequisite")
+    def test_redist_selection_uses_the_selected_toolchain(self):
+        script = (voice.REPO / ".github/scripts/build-windows-voice.ps1").read_text()
+        # Execute the real preflight, stopping before any downloads or native build.
+        preflight = script.split("# Public, versioned installers;")[0]
+        for folder in ("Microsoft.VC143.CRT", "Microsoft.VC145.CRT"):
+            with (
+                self.subTest(folder=folder),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                runtime = root / "x64" / folder
+                runtime.mkdir(parents=True)
+                (runtime / "vcruntime140.dll").write_bytes(b"fixture")
+                other_arch = root / "arm64" / folder
+                other_arch.mkdir(parents=True)
+                (other_arch / "vcruntime140.dll").write_bytes(b"wrong architecture")
+                result = subprocess.run(
+                    [
+                        "pwsh",
+                        "-NoProfile",
+                        "-Command",
+                        "& {"
+                        + preflight
+                        + "\nWrite-Output $redist\n} -Output $env:VOICE_TEST_OUTPUT",
+                    ],
+                    env={
+                        **os.environ,
+                        "VCToolsRedistDir": str(root),
+                        "VOICE_TEST_OUTPUT": str(root / "output"),
+                    },
+                    capture_output=True,
+                    text=True,
+                    check=True,
+                )
+                self.assertEqual(Path(result.stdout.strip()), runtime)
+
     def test_application_stamp_must_match_the_helper_commit(self):
         for target in (
             "x86_64-pc-windows-msvc",
