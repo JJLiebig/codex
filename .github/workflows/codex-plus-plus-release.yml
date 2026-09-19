@@ -439,6 +439,41 @@ jobs:
             --archive "dist/codex-plus-plus-$env:VERSION-$env:TARGET.$env:ARCHIVE_SUFFIX"
           if ($LASTEXITCODE -ne 0) { throw 'Voice package or relocated startup smoke failed' }
 
+      - name: Set up Bazel for native voice
+        if: runner.os != 'Windows'
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-version: 1.28.1
+
+      - name: Build and package Unix voice
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bazel build -c opt --jobs=4 \
+            //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            runtime_name=macos_aarch64
+          else
+            runtime_name=linux_x86_64
+          fi
+          voice_target="${TARGET%-musl}"
+          if [[ "$TARGET" == *-musl ]]; then voice_target="${voice_target}-gnu"; fi
+          work="${RUNNER_TEMP}/codex-plus-plus-voice"
+          mkdir -p "$work"
+          python third_party/voice/release_runtime.py stage \
+            --target "$voice_target" \
+            --source "bazel-bin/third_party/voice/native_runtime_${runtime_name}" \
+            --output "$work/runtime"
+          cp bazel-bin/codex-rs/voice-host/codex-voice-host "$work/codex-voice-host"
+          chmod 0755 "$work/codex-voice-host"
+          python third_party/voice/release_runtime.py seal \
+            --target "$voice_target" --output "$work/runtime"
+          python scripts/codex_package/codex_plus_plus/voice.py package \
+            --work "$work" --commit "$STABLE_GIT_COMMIT" \
+            --app "dist/package-${TARGET}" --output "dist/voice-package-${TARGET}" \
+            --archive "dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
+
       - name: Smoke package
         shell: bash
         env:

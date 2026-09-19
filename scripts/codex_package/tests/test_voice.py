@@ -1,8 +1,11 @@
-"""Windows fork archives must carry only the receipt-verified voice payload."""
+"""Fork archives must carry only the receipt-verified voice payload."""
 
+import hashlib
 import json
+import os
 from pathlib import Path
 import sys
+import tarfile
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -10,46 +13,71 @@ import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from codex_package.codex_plus_plus import voice
-from runtime import digest
+from runtime import PLUGINS, digest, required_library_paths
 
 
 class VoicePackageTests(unittest.TestCase):
     def test_application_stamp_must_match_the_helper_commit(self):
-        for provider_id in (
-            None,
-            "sha256:wrong-build",
-            "sha256:4228eeacc3620c9dd7db4d8554ef15f025dbbc5064746268f7c5b91a409fed5d",
+        for target in (
+            "x86_64-pc-windows-msvc",
+            "aarch64-apple-darwin",
+            "x86_64-unknown-linux-musl",
         ):
-            with (
-                self.subTest(provider_id=provider_id),
-                patch.object(voice.subprocess, "Popen") as spawn,
+            for provider_id in (
+                None,
+                "sha256:wrong-build",
+                "sha256:"
+                + hashlib.sha256(f"git:{'a' * 40}:{target}".encode()).hexdigest(),
             ):
-                spawn.return_value.stdout.readline.return_value = json.dumps(
-                    {
-                        "id": 1,
-                        "result": {"environmentInfo": {"providerId": provider_id}},
-                    }
-                )
-                if provider_id is None or provider_id.endswith("wrong-build"):
-                    with self.assertRaisesRegex(RuntimeError, "same compiled commit"):
-                        voice.verify_app_identity(Path("package"), "a" * 40)
-                else:
-                    voice.verify_app_identity(Path("package"), "a" * 40)
+                with (
+                    self.subTest(provider_id=provider_id),
+                    patch.object(voice.subprocess, "Popen") as spawn,
+                ):
+                    spawn.return_value.stdout.readline.return_value = json.dumps(
+                        {
+                            "id": 1,
+                            "result": {"environmentInfo": {"providerId": provider_id}},
+                        }
+                    )
+                    if provider_id is None or provider_id.endswith("wrong-build"):
+                        with self.assertRaisesRegex(
+                            RuntimeError, "same compiled commit"
+                        ):
+                            voice.verify_app_identity(Path("package"), "a" * 40, target)
+                    else:
+                        voice.verify_app_identity(Path("package"), "a" * 40, target)
 
     def test_fork_archive_keeps_verified_runtime_and_rejects_tampering(self):
+        self.check_archive("x86_64-pc-windows-msvc", "bin/gst{}.dll")
+
+    @unittest.skipIf(os.name == "nt", "Unix executable modes require a Unix filesystem")
+    def test_unix_archives_keep_runtime_and_executable_modes(self):
+        for target, plugin in (
+            ("aarch64-apple-darwin", "plugins/libgst{}.dylib"),
+            ("x86_64-unknown-linux-musl", "lib/gstreamer-1.0/libgst{}.so"),
+        ):
+            with self.subTest(target=target):
+                self.check_archive(target, plugin)
+
+    def check_archive(self, target, plugin):
+        suffix = ".exe" if target.endswith("windows-msvc") else ""
+        voice_target = target.replace("-musl", "-gnu")
+        entrypoint = f"bin/codex{suffix}"
+        helper_name = f"codex-voice-host{suffix}"
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             app, work = root / "app", root / "voice"
             (app / "bin").mkdir(parents=True)
-            (app / "bin/codex.exe").write_bytes(b"app")
+            (app / entrypoint).write_bytes(b"app")
+            (app / entrypoint).chmod(0o755)
             (app / "codex-package.json").write_text(
                 json.dumps(
                     {
                         "layoutVersion": 1,
-                        "version": "0.155.1-fork.2",
-                        "target": "x86_64-pc-windows-msvc",
+                        "version": "0.155.1-fork.3",
+                        "target": target,
                         "variant": "codex",
-                        "entrypoint": "bin/codex.exe",
+                        "entrypoint": entrypoint,
                         "resourcesDir": "codex-resources",
                         "pathDir": "codex-path",
                     }
@@ -57,26 +85,15 @@ class VoicePackageTests(unittest.TestCase):
             )
             runtime = work / "runtime"
             (runtime / "bin").mkdir(parents=True)
-            (work / "codex-voice-host.exe").write_bytes(b"helper")
-            plugins = [
-                f"bin/gst{name}.dll"
-                for name in (
-                    "app",
-                    "audioconvert",
-                    "audioresample",
-                    "coreelements",
-                    "opus",
-                    "rtp",
-                    "rtpmanager",
-                )
-            ]
-            files = plugins + [
-                "bin/gio-2.0-0.dll",
-                "bin/gstreamer-1.0-0.dll",
-                "bin/vcruntime140.dll",
-            ]
+            (work / helper_name).write_bytes(b"helper")
+            (work / helper_name).chmod(0o755)
+            plugins = [plugin.format(name) for name in PLUGINS]
+            files = plugins + list(required_library_paths(voice_target))
+            if suffix:
+                files += ["bin/gstreamer-1.0-0.dll", "bin/vcruntime140.dll"]
             records = []
             for name in files:
+                (runtime / name).parent.mkdir(parents=True, exist_ok=True)
                 (runtime / name).write_bytes(name.encode())
                 records.append({"path": name, "sha256": digest(runtime / name)})
             commit = "a" * 40
@@ -86,7 +103,7 @@ class VoicePackageTests(unittest.TestCase):
                         "schemaVersion": 1,
                         "developmentOnly": False,
                         "distribution": "publicRelease",
-                        "target": "x86_64-pc-windows-msvc",
+                        "target": voice_target,
                         "sourceCommit": commit,
                         "plugins": plugins,
                         "libraries": records,
@@ -99,31 +116,42 @@ class VoicePackageTests(unittest.TestCase):
             (runtime / "bin/unlisted.dll").write_bytes(
                 b"not part of the verified runtime"
             )
-            archive = root / "release.zip"
+            archive = root / ("release.zip" if suffix else "release.tar.gz")
             # Native startup is proved by the mandatory moved-package smoke in release jobs.
             with patch.object(voice, "smoke"):
                 voice.package(app, work, root / "output", archive, commit)
             before = archive.read_bytes()
-            with zipfile.ZipFile(archive) as contents:
-                self.assertEqual(contents.read("bin/codex.exe"), b"app")
+            if suffix:
+                with zipfile.ZipFile(archive) as contents:
+                    archived = {
+                        name: contents.read(name) for name in contents.namelist()
+                    }
+            else:
+                with tarfile.open(archive) as contents:
+                    archived = {
+                        member.name: contents.extractfile(member).read()
+                        for member in contents.getmembers()
+                        if member.isfile()
+                    }
+                    for name in (
+                        entrypoint,
+                        f"codex-resources/voice/bin/{helper_name}",
+                    ):
+                        self.assertEqual(contents.getmember(name).mode & 0o111, 0o111)
+            self.assertEqual(archived[entrypoint], b"app")
+            self.assertEqual(
+                archived[f"codex-resources/voice/bin/{helper_name}"], b"helper"
+            )
+            for name in files:
                 self.assertEqual(
-                    contents.read("codex-resources/voice/bin/codex-voice-host.exe"),
-                    b"helper",
+                    archived[f"codex-resources/voice/{name}"], name.encode()
                 )
-                self.assertEqual(
-                    contents.read("codex-resources/voice/bin/vcruntime140.dll"),
-                    b"bin/vcruntime140.dll",
-                )
-                self.assertNotIn(
-                    "codex-resources/voice/bin/unlisted.dll", contents.namelist()
-                )
-                self.assertEqual(
-                    contents.read("codex-resources/voice/licenses/LGPL-2.1.txt"),
-                    (
-                        voice.REPO / "third_party/voice/licenses/LGPL-2.1.txt"
-                    ).read_bytes(),
-                )
-            (runtime / "bin/vcruntime140.dll").write_bytes(b"changed")
+            self.assertNotIn("codex-resources/voice/bin/unlisted.dll", archived)
+            self.assertEqual(
+                archived["codex-resources/voice/licenses/LGPL-2.1.txt"],
+                (voice.REPO / "third_party/voice/licenses/LGPL-2.1.txt").read_bytes(),
+            )
+            (runtime / files[-1]).write_bytes(b"changed")
             with self.assertRaisesRegex(ValueError, "digest mismatch"):
                 voice.package(app, work, root / "rejected", archive, commit)
             self.assertEqual(archive.read_bytes(), before)
