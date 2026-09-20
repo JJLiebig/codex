@@ -3,7 +3,7 @@ use pretty_assertions::assert_eq;
 
 #[test]
 fn output_is_bounded_and_cannot_close_the_context_fragment() {
-    let completion = BackgroundCompletion(
+    let completion = BackgroundCompletion::Finished(
         (0..8)
             .map(|session_id| BackgroundProcessExit {
                 session_id,

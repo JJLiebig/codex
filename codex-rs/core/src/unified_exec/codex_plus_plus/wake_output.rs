@@ -6,7 +6,7 @@ use codex_tools::ToolPayload;
 use codex_utils_output_truncation::TruncationPolicy;
 use serde_json::Value;
 
-const NOTICE: &str = "Completion will resume you automatically. Do independent work or end this turn. Do not sleep, wait, or poll for this session.";
+const NOTICE: &str = "Completion will resume you automatically. A reminder also resumes you after each 55 minutes of background waiting while the process keeps running. Do independent work or end this turn. Do not sleep, wait, or poll for this session.";
 
 pub(crate) struct WakeOutput(ExecCommandToolOutput);
 
