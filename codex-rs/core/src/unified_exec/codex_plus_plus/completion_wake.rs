@@ -18,7 +18,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::Notify;
 
-const MAX_BACKGROUND_WAIT: std::time::Duration = std::time::Duration::from_secs(25 * 60);
+const MAX_BACKGROUND_WAIT: std::time::Duration = std::time::Duration::from_secs(55 * 60);
 
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
@@ -363,7 +363,7 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
     }
     if let ToolSpec::Function(spec) = &mut spec {
         spec.parameters.properties.get_or_insert_default().insert("on_exit".into(),
-            JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically, with a reminder after each 25 minutes of background waiting while the process keeps running. Do independent work or end this turn. Do not sleep, wait, or poll for this session. Omit for servers and interactive commands.".into())));
+            JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically, with a reminder after each 55 minutes of background waiting while the process keeps running. Do independent work or end this turn. Do not sleep, wait, or poll for this session. Omit for servers and interactive commands.".into())));
     }
     spec
 }

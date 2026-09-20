@@ -36,7 +36,7 @@ impl ContextualUserFragment for BackgroundCompletion {
             Self::StillRunning(ids) => {
                 let ids: Vec<_> = ids.iter().take(8).copied().collect();
                 return format!(
-                    "Background commands are still running after 25 minutes of waiting: session_ids={ids:?}. Completion monitoring remains active. Continue independent work or end this turn; another wake will arrive on completion or after another 25 minutes of waiting. Do not sleep, wait, or poll for these sessions. No user-facing update is needed solely because this timer elapsed."
+                    "Background commands are still running after 55 minutes of waiting: session_ids={ids:?}. Completion monitoring remains active. Continue independent work or end this turn; another wake will arrive on completion or after another 55 minutes of waiting. Do not sleep, wait, or poll for these sessions. No user-facing update is needed solely because this timer elapsed."
                 );
             }
         };

@@ -391,7 +391,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
 #[test_case(Finish::Wake; "reminders preserve eventual completion")]
 #[test_case(Finish::Cancel; "interrupt disarms reminders and completion")]
 #[tokio::test]
-async fn background_completion_reminds_after_each_25_minute_wait(finish: Finish) -> Result<()> {
+async fn background_completion_reminds_after_each_55_minute_wait(finish: Finish) -> Result<()> {
     let harness = TestCodexHarness::with_auto_env_builder(
         test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
     )
@@ -445,7 +445,7 @@ async fn background_completion_reminds_after_each_25_minute_wait(finish: Finish)
     .await;
     for count in [2, 3] {
         tokio::time::pause();
-        tokio::time::advance(std::time::Duration::from_secs(24 * 60)).await;
+        tokio::time::advance(std::time::Duration::from_secs(54 * 60)).await;
         tokio::task::yield_now().await;
         assert_eq!(mock.requests().len(), count);
         tokio::time::advance(std::time::Duration::from_secs(60)).await;
@@ -461,7 +461,7 @@ async fn background_completion_reminds_after_each_25_minute_wait(finish: Finish)
         assert_eq!(requests.len(), count + 1);
         let input = requests[count].body_json()["input"].to_string();
         assert_eq!(
-            input.matches("still running after 25 minutes").count(),
+            input.matches("still running after 55 minutes").count(),
             count - 1
         );
         assert!(input.contains("session_ids=[1000]"));
@@ -474,7 +474,7 @@ async fn background_completion_reminds_after_each_25_minute_wait(finish: Finish)
         })
         .await;
         tokio::time::pause();
-        tokio::time::advance(std::time::Duration::from_secs(25 * 60)).await;
+        tokio::time::advance(std::time::Duration::from_secs(55 * 60)).await;
         tokio::time::resume();
     }
     harness.write_file("release", b"go").await?;
