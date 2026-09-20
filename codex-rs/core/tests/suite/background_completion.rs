@@ -388,6 +388,116 @@ async fn background_completion(finish: Finish) -> Result<()> {
     Ok(())
 }
 
+#[test_case(Finish::Wake; "reminders preserve eventual completion")]
+#[test_case(Finish::Cancel; "interrupt disarms reminders and completion")]
+#[tokio::test]
+async fn background_completion_reminds_after_each_25_minute_wait(finish: Finish) -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(
+        test_codex().with_session_source(codex_protocol::protocol::SessionSource::Cli),
+    )
+    .await?;
+    let mut responses = vec![sse(vec![
+        ev_function_call(
+            "background",
+            "exec_command",
+            &json!({"cmd":wait_for_release_command(),"yield_time_ms":250,"on_exit":"wake"})
+                .to_string(),
+        ),
+        ev_completed("r1"),
+    ])];
+    for id in ["r2", "r3", "r4", "r5"]
+        .into_iter()
+        .take(if matches!(finish, Finish::Wake) { 4 } else { 3 })
+    {
+        responses.push(sse(vec![
+            ev_assistant_message(id, "Acknowledged."),
+            ev_completed(id),
+        ]));
+    }
+    let mock = mount_sse_sequence(harness.server(), responses).await;
+    harness
+        .test()
+        .codex
+        .start_or_steer_turn(
+            TurnInputRequest::user_input(vec![UserInput::Text {
+                text: "Run the command.".into(),
+                text_elements: Vec::new(),
+            }])
+            .with_thread_settings(ThreadSettingsOverrides {
+                approval_policy: Some(codex_protocol::protocol::AskForApproval::Never),
+                sandbox_policy: Some(SandboxPolicy::DangerFullAccess),
+                permission_profile: Some(codex_protocol::models::PermissionProfile::Disabled),
+                ..Default::default()
+            }),
+        )
+        .await?;
+    // Windows exec calls have a ten-second minimum yield before entering the idle wait.
+    core_test_support::wait_for_event_with_timeout(
+        &harness.test().codex,
+        |event| {
+            matches!(
+                event,
+                EventMsg::BackgroundCompletionWaiting { waiting: true }
+            )
+        },
+        std::time::Duration::from_secs(20),
+    )
+    .await;
+    for count in [2, 3] {
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(24 * 60)).await;
+        tokio::task::yield_now().await;
+        assert_eq!(mock.requests().len(), count);
+        tokio::time::advance(std::time::Duration::from_secs(60)).await;
+        tokio::time::resume();
+        wait_for_event(&harness.test().codex, |event| {
+            matches!(
+                event,
+                EventMsg::BackgroundCompletionWaiting { waiting: true }
+            )
+        })
+        .await;
+        let requests = mock.requests();
+        assert_eq!(requests.len(), count + 1);
+        let input = requests[count].body_json()["input"].to_string();
+        assert_eq!(
+            input.matches("still running after 25 minutes").count(),
+            count - 1
+        );
+        assert!(input.contains("session_ids=[1000]"));
+        assert!(!input.contains("Background commands finished."));
+    }
+    if matches!(finish, Finish::Cancel) {
+        harness.test().codex.submit(Op::Interrupt).await?;
+        wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::TurnAborted(_))
+        })
+        .await;
+        tokio::time::pause();
+        tokio::time::advance(std::time::Duration::from_secs(25 * 60)).await;
+        tokio::time::resume();
+    }
+    harness.write_file("release", b"go").await?;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::ExecCommandEnd(_))
+    })
+    .await;
+    if matches!(finish, Finish::Wake) {
+        wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await;
+        let requests = mock.requests();
+        assert_eq!(requests.len(), 5);
+        let input = requests[4].body_json()["input"].to_string();
+        assert_eq!(input.matches("Background commands finished.").count(), 1);
+        assert!(input.contains("exit_code=0"));
+    } else {
+        assert_eq!(mock.requests().len(), 4);
+    }
+    Ok(())
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn failed_turn_disarms_background_completion_wake() -> Result<()> {
     let harness = TestCodexHarness::with_auto_env_builder(test_codex().with_config(|config| {

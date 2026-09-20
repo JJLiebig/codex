@@ -18,6 +18,8 @@ use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use tokio::sync::Notify;
 
+const MAX_BACKGROUND_WAIT: std::time::Duration = std::time::Duration::from_secs(25 * 60);
+
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum OnExit {
@@ -109,7 +111,7 @@ impl CompletionWake {
         Some((
             claim,
             vec![TurnInput::ResponseItem(ResponseItemEnvelope::new(
-                ContextualUserFragment::into(BackgroundCompletion(
+                ContextualUserFragment::into(BackgroundCompletion::Finished(
                     ready.into_iter().map(|(_, result)| result).collect(),
                 )),
             ))],
@@ -181,6 +183,9 @@ impl CompletionWake {
             return None;
         }
         let mut waiting = false;
+        let reminder = tokio::time::sleep(MAX_BACKGROUND_WAIT);
+        tokio::pin!(reminder);
+        let mut reminder_due = false;
         let claim = loop {
             let active_turn = session.active_turn.lock().await;
             if !active_turn.as_ref().is_some_and(|active_turn| {
@@ -190,7 +195,38 @@ impl CompletionWake {
             }) {
                 break None;
             }
-            if let Some((claim, input)) = self.claim_input(session.is_interrupted()) {
+            let ready = self.claim_input(session.is_interrupted()).or_else(|| {
+                if !reminder_due {
+                    return None;
+                }
+                let ids: Vec<_> = self
+                    .processes
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .iter()
+                    .filter(|(_, entry)| {
+                        entry.claim.is_none()
+                            && entry.result.is_none()
+                            && entry
+                                .process
+                                .upgrade()
+                                .is_some_and(|process| process.completion().is_none())
+                    })
+                    .map(|(&id, _)| id)
+                    .take(8)
+                    .collect();
+                if ids.is_empty() {
+                    return None;
+                }
+                // Reminders do not claim entries: eventual exits must still be delivered.
+                Some((
+                    self.next_claim.fetch_add(1, Ordering::Relaxed),
+                    vec![TurnInput::ResponseItem(ResponseItemEnvelope::new(
+                        ContextualUserFragment::into(BackgroundCompletion::StillRunning(ids)),
+                    ))],
+                ))
+            });
+            if let Some((claim, input)) = ready {
                 if let Some(turn_state) = turn_state.as_deref() {
                     turn_state
                         .lock()
@@ -225,6 +261,7 @@ impl CompletionWake {
             }
             tokio::select! {
                 _ = self.notify.notified() => {}
+                _ = &mut reminder, if !reminder_due => reminder_due = true,
                 result = activity.changed() => {
                     if result.is_err()
                         || session
@@ -326,7 +363,7 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
     }
     if let ToolSpec::Function(spec) = &mut spec {
         spec.parameters.properties.get_or_insert_default().insert("on_exit".into(),
-            JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically. Do independent work or end this turn. Do not sleep, wait, or poll for this session. Omit for servers and interactive commands.".into())));
+            JsonSchema::string_enum(vec![serde_json::json!("wake")], Some("Set to 'wake' for a finite background command. If it outlives this call, completion resumes the thread automatically, with a reminder after each 25 minutes of background waiting while the process keeps running. Do independent work or end this turn. Do not sleep, wait, or poll for this session. Omit for servers and interactive commands.".into())));
     }
     spec
 }
