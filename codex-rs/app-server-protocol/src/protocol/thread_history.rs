@@ -611,8 +611,8 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::Extension(_)
             | codex_protocol::items::TurnItem::EnteredReviewMode(_)
             | codex_protocol::items::TurnItem::ExitedReviewMode(_) => true,
-            codex_protocol::items::TurnItem::AgentMessage(_)
-            | codex_protocol::items::TurnItem::UserMessage(_)
+            codex_protocol::items::TurnItem::UserMessage(_)
+            | codex_protocol::items::TurnItem::AgentMessage(_)
             | codex_protocol::items::TurnItem::Reasoning(_)
             | codex_protocol::items::TurnItem::WebSearch(_)
             | codex_protocol::items::TurnItem::ImageView(_)
