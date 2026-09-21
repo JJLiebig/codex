@@ -1,8 +1,0 @@
----
-source: tui/src/codex_plus_plus/user_message_inbox_tests.rs
-expression: "rendered(&transcript_cell, 40)"
----
-Message for you
-  First paragraph
-
-  Second paragraph

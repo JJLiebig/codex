@@ -1,4 +1,3 @@
-use crate::protocol::codex_plus_plus::InboxLegacyDeduper;
 use crate::protocol::item_builders::build_command_execution_begin_item;
 use crate::protocol::item_builders::build_command_execution_end_item;
 use crate::protocol::item_builders::build_file_change_approval_request_item;
@@ -232,7 +231,6 @@ pub struct ThreadHistoryBuilder {
     current_rollout_index: usize,
     next_rollout_index: usize,
     active_change_set: Option<ThreadHistoryChangeSet>,
-    inbox_legacy_deduper: InboxLegacyDeduper,
 }
 
 impl Default for ThreadHistoryBuilder {
@@ -250,7 +248,6 @@ impl ThreadHistoryBuilder {
             current_rollout_index: 0,
             next_rollout_index: 0,
             active_change_set: None,
-            inbox_legacy_deduper: InboxLegacyDeduper::default(),
         }
     }
 
@@ -328,7 +325,6 @@ impl ThreadHistoryBuilder {
     /// This function should handle all EventMsg variants that can be persisted in a rollout file.
     /// See `should_persist_event_msg` in `codex-rs/core/rollout/policy.rs`.
     pub fn handle_event(&mut self, event: &EventMsg) {
-        self.inbox_legacy_deduper.prepare_for(event);
         match event {
             EventMsg::UserMessage(payload) => self.handle_user_message(payload),
             EventMsg::AgentMessage(payload) => self.handle_agent_message(payload),
@@ -494,12 +490,6 @@ impl ThreadHistoryBuilder {
         if payload.message.is_empty() {
             return;
         }
-        if self
-            .inbox_legacy_deduper
-            .consume_if_matches(&payload.message)
-        {
-            return;
-        }
 
         let id = self.next_item_id();
         self.push_item_in_current_turn(ThreadItem::AgentMessage {
@@ -621,10 +611,8 @@ impl ThreadHistoryBuilder {
             | codex_protocol::items::TurnItem::Extension(_)
             | codex_protocol::items::TurnItem::EnteredReviewMode(_)
             | codex_protocol::items::TurnItem::ExitedReviewMode(_) => true,
-            codex_protocol::items::TurnItem::AgentMessage(item) => {
-                InboxLegacyDeduper::should_materialize(item)
-            }
-            codex_protocol::items::TurnItem::UserMessage(_)
+            codex_protocol::items::TurnItem::AgentMessage(_)
+            | codex_protocol::items::TurnItem::UserMessage(_)
             | codex_protocol::items::TurnItem::Reasoning(_)
             | codex_protocol::items::TurnItem::WebSearch(_)
             | codex_protocol::items::TurnItem::ImageView(_)
@@ -636,7 +624,6 @@ impl ThreadHistoryBuilder {
 
         if should_upsert {
             let item = ThreadItem::from(item.clone());
-            self.inbox_legacy_deduper.record_materialized(&item);
             if is_review_mode_item {
                 self.upsert_review_mode_item(Some(turn_id), item);
             } else {
@@ -1984,63 +1971,6 @@ mod tests {
                 ThreadItem::ExitedReviewMode {
                     id: "exited-review".into(),
                     review: REVIEW_FALLBACK_MESSAGE.into(),
-                },
-            ]
-        );
-    }
-
-    #[test]
-    fn materialized_history_deduplicates_only_paired_legacy_inbox_messages() {
-        let agent_message = |id: &str, text: &str| {
-            CoreTurnItem::AgentMessage(codex_protocol::items::AgentMessageItem {
-                id: id.into(),
-                content: vec![codex_protocol::items::AgentMessageContent::Text {
-                    text: text.into(),
-                }],
-                phase: Some(CoreMessagePhase::Commentary),
-                delivery: None,
-                memory_citation: None,
-                questions: None,
-            })
-        };
-        let mut builder = ThreadHistoryBuilder::new();
-        let turn_id = builder.ensure_turn().id.clone();
-        builder
-            .handle_materialized_item_lifecycle(&turn_id, &agent_message("assistant", "ordinary"));
-        let note = "[Message for you]\nCheck deployment.";
-        let note_event = AgentMessageEvent {
-            message: note.into(),
-            phase: Some(CoreMessagePhase::Commentary),
-            memory_citation: None,
-            delivery: None,
-            questions: None,
-        };
-        for _ in 0..2 {
-            builder.handle_materialized_item_lifecycle(
-                &turn_id,
-                &agent_message("user-message:call-1", note),
-            );
-            builder.handle_agent_message(&note_event);
-        }
-        builder.handle_agent_message(&note_event);
-        assert_eq!(
-            builder.active_turn_snapshot().expect("active turn").items,
-            vec![
-                ThreadItem::AgentMessage {
-                    id: "user-message:call-1".into(),
-                    text: note.into(),
-                    phase: Some(CoreMessagePhase::Commentary),
-                    memory_citation: None,
-                    delivery: None,
-                    questions: None,
-                },
-                ThreadItem::AgentMessage {
-                    id: "item-1".into(),
-                    text: note.into(),
-                    phase: Some(CoreMessagePhase::Commentary),
-                    memory_citation: None,
-                    delivery: None,
-                    questions: None,
                 },
             ]
         );

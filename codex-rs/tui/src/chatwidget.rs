@@ -572,7 +572,6 @@ pub(crate) struct ChatWidget {
     codex_op_target: CodexOpTarget,
     bottom_pane: BottomPane,
     transcript: TranscriptState,
-    user_message_inbox: crate::codex_plus_plus::UserMessageInboxState,
     account_identity_freshness: crate::codex_plus_plus::AccountIdentityFreshness,
     usage_reset_wait: Option<codex_plus_plus::UsageResetWait>,
     last_resumed_usage_reset_at: Option<i64>,

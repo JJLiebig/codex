@@ -57,7 +57,6 @@ pub enum SlashCommand {
     Accounts,
     #[strum(serialize = "codexplusplus")]
     CodexPlusPlus,
-    Inbox,
     DebugConfig,
     Title,
     Statusline,
@@ -120,7 +119,6 @@ impl SlashCommand {
             SlashCommand::Usage => "view account usage or use a usage limit reset",
             SlashCommand::Accounts => "configure automatic account selection",
             SlashCommand::CodexPlusPlus => "configure Codex++ settings",
-            SlashCommand::Inbox => "review agent messages in this thread",
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
@@ -250,7 +248,6 @@ impl SlashCommand {
             | SlashCommand::Usage
             | SlashCommand::Accounts
             | SlashCommand::CodexPlusPlus
-            | SlashCommand::Inbox
             | SlashCommand::DebugConfig
             | SlashCommand::Ps
             | SlashCommand::Stop
@@ -328,8 +325,6 @@ mod tests {
         assert!(SlashCommand::Raw.available_in_side_conversation());
         assert!(SlashCommand::Raw.supports_inline_args());
         assert!(SlashCommand::App.available_during_task());
-        assert_eq!(SlashCommand::Inbox.command(), "inbox");
-        assert!(SlashCommand::Inbox.available_during_task());
     }
 
     #[test]

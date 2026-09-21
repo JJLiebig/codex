@@ -20,16 +20,12 @@ const AGENT_STATUS_PREVIEW_INDENT: u16 = 4;
 
 #[derive(Debug)]
 pub(super) struct AgentStatusHistoryCell {
-    primary_unread: bool,
     entries: Vec<AgentStatusThreadPreview>,
 }
 
 impl AgentStatusHistoryCell {
-    pub(super) fn new(entries: Vec<AgentStatusThreadPreview>, primary_unread: bool) -> Self {
-        Self {
-            primary_unread,
-            entries,
-        }
+    pub(super) fn new(entries: Vec<AgentStatusThreadPreview>) -> Self {
+        Self { entries }
     }
 }
 
@@ -40,18 +36,6 @@ impl HistoryCell for AgentStatusHistoryCell {
             "Sub-agents running".bold().into(),
             "".into(),
         ];
-        if self.primary_unread {
-            lines.push(
-                vec![
-                    "  • ".dim(),
-                    "Main [default]".into(),
-                    "  ".into(),
-                    "New message".into(),
-                ]
-                .into(),
-            );
-        }
-
         if self.entries.is_empty() {
             lines.push("  • No sub-agents running.".italic().into());
             return lines;
@@ -81,26 +65,20 @@ impl HistoryCell for AgentStatusHistoryCell {
 pub(super) struct AgentStatusThreadPreview {
     agent_path: String,
     activity: Vec<String>,
-    has_unread: bool,
 }
 
 impl AgentStatusThreadPreview {
-    pub(super) fn from_store(
-        agent_path: String,
-        store: &ThreadEventStore,
-        has_unread: bool,
-    ) -> Self {
-        Self::from_events(agent_path, store.buffer.iter().rev(), has_unread)
+    pub(super) fn from_store(agent_path: String, store: &ThreadEventStore) -> Self {
+        Self::from_events(agent_path, store.buffer.iter().rev())
     }
 
-    pub(super) fn empty(agent_path: String, has_unread: bool) -> Self {
-        Self::from_events(agent_path, std::iter::empty(), has_unread)
+    pub(super) fn empty(agent_path: String) -> Self {
+        Self::from_events(agent_path, std::iter::empty())
     }
 
     fn from_events<'a>(
         agent_path: String,
         events: impl Iterator<Item = &'a ThreadBufferedEvent>,
-        has_unread: bool,
     ) -> Self {
         let mut seen_item_ids = HashSet::new();
         let mut activity = Vec::new();
@@ -129,15 +107,11 @@ impl AgentStatusThreadPreview {
         Self {
             agent_path,
             activity,
-            has_unread,
         }
     }
 
     fn title_line(&self) -> Line<'static> {
-        let mut spans = vec!["  • ".dim(), format!("`{}`", self.agent_path).cyan()];
-        if self.has_unread {
-            spans.extend(["  ".into(), "New message".into()]);
-        }
+        let spans = vec!["  • ".dim(), format!("`{}`", self.agent_path).cyan()];
         spans.into()
     }
 

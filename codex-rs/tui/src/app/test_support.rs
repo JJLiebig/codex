@@ -73,7 +73,6 @@ pub(super) async fn make_test_app() -> App {
         pending_thread_titles: HashSet::new(),
         thread_event_listener_tasks: HashMap::new(),
         agent_navigation: AgentNavigationState::default(),
-        user_message_unread: UserMessageUnreadState::default(),
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
         abandoned_side_threads: HashSet::new(),

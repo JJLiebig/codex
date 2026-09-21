@@ -5982,14 +5982,6 @@
         }
       ]
     },
-    "UserMessageInbox": {
-      "description": "Controls whether agents can leave durable, non-blocking messages for the user.",
-      "enum": [
-        "enabled",
-        "disabled"
-      ],
-      "type": "string"
-    },
     "Verbosity": {
       "description": "Controls output length/detail on GPT-5 models via the Responses API. Serialized with lowercase values to match the OpenAI API.",
       "enum": [
@@ -7226,14 +7218,6 @@
         }
       ],
       "description": "Collection of settings that are specific to the TUI."
-    },
-    "user_message_inbox": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/UserMessageInbox"
-        }
-      ],
-      "description": "Whether agents can leave durable, non-blocking messages for the user."
     },
     "web_search": {
       "allOf": [

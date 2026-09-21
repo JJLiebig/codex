@@ -6,7 +6,6 @@ use crate::legacy_core::config::Config;
 use codex_config::AutoRedeemResets;
 use codex_config::ModelCapacityRetryMode;
 use codex_config::ToolActivityPresentation;
-use codex_config::UserMessageInbox;
 use codex_config::WeeklyUsageWindowAutoStart;
 use codex_config::types::AutomaticAccountSelection;
 use toml::Value as TomlValue;
@@ -18,7 +17,6 @@ pub(crate) async fn persist_settings(
     weekly_usage_window_auto_start: Option<WeeklyUsageWindowAutoStart>,
     auto_redeem_resets: Option<AutoRedeemResets>,
     model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
-    user_message_inbox: UserMessageInbox,
     tool_activity: ToolActivityPresentation,
     disable_unnecessary_updates: bool,
 ) {
@@ -63,13 +61,6 @@ pub(crate) async fn persist_settings(
             }),
         ));
     }
-    writes.push(crate::config_update::replace_config_value(
-        "user_message_inbox",
-        serde_json::json!(match user_message_inbox {
-            UserMessageInbox::Enabled => "enabled",
-            UserMessageInbox::Disabled => "disabled",
-        }),
-    ));
     writes.push(crate::config_update::replace_config_value(
         "codex_plus_plus_tool_activity",
         serde_json::json!(match tool_activity {
@@ -153,15 +144,6 @@ pub(crate) async fn persist_settings(
         Some("indefinite") => ModelCapacityRetryMode::Indefinite,
         _ => ModelCapacityRetryMode::Bounded,
     };
-    let effective_user_message_inbox = match response
-        .config
-        .additional
-        .get("user_message_inbox")
-        .and_then(serde_json::Value::as_str)
-    {
-        Some("enabled") => UserMessageInbox::Enabled,
-        _ => UserMessageInbox::Disabled,
-    };
     let effective_quiet_updates = response
         .config
         .additional
@@ -217,7 +199,6 @@ pub(crate) async fn persist_settings(
         && requested_auto_redeem.is_none_or(|requested| effective_auto_redeem == requested)
         && model_capacity_retry_mode.is_none_or(|capacity| effective_capacity == capacity)
         && effective_quiet_updates == disable_unnecessary_updates
-        && effective_user_message_inbox == user_message_inbox
         && effective_tool_activity == tool_activity
     {
         app.chat_widget.codex_plus_plus_settings_persisted(

@@ -13,14 +13,11 @@ use ModelCapacityRetryMode::Bounded as CapacityBounded;
 use ModelCapacityRetryMode::Indefinite as CapacityIndefinite;
 use ToolActivityPresentation::Compact as ActivityCompact;
 use ToolActivityPresentation::Full as ActivityFull;
-use UserMessageInbox::Disabled as InboxOff;
-use UserMessageInbox::Enabled as InboxOn;
 use WeeklyUsageWindowAutoStart::Disabled as WeeklyOff;
 use WeeklyUsageWindowAutoStart::Enabled as WeeklyOn;
 use codex_config::AutoRedeemResets;
 use codex_config::ModelCapacityRetryMode;
 use codex_config::ToolActivityPresentation;
-use codex_config::UserMessageInbox;
 use codex_config::WeeklyUsageWindowAutoStart;
 use codex_config::types::AutomaticAccountSelection;
 use crossterm::event::KeyCode;
@@ -36,13 +33,6 @@ use crate::keymap::ListKeymap;
 use crate::keymap::primary_binding;
 
 impl ChatWidget {
-    pub(super) fn show_user_message_inbox(&mut self) {
-        let enabled =
-            crate::codex_plus_plus::user_message_inbox_enabled(&self.config.config_layer_stack);
-        self.add_to_history(self.user_message_inbox.history_cell(enabled));
-        self.request_redraw();
-    }
-
     pub(crate) fn open_codex_plus_plus_popup(&mut self, dcg_status: DcgStatus) {
         let list_keymap = settings_list_keymap(self.bottom_pane.list_keymap());
         let params = codex_plus_plus_settings_params(
@@ -50,7 +40,6 @@ impl ChatWidget {
             self.config.weekly_usage_window_auto_start,
             crate::codex_plus_plus::auto_redeem_resets_settings(&self.config.config_layer_stack),
             self.config.model_capacity_retry_mode,
-            crate::codex_plus_plus::user_message_inbox_enabled(&self.config.config_layer_stack),
             self.config.codex_plus_plus_tool_activity,
             codex_config::disable_unnecessary_updates(&self.config.config_layer_stack),
             self.weekly_start_supported,
@@ -118,7 +107,6 @@ struct SettingsSelection {
     auto_redeem_exhausted: Arc<AtomicBool>,
     auto_redeem_thresholds: AutoRedeemResets,
     capacity_indefinite: Arc<AtomicBool>,
-    user_message_inbox: Arc<AtomicBool>,
     compact_tool_activity: Arc<AtomicBool>,
     quiet_updates: Arc<AtomicBool>,
 }
@@ -155,7 +143,6 @@ fn codex_plus_plus_settings_params(
     current_weekly: WeeklyUsageWindowAutoStart,
     current_auto_redeem: Option<AutoRedeemResets>,
     current_capacity: ModelCapacityRetryMode,
-    current_user_message_inbox: bool,
     current_tool_activity: ToolActivityPresentation,
     current_quiet_updates: bool,
     weekly_supported: bool,
@@ -183,7 +170,6 @@ fn codex_plus_plus_settings_params(
                 .or(defaults.weekly_exhausted_min_wait_hours),
         },
         capacity_indefinite: Arc::new(AtomicBool::new(current_capacity == CapacityIndefinite)),
-        user_message_inbox: Arc::new(AtomicBool::new(current_user_message_inbox)),
         compact_tool_activity: Arc::new(AtomicBool::new(current_tool_activity == ActivityCompact)),
         quiet_updates: Arc::new(AtomicBool::new(current_quiet_updates)),
     };
@@ -250,13 +236,6 @@ fn codex_plus_plus_settings_params(
         weekly_supported,
     ));
     items.push(settings_item(
-        "Agent inbox messages (Experimental)",
-        "Let Codex leave durable messages you can review with /inbox.",
-        Arc::clone(&selection.user_message_inbox),
-        selection.clone(),
-        weekly_supported,
-    ));
-    items.push(settings_item(
         "Disable unnecessary updates to save tokens",
         "Report meaningful progress instead of timed status updates.",
         Arc::clone(&selection.quiet_updates),
@@ -309,11 +288,6 @@ fn settings_item(
                     CapacityIndefinite
                 } else {
                     CapacityBounded
-                },
-                user_message_inbox: if selection.user_message_inbox.load(Ordering::Relaxed) {
-                    InboxOn
-                } else {
-                    InboxOff
                 },
                 tool_activity: if selection.compact_tool_activity.load(Ordering::Relaxed) {
                     ActivityCompact

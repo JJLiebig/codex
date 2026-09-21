@@ -20,7 +20,6 @@ pub use tool_name::DEFAULT_FUNCTION_NAMESPACE;
 pub use tool_name::ToolName;
 pub mod approvals;
 pub mod capabilities;
-pub mod codex_plus_plus;
 pub mod config_types;
 pub mod dynamic_tools;
 mod environment;

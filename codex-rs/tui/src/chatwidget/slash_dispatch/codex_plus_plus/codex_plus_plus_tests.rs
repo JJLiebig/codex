@@ -31,7 +31,6 @@ fn settings_view(
                 weekly,
                 /*current_auto_redeem*/ None,
                 capacity,
-                /*current_user_message_inbox*/ false,
                 ToolActivityPresentation::Full,
                 /*current_quiet_updates*/ true,
                 weekly_supported,
@@ -101,7 +100,6 @@ fn unsupported_settings_save_only_the_visible_settings() {
             weekly_usage_window_auto_start: None,
             auto_redeem_resets: None,
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
-            user_message_inbox: UserMessageInbox::Disabled,
             tool_activity: ToolActivityPresentation::Full,
             disable_unnecessary_updates: true,
         })
@@ -153,7 +151,6 @@ fn redemption_rows_describe_configured_thresholds() {
         WeeklyOn,
         Some(configured),
         CapacityBounded,
-        /*current_user_message_inbox*/ false,
         ActivityFull,
         /*current_quiet_updates*/ true,
         /*weekly_supported*/ true,
@@ -194,7 +191,6 @@ fn weekly_setting_saves_full_selection() {
                 weekly_exhausted_min_wait_hours: None
             }),
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
-            user_message_inbox: UserMessageInbox::Disabled,
             tool_activity: ToolActivityPresentation::Full,
             disable_unnecessary_updates: true,
         })
@@ -214,9 +210,6 @@ fn capacity_setting_saves_indefinite_mode() {
     view.handle_key_event(KeyEvent::from(KeyCode::Down));
     view.handle_key_event(KeyEvent::from(KeyCode::Down));
     view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
-    view.handle_key_event(KeyEvent::from(KeyCode::Down));
-    view.handle_key_event(KeyEvent::from(KeyCode::Down));
-    view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
     view.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     assert_matches!(
@@ -229,7 +222,6 @@ fn capacity_setting_saves_indefinite_mode() {
                 weekly_exhausted_min_wait_hours: None
             }),
             model_capacity_retry_mode: ModelCapacityRetryMode::Indefinite,
-            user_message_inbox: UserMessageInbox::Enabled,
             tool_activity: ToolActivityPresentation::Full,
             disable_unnecessary_updates: true,
         })

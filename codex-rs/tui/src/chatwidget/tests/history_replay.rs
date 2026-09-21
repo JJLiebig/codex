@@ -12,33 +12,6 @@ use codex_protocol::permissions::NetworkSandboxPolicy;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
-async fn durable_user_message_uses_shared_live_replay_path_and_deduplicates() {
-    let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
-    let item = AppServerThreadItem::AgentMessage {
-        id: "user-message:call-1".to_string(),
-        text: "[Message for you]\nCheck deployment.".to_string(),
-        phase: Some(MessagePhase::Commentary),
-        memory_citation: None,
-        delivery: None,
-        questions: None,
-    };
-    chat.handle_server_notification(
-        ServerNotification::ItemCompleted(ItemCompletedNotification {
-            thread_id: chat.thread_id.map(|id| id.to_string()).unwrap_or_default(),
-            turn_id: "turn-1".to_string(),
-            completed_at_ms: 0,
-            item: item.clone(),
-        }),
-        /*replay_kind*/ None,
-    );
-    chat.replay_thread_item(item, "turn-1".to_string(), ReplayKind::ThreadSnapshot);
-
-    let rendered = lines_to_single_string(&drain_insert_history(&mut rx).concat());
-    assert_eq!(rendered.matches("Message for you").count(), 1);
-    assert!(rendered.contains("Check deployment."));
-}
-
-#[tokio::test]
 async fn resumed_initial_messages_render_history() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 

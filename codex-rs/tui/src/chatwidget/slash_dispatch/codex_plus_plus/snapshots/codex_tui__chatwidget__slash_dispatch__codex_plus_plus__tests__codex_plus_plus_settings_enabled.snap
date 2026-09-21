@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/codex_plus_plus_tests.rs
-assertion_line: 64
+assertion_line: 63
 expression: "render_settings(AutomaticAccountSelection::Enabled,\nWeeklyUsageWindowAutoStart::Enabled, ModelCapacityRetryMode::Bounded,)"
 ---
 
@@ -19,11 +19,11 @@ expression: "render_settings(AutomaticAccountSelection::Enabled,\nWeeklyUsageWin
   6. [ ] Compact tool activity                       Keep routine tool details in
                                                      Ctrl+T instead of the main
                                                      conversation.
-  7. [ ] Agent inbox messages (Experimental)         Let Codex leave durable
-                                                     messages you can review
-                                                     with /inbox.
-  8. [*] Disable unnecessary updates to save tokens  Report meaningful progress
+  7. [*] Disable unnecessary updates to save tokens  Report meaningful progress
                                                      instead of timed status
                                                      updates.
+
+
+
 
   Press space to toggle; enter to save or manage; esc to cancel
