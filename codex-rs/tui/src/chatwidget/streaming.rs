@@ -382,64 +382,54 @@ impl ChatWidget {
                 AgentMessageContent::Text { text } => message.push_str(text),
             }
         }
-        if let Some(message) = crate::codex_plus_plus::recognize_user_message(&item) {
-            if let Some(cell) = self.user_message_inbox.record(message) {
-                self.add_to_history(cell);
-            }
+        let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
+        if from_replay && self.stream_controller.is_none() && !parsed.visible_markdown.is_empty() {
+            self.prepare_assistant_message();
+            self.mark_safety_buffering_agent_message_started();
+            self.bottom_pane.hide_status_indicator();
+            let context = self.thread_id.and_then(|thread_id| {
+                crate::inline_visualization::InlineVisualizationContext::from_config(
+                    &self.config,
+                    thread_id,
+                )
+            });
+            self.add_to_history(
+                history_cell::AgentMarkdownCell::new_with_inline_visualizations(
+                    parsed.visible_markdown.clone(),
+                    self.config.cwd.as_path(),
+                    context,
+                ),
+            );
+            self.handle_stream_finished();
+            self.request_redraw();
         } else {
-            let parsed = parse_assistant_markdown(&message, self.config.cwd.as_path());
-            if from_replay
-                && self.stream_controller.is_none()
-                && !parsed.visible_markdown.is_empty()
-            {
-                self.prepare_assistant_message();
-                self.mark_safety_buffering_agent_message_started();
-                self.bottom_pane.hide_status_indicator();
-                let context = self.thread_id.and_then(|thread_id| {
-                    crate::inline_visualization::InlineVisualizationContext::from_config(
-                        &self.config,
+            self.finalize_completed_assistant_message(Some(parsed.visible_markdown.as_str()));
+        }
+        if matches!(item.phase, Some(MessagePhase::FinalAnswer) | None)
+            && !parsed.visible_markdown.is_empty()
+        {
+            self.transcript
+                .record_agent_markdown(parsed.visible_markdown.clone(), message);
+        }
+        if !from_replay
+            && let Some(cwd) = parsed.last_created_branch_cwd()
+            && let Some(thread_id) = self.thread_id
+            && let Some(runner) = self.workspace_command_runner.clone()
+        {
+            let branch_cwd = PathBuf::from(cwd);
+            let cwd = self.config.cwd.to_path_buf();
+            let tx = self.app_event_tx.clone();
+            tokio::spawn(async move {
+                if let Some(branch) =
+                    crate::branch_summary::current_branch_name(runner.as_ref(), &branch_cwd).await
+                {
+                    tx.send(AppEvent::SyncThreadGitBranch {
                         thread_id,
-                    )
-                });
-                self.add_to_history(
-                    history_cell::AgentMarkdownCell::new_with_inline_visualizations(
-                        parsed.visible_markdown.clone(),
-                        self.config.cwd.as_path(),
-                        context,
-                    ),
-                );
-                self.handle_stream_finished();
-                self.request_redraw();
-            } else {
-                self.finalize_completed_assistant_message(Some(parsed.visible_markdown.as_str()));
-            }
-            if matches!(item.phase, Some(MessagePhase::FinalAnswer) | None)
-                && !parsed.visible_markdown.is_empty()
-            {
-                self.transcript
-                    .record_agent_markdown(parsed.visible_markdown.clone(), message);
-            }
-            if !from_replay
-                && let Some(cwd) = parsed.last_created_branch_cwd()
-                && let Some(thread_id) = self.thread_id
-                && let Some(runner) = self.workspace_command_runner.clone()
-            {
-                let branch_cwd = PathBuf::from(cwd);
-                let cwd = self.config.cwd.to_path_buf();
-                let tx = self.app_event_tx.clone();
-                tokio::spawn(async move {
-                    if let Some(branch) =
-                        crate::branch_summary::current_branch_name(runner.as_ref(), &branch_cwd)
-                            .await
-                    {
-                        tx.send(AppEvent::SyncThreadGitBranch {
-                            thread_id,
-                            branch,
-                            cwd,
-                        });
-                    }
-                });
-            }
+                        branch,
+                        cwd,
+                    });
+                }
+            });
         }
         self.status_state.pending_status_indicator_restore = item.questions.is_some()
             || match item.phase {

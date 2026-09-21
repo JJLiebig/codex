@@ -1,7 +1,5 @@
 use crate::agent::exceeds_thread_spawn_depth_limit;
 use crate::agent::next_thread_spawn_depth;
-use crate::codex_plus_plus::user_message_inbox;
-use crate::codex_plus_plus::user_message_inbox::LeaveUserMessageHandler;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use crate::image_preparation::unified_image_budget_enabled;
 use crate::session::session::Session;
@@ -1150,13 +1148,6 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, registry: &mut Tool
 
     if turn_context.config.update_plan_enabled {
         registry.add(PlanHandler);
-    }
-
-    if user_message_inbox::available(
-        &turn_context.config.config_layer_stack,
-        &turn_context.session_source,
-    ) {
-        registry.add(LeaveUserMessageHandler);
     }
 
     if features.enabled(Feature::DeferredExecutor) {

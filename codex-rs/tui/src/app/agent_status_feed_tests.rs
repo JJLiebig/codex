@@ -46,12 +46,8 @@ fn agent_status_uses_bounded_buffered_activity() {
         },
     ));
 
-    let preview = AgentStatusThreadPreview::from_store(
-        "/root/reviewer".to_string(),
-        &store,
-        /*has_unread*/ false,
-    );
-    let cell = AgentStatusHistoryCell::new(vec![preview], /*primary_unread*/ false);
+    let preview = AgentStatusThreadPreview::from_store("/root/reviewer".to_string(), &store);
+    let cell = AgentStatusHistoryCell::new(vec![preview]);
     let rendered = cell
         .display_lines(/*width*/ 80)
         .iter()
@@ -98,12 +94,8 @@ fn agent_status_uses_reasoning_summaries_only() {
         },
     ));
 
-    let preview = AgentStatusThreadPreview::from_store(
-        "/root/reviewer".to_string(),
-        &store,
-        /*has_unread*/ false,
-    );
-    let cell = AgentStatusHistoryCell::new(vec![preview], /*primary_unread*/ false);
+    let preview = AgentStatusThreadPreview::from_store("/root/reviewer".to_string(), &store);
+    let cell = AgentStatusHistoryCell::new(vec![preview]);
     let rendered = cell
         .display_lines(/*width*/ 80)
         .iter()
@@ -120,26 +112,4 @@ fn agent_status_uses_reasoning_summaries_only() {
     "###);
     assert!(!rendered.contains("hidden raw reasoning"));
     assert!(!rendered.contains("raw-only reasoning"));
-}
-
-#[test]
-fn agent_status_marks_unread_user_messages() {
-    let preview =
-        AgentStatusThreadPreview::empty("/root/reviewer".to_string(), /*has_unread*/ true);
-    let cell = AgentStatusHistoryCell::new(vec![preview], /*primary_unread*/ true);
-    let rendered = cell
-        .display_lines(/*width*/ 80)
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n");
-
-    insta::assert_snapshot!(rendered, @"
-    /subagents
-    Sub-agents running
-
-      • Main [default]  New message
-      • `/root/reviewer`  New message
-        No recent activity yet.
-    ");
 }

@@ -74,7 +74,6 @@ pub use codex_home_symlink::allowed_symlinked_codex_home;
 pub use codex_plus_plus::AutoRedeemResets;
 pub use codex_plus_plus::ModelCapacityRetryMode;
 pub use codex_plus_plus::ToolActivityPresentation;
-pub use codex_plus_plus::UserMessageInbox;
 pub use codex_plus_plus::WeeklyUsageWindowAutoStart;
 pub use codex_plus_plus::codex_plus_plus_dcg_nux_shown;
 pub use codex_plus_plus::disable_unnecessary_updates;

@@ -16,7 +16,6 @@ Codex++ is a lean fork of upstream [OpenAI Codex](https://github.com/openai/code
   - Can automatically start unused weekly usage windows and redeem banked usage resets shortly before expiry or when weekly usage is exhausted.
 - Quality of life
   - Automatically waits and retries when a model is temporarily full.
-  - An experimental inbox lets the main agent leave durable messages, with unread markers for background threads.
   - Fixes TUI focus and input problems, plus crashes in long-running threads.
 - Safer automation under `--yolo`
   - Hooks can send risky actions to Guardian for an automatic review instead of only allowing or blocking them.

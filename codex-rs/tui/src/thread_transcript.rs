@@ -127,22 +127,14 @@ pub(crate) fn thread_items_to_transcript_cells(
                     remote_image_urls: item.image_urls(),
                 }));
             }
-            ThreadItem::AgentMessage {
-                id, text, phase, ..
-            } => {
-                if let Some(message) =
-                    crate::codex_plus_plus::recognize_user_message_text(&id, &text, phase.as_ref())
-                {
-                    cells.push(Arc::new(message.history_cell()));
-                } else {
-                    let parsed = parse_assistant_markdown(&text, cwd.as_path());
-                    if !parsed.visible_markdown.trim().is_empty() {
-                        cells.push(Arc::new(AgentMarkdownCell::new_with_inline_visualizations(
-                            parsed.visible_markdown,
-                            cwd.as_path(),
-                            inline_visualization_context.clone(),
-                        )));
-                    }
+            ThreadItem::AgentMessage { text, .. } => {
+                let parsed = parse_assistant_markdown(&text, cwd.as_path());
+                if !parsed.visible_markdown.trim().is_empty() {
+                    cells.push(Arc::new(AgentMarkdownCell::new_with_inline_visualizations(
+                        parsed.visible_markdown,
+                        cwd.as_path(),
+                        inline_visualization_context.clone(),
+                    )));
                 }
             }
             ThreadItem::FunctionCallOutput {

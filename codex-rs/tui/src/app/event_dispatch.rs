@@ -2618,7 +2618,6 @@ impl App {
                 weekly_usage_window_auto_start,
                 auto_redeem_resets,
                 model_capacity_retry_mode,
-                user_message_inbox,
                 tool_activity,
             } => {
                 crate::codex_plus_plus::persist_settings(
@@ -2628,7 +2627,6 @@ impl App {
                     weekly_usage_window_auto_start,
                     auto_redeem_resets,
                     Some(model_capacity_retry_mode),
-                    user_message_inbox,
                     tool_activity,
                     disable_unnecessary_updates,
                 )

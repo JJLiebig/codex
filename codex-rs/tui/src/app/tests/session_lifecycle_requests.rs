@@ -24,7 +24,6 @@ use codex_protocol::items::EnteredReviewModeItem;
 use codex_protocol::items::ExitedReviewModeItem;
 use codex_protocol::items::TurnItem;
 use codex_protocol::items::UserMessageItem;
-use codex_protocol::models::MessagePhase;
 use codex_protocol::protocol::ItemCompletedEvent;
 use codex_protocol::protocol::ReviewTarget;
 use codex_protocol::user_input::UserInput as CoreUserInput;
@@ -1994,26 +1993,15 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
         collaboration_mode_kind: Default::default(),
     }))
     .chain((0..305).map(|index| {
-        let (id, text, phase) = if index == 0 {
-            (
-                "user-message:paged".to_string(),
-                "[Message for you]\nOlder page note.".to_string(),
-                Some(MessagePhase::Commentary),
-            )
-        } else {
-            (
-                format!("history-item-{index}"),
-                format!("history output {index}"),
-                None,
-            )
-        };
         EventMsg::ItemCompleted(ItemCompletedEvent {
             thread_id,
             turn_id: "multi-page-turn".to_string(),
             item: TurnItem::AgentMessage(AgentMessageItem {
-                id,
-                content: vec![AgentMessageContent::Text { text }],
-                phase,
+                id: format!("history-item-{index}"),
+                content: vec![AgentMessageContent::Text {
+                    text: format!("history output {index}"),
+                }],
+                phase: None,
                 memory_citation: None,
                 delivery: None,
                 questions: None,
@@ -2083,11 +2071,10 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
     assert!(app.chat_widget.queued_user_message_texts().is_empty());
     let markdown = std::fs::read_to_string(export_path)?;
     assert!(
-        (1..305)
+        (0..305)
             .map(|index| format!("history output {index}"))
             .eq(markdown.lines().filter(|line| line.starts_with("history")))
     );
-    assert!(markdown.contains("Older page note."));
     assert!(
         recorded_params(&requests, "thread/turns/list")[initial_turn_requests..]
             .iter()
@@ -2122,27 +2109,6 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
     }
 
     assert!(recorded_params(&requests, "thread/items/list").len() >= initial_page_requests + 3);
-    let older_note = app
-        .transcript_cells
-        .iter()
-        .find(|cell| {
-            cell.raw_lines()
-                .iter()
-                .any(|line| line.to_string().contains("Older page note."))
-        })
-        .expect("older durable user message");
-    insta::assert_snapshot!(
-        older_note
-            .raw_lines()
-            .into_iter()
-            .map(|line| line.to_string())
-            .collect::<Vec<_>>()
-            .join("\n"),
-        @r"
-    Message for you
-    Older page note.
-    "
-    );
     let Some(Overlay::Transcript(overlay)) = app.overlay.as_mut() else {
         panic!("expected transcript overlay after Home navigation");
     };
@@ -2159,7 +2125,7 @@ async fn transcript_home_loads_every_older_history_page() -> Result<()> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(visible.contains("Older page note."), "{visible}");
+    assert!(visible.contains("history output 0"), "{visible}");
     assert!(!visible.contains("history output 304"), "{visible}");
     app_server.shutdown().await?;
     proxy.await??;

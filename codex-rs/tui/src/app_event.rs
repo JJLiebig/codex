@@ -59,7 +59,6 @@ use crate::goal_files::GoalDraft;
 use codex_app_server_protocol::AskForApproval;
 use codex_config::ModelCapacityRetryMode;
 use codex_config::ToolActivityPresentation;
-use codex_config::UserMessageInbox;
 use codex_config::WeeklyUsageWindowAutoStart;
 use codex_config::types::ApprovalsReviewer;
 use codex_config::types::AutomaticAccountSelection;
@@ -1314,7 +1313,6 @@ pub(crate) enum AppEvent {
         weekly_usage_window_auto_start: Option<WeeklyUsageWindowAutoStart>,
         auto_redeem_resets: Option<codex_config::AutoRedeemResets>,
         model_capacity_retry_mode: ModelCapacityRetryMode,
-        user_message_inbox: UserMessageInbox,
         tool_activity: ToolActivityPresentation,
     },
 

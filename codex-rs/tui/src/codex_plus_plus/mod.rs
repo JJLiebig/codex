@@ -10,7 +10,6 @@ mod model_capacity_retry;
 mod release_status;
 pub(crate) mod runtime_version;
 mod startup_accounts;
-mod user_message_inbox;
 mod weekly_window_scheduler;
 mod welcome;
 
@@ -36,10 +35,6 @@ pub(crate) use release_status::release_status_filepath;
 pub(super) use startup_accounts::StartupAccountSelection;
 pub(super) use startup_accounts::may_run_startup_account_picker;
 pub(super) use startup_accounts::run_startup_account_picker;
-pub(crate) use user_message_inbox::UserMessageInboxState;
-pub(crate) use user_message_inbox::enabled as user_message_inbox_enabled;
-pub(crate) use user_message_inbox::recognize as recognize_user_message;
-pub(crate) use user_message_inbox::recognize_text as recognize_user_message_text;
 pub(crate) use weekly_window_scheduler::WeeklyWindowScheduler;
 pub(crate) use weekly_window_scheduler::WeeklyWindowStatus;
 pub(crate) use welcome::DCG_UPDATE_TIP;

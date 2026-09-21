@@ -530,7 +530,6 @@ impl App {
         self.agents_overview.activity.remove(&thread_id);
         self.side_threads.remove(&thread_id);
         self.agent_navigation.remove(thread_id);
-        self.remove_user_message_thread_state(thread_id);
         if self.active_thread_id == Some(thread_id) {
             self.clear_active_thread().await;
         } else {

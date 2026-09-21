@@ -78,34 +78,27 @@ impl App {
             let visible_threads: Vec<_> = path_backed_threads
                 .into_iter()
                 .filter_map(|(thread_id, entry)| {
-                    let has_unread = self.has_unread_user_message(thread_id);
-                    if (!entry.is_running || entry.is_closed) && !has_unread {
+                    if !entry.is_running || entry.is_closed {
                         return None;
                     }
-                    Some((
-                        thread_id,
-                        entry.agent_path.as_deref()?.trim().to_string(),
-                        has_unread,
-                    ))
+                    Some((thread_id, entry.agent_path.as_deref()?.trim().to_string()))
                 })
                 .collect();
             let mut entries = Vec::new();
-            for (thread_id, agent_path, has_unread) in visible_threads {
+            for (thread_id, agent_path) in visible_threads {
                 let preview = if let Some(channel) = self.thread_event_channels.get(&thread_id) {
                     match channel.store.try_lock() {
                         Ok(store) => {
                             super::agent_status_feed::AgentStatusThreadPreview::from_store(
-                                agent_path, &store, has_unread,
+                                agent_path, &store,
                             )
                         }
-                        Err(_) => super::agent_status_feed::AgentStatusThreadPreview::empty(
-                            agent_path, has_unread,
-                        ),
+                        Err(_) => {
+                            super::agent_status_feed::AgentStatusThreadPreview::empty(agent_path)
+                        }
                     }
                 } else {
-                    super::agent_status_feed::AgentStatusThreadPreview::empty(
-                        agent_path, has_unread,
-                    )
+                    super::agent_status_feed::AgentStatusThreadPreview::empty(agent_path)
                 };
                 entries.push(preview);
             }
@@ -113,8 +106,6 @@ impl App {
             self.chat_widget
                 .add_to_history(super::agent_status_feed::AgentStatusHistoryCell::new(
                     entries,
-                    self.primary_thread_id
-                        .is_some_and(|thread_id| self.has_unread_user_message(thread_id)),
                 ));
         }
 
@@ -205,15 +196,10 @@ impl App {
                         )
                     });
                 let uuid = thread_id.to_string();
-                let description = if self.has_unread_user_message(thread_id) {
-                    format!("New message  {uuid}")
-                } else {
-                    uuid.clone()
-                };
                 SelectionItem {
                     name: name.clone(),
                     name_prefix_spans: agent_picker_status_dot_spans(entry.is_closed),
-                    description: Some(description),
+                    description: Some(uuid.clone()),
                     is_current: self.active_thread_id == Some(thread_id),
                     actions: vec![Box::new(move |tx| {
                         tx.send(AppEvent::SelectAgentThread(id));
@@ -344,7 +330,6 @@ impl App {
             Err(err) => {
                 if Self::is_terminal_thread_read_error(&err) && !has_replay_channel {
                     self.agent_navigation.remove(thread_id);
-                    self.remove_user_message_thread_state(thread_id);
                     return false;
                 }
                 let is_closed = Self::closed_state_for_thread_read_error(
@@ -792,7 +777,6 @@ impl App {
         self.pending_server_profiles.clear();
         self.agents_overview.activity.clear();
         self.agent_navigation.clear();
-        self.clear_user_message_unread_state();
         self.side_threads.clear();
         self.active_thread_id = None;
         self.active_thread_rx = None;

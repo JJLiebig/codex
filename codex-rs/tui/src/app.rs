@@ -262,8 +262,6 @@ mod thread_title;
 mod transcript_export;
 #[path = "app/codex_plus_plus/usage_reset_resume.rs"]
 mod usage_reset_resume;
-#[path = "codex_plus_plus/user_messages.rs"]
-mod user_messages;
 mod user_verification;
 mod user_verification_errors;
 mod user_verification_requests;
@@ -280,7 +278,6 @@ use self::side::SideParentStatusChange;
 use self::side::SideThreadState;
 use self::startup_prompts::*;
 use self::thread_events::*;
-use self::user_messages::UserMessageUnreadState;
 
 const EXTERNAL_EDITOR_HINT: &str = "Save and close external editor to continue.";
 const THREAD_EVENT_CHANNEL_CAPACITY: usize = 32768;
@@ -645,7 +642,6 @@ pub(crate) struct App {
     pending_thread_titles: HashSet<(ThreadId, ThreadTitleDestination)>,
     thread_event_listener_tasks: HashMap<ThreadId, JoinHandle<()>>,
     agent_navigation: AgentNavigationState,
-    user_message_unread: UserMessageUnreadState,
     agents_overview: agents_overview::AgentsOverviewState,
     side_threads: HashMap<ThreadId, SideThreadState>,
     abandoned_side_threads: HashSet<ThreadId>,

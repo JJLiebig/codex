@@ -1,5 +1,0 @@
----
-source: tui/src/codex_plus_plus/user_message_inbox_tests.rs
-expression: "rendered(&UserMessageInboxState::default().history_cell(false), 80,)"
----
-Enable Agent inbox messages in /codexplusplus, then restart Codex.

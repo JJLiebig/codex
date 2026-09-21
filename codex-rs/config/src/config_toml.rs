@@ -9,7 +9,6 @@ use crate::AutoRedeemResets;
 use crate::HooksToml;
 use crate::ModelCapacityRetryMode;
 use crate::ToolActivityPresentation;
-use crate::UserMessageInbox;
 use crate::WeeklyUsageWindowAutoStart;
 use crate::browser_use::BrowserUseConfigToml;
 use crate::computer_use::ComputerUseConfigToml;
@@ -286,8 +285,6 @@ pub struct ConfigToml {
     pub auto_redeem_resets: Option<AutoRedeemResets>,
     /// Whether Codex++ keeps retrying indefinitely while a model is at capacity.
     pub model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
-    /// Whether agents can leave durable, non-blocking messages for the user.
-    pub user_message_inbox: Option<UserMessageInbox>,
 
     /// Suppress time-driven progress updates; enabled by default.
     pub disable_unnecessary_updates: Option<bool>,
@@ -1117,14 +1114,6 @@ mod tests {
                 ModelCapacityRetryMode::Indefinite,
             ]
         );
-    }
-
-    #[test]
-    fn user_message_inbox_defaults_disabled_and_parses_override() {
-        let config: ConfigToml =
-            toml::from_str("user_message_inbox = \"enabled\"").expect("valid inbox setting");
-        assert_eq!(ConfigToml::default().user_message_inbox, None);
-        assert_eq!(config.user_message_inbox, Some(UserMessageInbox::Enabled));
     }
 
     #[test]
