@@ -88,6 +88,7 @@ impl App {
         } else {
             ThreadSessionState {
                 background_completion_waiting: false,
+                windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
                 thread_id,
                 forked_from_id: None,
                 fork_parent_title: None,
@@ -112,6 +113,8 @@ impl App {
                 rollout_path: thread.path.clone(),
             }
         };
+        session.windows_sandbox_host =
+            crate::windows_sandbox::host_from_environments(thread.environments.as_deref());
         session.thread_id = thread_id;
         session.thread_name = thread.name.clone();
         session.model_provider_id = thread.model_provider.clone();
@@ -171,6 +174,7 @@ mod tests {
     fn test_thread_session(thread_id: ThreadId, cwd: PathBuf) -> ThreadSessionState {
         ThreadSessionState {
             background_completion_waiting: false,
+            windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
             thread_id,
             forked_from_id: None,
             fork_parent_title: None,

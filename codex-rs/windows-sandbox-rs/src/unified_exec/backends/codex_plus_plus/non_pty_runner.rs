@@ -46,7 +46,6 @@ pub async fn spawn_current_user_runner_session(
         timeout_ms: None,
         tty: false,
         stdin_open,
-        use_private_desktop: false,
         private_desktop_name: None,
     };
     let transport = tokio::task::spawn_blocking(move || {

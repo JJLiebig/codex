@@ -122,10 +122,14 @@ pub unsafe fn create_process(
         | (None, ChildConsoleMode::Inherit)
         | (None, ChildConsoleMode::NoWindow) => 0,
     };
-    let attr_count = if stdio.is_some() { 2 } else { 1 };
+    let preserve_app_context = crate::app_package::current_process_has_package_identity()?;
+    let attr_count = if stdio.is_some() { 2 } else { 1 } + u32::from(preserve_app_context);
     let mut attrs = ProcThreadAttributeList::new(attr_count)?;
     if matches!(execution_mode, ProcessExecutionMode::Token(_)) {
         attrs.set_job(job.as_raw_handle() as HANDLE)?;
+    }
+    if preserve_app_context {
+        attrs.preserve_desktop_app_context()?;
     }
 
     let mut si: STARTUPINFOEXW = std::mem::zeroed();

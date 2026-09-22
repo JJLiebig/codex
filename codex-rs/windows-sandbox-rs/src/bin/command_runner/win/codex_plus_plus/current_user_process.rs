@@ -20,10 +20,7 @@ pub(in super::super) fn spawn_current_user_process(
         true => StdinMode::Open,
         false => StdinMode::Closed,
     };
-    let desktop = LaunchDesktop::prepare(
-        /*use_private_desktop*/ false,
-        Some(req.codex_home.as_path()),
-    )?;
+    let desktop = LaunchDesktop::current_user();
     let pipes = spawn_process_with_pipes(
         ProcessExecutionMode::CurrentUser,
         &req.command,

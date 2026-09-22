@@ -31,6 +31,7 @@ mod completion_wait;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ThreadSessionState {
+    pub(crate) windows_sandbox_host: crate::app::WindowsSandboxHost,
     pub(crate) thread_id: ThreadId,
     pub(crate) background_completion_waiting: bool,
     pub(crate) forked_from_id: Option<ThreadId>,

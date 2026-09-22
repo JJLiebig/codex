@@ -85,7 +85,7 @@ pub(crate) fn start_runner_stdout_reader(
     exit_tx: oneshot::Sender<i32>,
 ) {
     std::thread::spawn(move || {
-        loop {
+        let exit = loop {
             let msg = match crate::ipc_framed::read_frame(&mut pipe_read) {
                 Ok(Some(v)) => v,
                 Ok(None) => {
@@ -95,8 +95,7 @@ pub(crate) fn start_runner_stdout_reader(
                         stderr_tx.as_ref(),
                         direct_stderr_tx.as_ref(),
                     );
-                    let _ = exit_tx.send(-1);
-                    break;
+                    break None;
                 }
                 Err(err) => {
                     send_runner_error(
@@ -105,8 +104,7 @@ pub(crate) fn start_runner_stdout_reader(
                         stderr_tx.as_ref(),
                         direct_stderr_tx.as_ref(),
                     );
-                    let _ = exit_tx.send(-1);
-                    break;
+                    break None;
                 }
             };
 
@@ -128,8 +126,7 @@ pub(crate) fn start_runner_stdout_reader(
                     }
                 }
                 Message::Exit { payload } => {
-                    let _ = exit_tx.send(payload.exit_code);
-                    break;
+                    break Some((payload.exit_code, payload.timed_out));
                 }
                 Message::Error { payload } => {
                     send_runner_error(
@@ -138,8 +135,7 @@ pub(crate) fn start_runner_stdout_reader(
                         stderr_tx.as_ref(),
                         direct_stderr_tx.as_ref(),
                     );
-                    let _ = exit_tx.send(-1);
-                    break;
+                    break None;
                 }
                 Message::SpawnReady { .. }
                 | Message::Stdin { .. }
@@ -148,7 +144,9 @@ pub(crate) fn start_runner_stdout_reader(
                 | Message::SpawnRequest { .. }
                 | Message::Terminate { .. } => {}
             }
-        }
+        };
+        crate::elevated::runner_metrics::record_command(exit);
+        let _ = exit_tx.send(exit.map_or(-1, |(code, _)| code));
     });
 }
 
