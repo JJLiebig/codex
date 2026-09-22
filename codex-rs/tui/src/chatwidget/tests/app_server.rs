@@ -1,3 +1,4 @@
+use super::helpers::drain_insert_history_transcript;
 use super::*;
 use codex_app_server_protocol::AuthRecoveryNotification;
 use codex_protocol::error::CodexErr;
@@ -13,6 +14,7 @@ fn thread_settings_for_test(
     codex_app_server_protocol::ThreadSettingsUpdatedNotification {
         thread_id: thread_id.to_string(),
         thread_settings: codex_app_server_protocol::ThreadSettings {
+            disabled_plugin_ids: Vec::new(),
             cwd: test_path_buf("/tmp/thread-settings").abs(),
             approval_policy: AskForApproval::OnRequest,
             approvals_reviewer: codex_app_server_protocol::ApprovalsReviewer::AutoReview,
@@ -44,6 +46,7 @@ fn thread_settings_for_test(
 fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::ThreadSessionState {
     crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
         forked_from_id: None,
         fork_parent_title: None,
@@ -64,6 +67,39 @@ fn configured_thread_session(thread_id: ThreadId) -> crate::session_state::Threa
         message_history: None,
         network_proxy: None,
         rollout_path: None,
+    }
+}
+
+#[tokio::test]
+async fn session_header_uses_catalog_display_name_without_changing_model() {
+    let slug = "us.openai.gpt-5.6-luna";
+    for (name, first_event, display_name) in [
+        ("startup", true, Some("GPT-5.6 Luna")),
+        ("resume", false, Some("GPT-5.6 Luna")),
+        ("unknown_model", false, None),
+    ] {
+        let (mut chat, mut events, _ops) = make_chatwidget_manual(Some(slug)).await;
+        let mut preset = get_available_model(&chat, "gpt-5.5");
+        preset.model = slug.to_string();
+        preset.display_name = display_name.unwrap_or_default().to_string();
+        chat.model_catalog = Arc::new(ModelCatalog::new(
+            display_name.map(|_| preset).into_iter().collect(),
+        ));
+        chat.show_welcome_banner = first_event;
+        chat.local_settings.tui.show_tooltips = false;
+        let mut session = configured_thread_session(ThreadId::new());
+        session.model = slug.to_string();
+        session.reasoning_effort = Some(ReasoningEffortConfig::High);
+        chat.handle_thread_session(session);
+
+        let rendered = drain_insert_history_with(&mut events, HistoryCell::raw_lines)
+            .iter()
+            .map(|lines| lines_to_single_string(lines))
+            .collect::<String>()
+            .replace(codex_cli_version(), "<VERSION>")
+            .replace("C:\\tmp\\thread-settings", "/tmp/thread-settings");
+        assert_chatwidget_snapshot!(format!("catalog_model_session_header_{name}"), rendered);
+        assert_eq!(chat.current_model(), slug);
     }
 }
 
@@ -825,11 +861,11 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
         /*replay_kind*/ None,
     );
 
-    let completion_cells = drain_insert_history(&mut rx)
+    let completion_cells = drain_insert_history_normalized(&mut rx)
         .iter()
-        .map(|lines| normalize_completion_timestamps(lines_to_single_string(lines).trim()))
+        .map(|lines| lines_to_single_string(lines).trim().to_string())
         .collect::<Vec<_>>();
-    assert_eq!(completion_cells, vec!["done [completion time]"]);
+    assert_eq!(completion_cells, vec!["[completion time]"]);
     assert!(!chat.bottom_pane.is_task_running());
     assert!(chat.bottom_pane.status_widget().is_none());
     assert_eq!(
@@ -889,7 +925,7 @@ async fn live_app_server_warning_notification_renders_message() {
         /*replay_kind*/ None,
     );
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     assert_eq!(cells.len(), 1, "expected one warning history cell");
     let rendered = lines_to_single_string(&cells[0]);
     let normalized = rendered.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -920,7 +956,7 @@ async fn live_app_server_warning_notification_renders_message() {
     ] {
         chat.handle_server_notification(notification, /*replay_kind*/ None);
 
-        let [cell] = drain_insert_history(&mut rx)
+        let [cell] = drain_insert_history_transcript(&mut rx)
             .try_into()
             .expect("expected one authentication recovery history cell");
         recovery_messages.push_str(&lines_to_single_string(&cell));
@@ -943,7 +979,7 @@ async fn live_app_server_guardian_warning_notification_renders_message() {
         /*replay_kind*/ None,
     );
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     assert_eq!(cells.len(), 1, "expected one warning history cell");
     let rendered = lines_to_single_string(&cells[0]);
     assert!(
@@ -970,7 +1006,7 @@ async fn live_app_server_strict_review_required_notification_renders_message() {
         /*replay_kind*/ None,
     );
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     assert_eq!(cells.len(), 1, "expected one warning history cell");
     assert_chatwidget_snapshot!("strict_review_required", lines_to_single_string(&cells[0]));
     chat.on_exec_command_output_delta("cmd-1", "streamed output\n");
@@ -986,7 +1022,7 @@ async fn live_app_server_strict_review_required_notification_renders_message() {
 }
 
 #[tokio::test]
-async fn config_warning_during_turn_remains_inline() {
+async fn config_warning_during_turn_retains_transcript_details() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
     handle_turn_started(&mut chat, "turn-1");
     chat.handle_server_notification(
@@ -998,7 +1034,7 @@ async fn config_warning_during_turn_remains_inline() {
         }),
         /*replay_kind*/ None,
     );
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     insta::assert_snapshot!(
         "runtime_config_warning",
         cells
@@ -1009,46 +1045,52 @@ async fn config_warning_during_turn_remains_inline() {
 }
 
 #[tokio::test]
-async fn live_app_server_config_warning_prefixes_summary() {
+async fn startup_config_warning_is_not_repeated_by_thread() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    let message = "Codex is ignoring 1 unrecognized configuration setting. Check for typos or deprecated settings.";
 
-    chat.handle_server_notification(
+    for notification in [
         ServerNotification::ConfigWarning(ConfigWarningNotification {
-            summary: "Invalid configuration; using defaults.".to_string(),
+            summary: message.to_string(),
             details: None,
             path: None,
             range: None,
         }),
-        /*replay_kind*/ None,
-    );
+        ServerNotification::Warning(WarningNotification {
+            thread_id: Some("thread-1".to_string()),
+            message: message.to_string(),
+        }),
+    ] {
+        chat.handle_server_notification(notification, /*replay_kind*/ None);
+    }
 
     let cells = drain_insert_history_transcript(&mut rx);
-    assert_eq!(cells.len(), 1, "expected one warning history cell");
-    let rendered = lines_to_single_string(&cells[0]);
-    assert!(
-        rendered.contains("Invalid configuration; using defaults."),
-        "expected config warning summary, got {rendered}"
-    );
+    assert_eq!(cells.len(), 1);
+    insta::assert_snapshot!(lines_to_single_string(&cells[0]), @"
+    ⚠ Codex is ignoring 1 unrecognized configuration setting. Check for typos or
+      deprecated settings.
+    ");
 }
 
 #[tokio::test]
 async fn live_app_server_file_change_item_started_preserves_changes() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
+    let item = AppServerThreadItem::FileChange {
+        id: "patch-1".to_string(),
+        changes: vec![FileUpdateChange {
+            path: "foo.txt".to_string(),
+            kind: PatchChangeKind::Add,
+            diff: "hello\n".to_string(),
+        }],
+        status: AppServerPatchApplyStatus::InProgress,
+    };
     chat.handle_server_notification(
         ServerNotification::ItemStarted(ItemStartedNotification {
             thread_id: "thread-1".to_string(),
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
-            item: AppServerThreadItem::FileChange {
-                id: "patch-1".to_string(),
-                changes: vec![FileUpdateChange {
-                    path: "foo.txt".to_string(),
-                    kind: PatchChangeKind::Add,
-                    diff: "hello\n".to_string(),
-                }],
-                status: AppServerPatchApplyStatus::InProgress,
-            },
+            item: item.clone(),
         }),
         /*replay_kind*/ None,
     );
@@ -1056,10 +1098,25 @@ async fn live_app_server_file_change_item_started_preserves_changes() {
     let cells = drain_insert_history(&mut rx);
     assert!(!cells.is_empty(), "expected patch history to be rendered");
     let transcript = lines_to_single_string(cells.last().expect("patch cell"));
-    assert!(
-        transcript.contains("Added foo.txt") || transcript.contains("Edited foo.txt"),
-        "expected patch summary to include foo.txt, got: {transcript}"
+    let AppServerThreadItem::FileChange { id, changes, .. } = item else {
+        unreachable!()
+    };
+    chat.replay_thread_item(
+        AppServerThreadItem::FileChange {
+            id,
+            changes,
+            status: AppServerPatchApplyStatus::Completed,
+        },
+        "turn-1".to_string(),
+        ReplayKind::ResumeInitialMessages,
     );
+    let replayed = drain_insert_history(&mut rx);
+    assert_eq!(replayed.len(), 1);
+    assert_eq!(lines_to_single_string(&replayed[0]), transcript);
+    insta::assert_snapshot!(transcript, @"
+    • Added foo.txt (+1 -0)
+        1 +hello
+    ");
 }
 
 #[tokio::test]
@@ -1075,6 +1132,7 @@ async fn live_app_server_command_execution_strips_shell_wrapper() {
             turn_id: "turn-1".to_string(),
             started_at_ms: 0,
             item: AppServerThreadItem::CommandExecution {
+                model_context: None,
                 id: "cmd-1".to_string(),
                 command: command.clone(),
                 cwd: test_path_buf("/tmp").abs().into(),
@@ -1099,6 +1157,7 @@ async fn live_app_server_command_execution_strips_shell_wrapper() {
             turn_id: "turn-1".to_string(),
             completed_at_ms: 0,
             item: AppServerThreadItem::CommandExecution {
+                model_context: None,
                 id: "cmd-1".to_string(),
                 command,
                 cwd: test_path_buf("/tmp").abs().into(),
@@ -1616,13 +1675,11 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
         /*replay_kind*/ None,
     );
 
-    let status = chat
-        .bottom_pane
-        .status_widget()
-        .expect("status indicator should be visible");
-    assert_eq!(status.header(), "Working");
-    assert_eq!(status.details(), None);
+    assert_eq!(chat.status_state.current_status.header, "Working");
+    assert_eq!(chat.status_state.current_status.details, None);
     assert!(chat.status_state.retry_status_header.is_none());
+    assert!(chat.bottom_pane.status_widget().is_none());
+    assert!(chat.active_cell_is_stream_tail());
 }
 
 #[tokio::test]
@@ -1646,7 +1703,7 @@ async fn live_app_server_rate_limit_error_renders_upstream_message() {
 }
 
 #[tokio::test]
-async fn live_app_server_server_overloaded_error_renders_warning() {
+async fn live_app_server_server_overloaded_error_renders_error() {
     let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
 
     chat.handle_server_notification(
@@ -1684,7 +1741,7 @@ async fn live_app_server_server_overloaded_error_renders_warning() {
 
     let cells = drain_insert_history(&mut rx);
     assert_eq!(cells.len(), 1);
-    assert_eq!(lines_to_single_string(&cells[0]), "⚠ server overloaded\n");
+    assert_eq!(lines_to_single_string(&cells[0]), "■ server overloaded\n");
     assert!(!chat.bottom_pane.is_task_running());
 }
 
@@ -1790,7 +1847,7 @@ async fn live_app_server_model_verification_renders_warning() {
         /*replay_kind*/ None,
     );
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     assert_eq!(cells.len(), 1);
     let rendered = lines_to_single_string(&cells[0]);
     assert!(rendered.contains("multiple flags for possible cybersecurity risk"));

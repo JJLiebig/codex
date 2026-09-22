@@ -1,5 +1,4 @@
 use crate::guardian::GuardianApprovalRequest;
-use crate::guardian::guardian_timeout_message;
 use crate::guardian::new_guardian_review_id;
 use crate::guardian::preflight_guardian_action;
 use crate::guardian::review_pre_tool_use;
@@ -126,7 +125,12 @@ pub(crate) fn review<'a>(
                 ))
             }
             ReviewDecision::Denied { rejection } => Err(rejection),
-            ReviewDecision::TimedOut => Err(guardian_timeout_message(invocation.turn.model_info())),
+            ReviewDecision::TimedOut => Err(codex_prompts::ResolvedModelMessages::from_model(
+                &invocation.step_context.settings.model_info,
+            )
+            .auto_review()
+            .timeout_instructions
+            .to_string()),
             ReviewDecision::Abort => Err(
                 "Automatic approval review was cancelled. The tool call was blocked.".to_string(),
             ),

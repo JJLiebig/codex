@@ -32,9 +32,10 @@ use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
-use crate::responses_retry::handle_retryable_response_stream_error;
+use crate::responses_retry::handle_response_stream_error;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
+use crate::session::daemon_recovery::RecordedTurnInput;
 use crate::session::session::Session;
 use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
@@ -93,7 +94,6 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::MessagePhase;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ModelInfo;
-use codex_protocol::openai_models::ModelMessages;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::AgentReasoningSectionBreakEvent;
 use codex_protocol::protocol::CodexErrorInfo;
@@ -465,7 +465,7 @@ pub(crate) async fn run_turn(
             &turn_context,
             &turn_context.capture_current_model_info(),
             &pending_input,
-            PersistContext::Standard,
+            PersistContext::SteeredUserInput,
             &mut turn_state.completion_claim,
         )
         .await;
@@ -473,6 +473,9 @@ pub(crate) async fn run_turn(
             turn_state.stop();
             break;
         }
+
+        // Input and turn-start injections are recorded before recovery can continue this turn.
+        turn_context.extension_data.insert(RecordedTurnInput);
         let window_id = sess.current_window_id().await;
         super::rollout_budget::maybe_record_reminder(
             sess.as_ref(),
@@ -559,7 +562,7 @@ pub(crate) async fn run_turn(
                 .record_step_world_state_if_changed(&world_state, step_context.as_ref())
                 .await?;
 
-            // Keep the override after accepted input so ordinary turn rollback removes it too.
+            // Keep the override after accepted input so history truncation removes them together.
             sess.record_reasoning_effort_override(step_context.as_ref())
                 .await;
 
@@ -573,7 +576,7 @@ pub(crate) async fn run_turn(
             .await;
 
             let responses_metadata = sess
-                .responses_metadata(turn_context.as_ref(), CodexResponsesRequestKind::Turn)
+                .responses_metadata(step_context.as_ref(), CodexResponsesRequestKind::Turn)
                 .await;
             run_sampling_request(
                 Arc::clone(&sess),
@@ -760,6 +763,39 @@ pub(crate) async fn run_turn(
                         turn_state.stop();
                         return Ok(last_agent_message);
                     }
+                    // Token-budget resets do not summarize, so preserve their existing rollover
+                    // policy. Keep summarizing compaction in this task to serialize history updates.
+                    let config = &turn_context.config;
+                    if config.model_post_turn_compact_threshold_percent > 0
+                        && !config.features.enabled(Feature::TokenBudget)
+                        && super::context_window::context_window_token_status(
+                            sess.as_ref(),
+                            turn_context.as_ref(),
+                        )
+                        .await
+                        .turn_end_compaction_threshold_reached
+                        && !sess.input_queue.has_pending_input(&sess.active_turn).await
+                        && !cancellation_token.is_cancelled()
+                        && let Err(err) = run_auto_compact(
+                            &sess,
+                            Arc::clone(&step_context),
+                            /*fallback_step_context*/ None,
+                            client_session,
+                            usage_limit_account_attempts,
+                            InitialContextInjection::DoNotInject,
+                            CompactionReason::ContextLimit,
+                            CompactionPhase::PostTurn,
+                        )
+                        .await
+                    {
+                        if matches!(
+                            err.details(),
+                            CodexErrorDetails::Interrupted | CodexErrorDetails::TurnAborted
+                        ) {
+                            return Err(err);
+                        }
+                        warn!(error = %err, "Post-turn compaction failed; preserving the completed turn");
+                    }
                     break;
                 }
                 continue;
@@ -925,6 +961,14 @@ async fn run_hooks_and_collect_inputs(
             if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty()) {
                 accepted_user_input = true;
             }
+            // Tool outputs retain their durability barrier, including in mixed input batches.
+            let input_persist_context = if persist_context == PersistContext::SteeredUserInput
+                && matches!(input_item, TurnInput::FunctionCallOutput(_))
+            {
+                PersistContext::Standard
+            } else {
+                persist_context
+            };
             if !completion_wake::record_claimed_completion(
                 sess,
                 turn_context,
@@ -940,7 +984,7 @@ async fn run_hooks_and_collect_inputs(
                     model_info,
                     input_item.clone(),
                     hook_outcome.additional_contexts,
-                    persist_context,
+                    input_persist_context,
                 )
                 .await;
             }
@@ -983,7 +1027,8 @@ async fn required_mcp_servers_for_input(
         .services
         .plugins_manager
         .plugins_for_config(&turn_context.config.plugins_config_input())
-        .await;
+        .await
+        .without_plugins(&turn_context.disabled_plugin_ids);
     let current_config = sess.services.mcp_runtime.current_config();
     let mentioned_plugins =
         collect_explicit_plugin_mentions(user_input, loaded_plugins.capability_summaries());
@@ -1284,6 +1329,7 @@ async fn track_turn_resolved_config_analytics(
             turn_id: turn_context.sub_id.clone(),
             thread_id: sess.thread_id.to_string(),
             turn_metadata: turn_context.turn_metadata_state.clone(),
+            active_plugin_ids_at_turn_start: turn_context.active_plugin_ids_for_telemetry(),
             num_input_images: input
                 .iter()
                 .filter_map(|item| match item {
@@ -1419,6 +1465,12 @@ async fn maybe_run_previous_model_inline_compact(
         turn_context.model_info().comp_hash.as_deref(),
     );
     let previous_model = previous_turn_settings.model;
+    if crate::guardian::is_basic_session_source(&turn_context.session_source)
+        && !should_compact_for_comp_hash_change
+        && previous_model == turn_context.model_info().slug
+    {
+        return Ok(());
+    }
     let previous_model_turn_context = Arc::new(
         turn_context
             .with_model(previous_model.clone(), &sess.services.models_manager)
@@ -1681,10 +1733,8 @@ async fn run_sampling_request(
     let mut original_input = None;
     let mut executed_tool_calls_by_output = HashMap::new();
     loop {
-        // A retry must not attribute the next tool call to the previous response.
-        turn_context
-            .extension_data
-            .remove::<codex_api::ResponseId>();
+        // Running code-mode cells can request review while this response is in flight.
+        // Keep the latest received ID until response.created replaces it.
         let prompt_input = if let Some(input) = initial_input.take() {
             input
         } else {
@@ -1786,15 +1836,6 @@ async fn run_sampling_request(
             original_input = Some(prompt.input);
         }
 
-        if !err.is_retryable()
-            && !crate::codex_plus_plus::model_capacity_retry::applies_to_sampling(
-                &err,
-                &turn_context.session_source,
-            )
-        {
-            return Err(err);
-        }
-
         if crate::codex_plus_plus::model_capacity_retry::applies_to_sampling(
             &err,
             &turn_context.session_source,
@@ -1809,7 +1850,7 @@ async fn run_sampling_request(
             )
             .await?;
         } else {
-            handle_retryable_response_stream_error(
+            handle_response_stream_error(
                 &mut retry_state,
                 max_retries,
                 err,
@@ -1838,8 +1879,8 @@ pub(crate) async fn prepare_tool_recommendations(
         .services
         .plugins_manager
         .plugins_for_config(&turn_context.config.plugins_config_input())
-        .instrument(trace_span!("built_tools.load_plugins"))
-        .await;
+        .await
+        .without_plugins(&turn_context.disabled_plugin_ids);
     let tool_suggest_is_enabled = tool_suggest_enabled(turn_context);
     let auth = if tool_suggest_is_enabled {
         sess.services.auth_manager.auth().await
@@ -1881,7 +1922,6 @@ pub(crate) async fn built_tools(
     sess: &Session,
     turn_context: &TurnContext,
     model_info: &codex_protocol::openai_models::ModelInfo,
-    model_messages: Option<&ModelMessages>,
     environments: &TurnEnvironmentSnapshot,
     mcp: &Arc<codex_mcp::McpBinding>,
     step_store: &ExtensionData,
@@ -1951,7 +1991,6 @@ pub(crate) async fn built_tools(
         sess,
         turn_context,
         model_info,
-        model_messages,
         environments,
         mcp,
         apps_enabled,
@@ -2602,7 +2641,12 @@ async fn try_run_sampling_request(
         sandbox_policy = &turn_context.sandbox_policy(),
         effort = step_context.settings.reasoning_effort(),
         auth_mode = sess.services.auth_manager.auth_mode(),
-        features = sess.features.enabled_features(),
+        tags_json = tracing::field::display(serde_json::json!(crate::feedback_config::usage_tags(
+            &turn_context.config,
+            &sess.features,
+            &step_context.settings.model_info,
+            step_context.settings.service_tier.as_deref(),
+        ))),
     );
     let inference_trace = sess.services.rollout_thread_trace.inference_trace_context(
         turn_context.sub_id.as_str(),
@@ -2998,7 +3042,11 @@ async fn try_run_sampling_request(
                 )
                 .await;
                 let budget_result = sess
-                    .record_token_usage_info(&turn_context, token_usage.as_ref())
+                    .record_token_usage_info(
+                        &turn_context,
+                        &step_context.settings,
+                        token_usage.as_ref(),
+                    )
                     .await;
                 should_emit_token_count = true;
                 should_emit_turn_diff = true;

@@ -19,7 +19,7 @@ fn status(
 fn render_case(label: &str, status: ForkReleaseStatus, codex_home: &Path) -> String {
     let rendered = lag_warning(&status, codex_home)
         .map(|cell| {
-            cell.display_lines(80)
+            cell.transcript_lines(80)
                 .into_iter()
                 .map(|line| {
                     line.spans

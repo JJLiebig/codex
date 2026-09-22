@@ -1,27 +1,26 @@
 ---
 source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/codex_plus_plus_tests.rs
-assertion_line: 63
 expression: "render_settings(AutomaticAccountSelection::Enabled,\nWeeklyUsageWindowAutoStart::Enabled, ModelCapacityRetryMode::Bounded,)"
 ---
-
   Codex++ Settings
   Select the settings to enable.
 
-› 1. [*] Automatic account selection                 Choose and switch accounts
-                                                     when needed.
-  2. [*] Start unused weekly windows                 Keep imported accounts ready
-                                                     to use.
+
+› 1. [*] Automatic account selection                 Choose and switch accounts when
+                                                     needed.                        
+  2. [*] Start unused weekly windows                 Keep imported accounts ready to
+                                                     use.
   3. [ ] Auto-redeem expiring resets (Experimental)  Within 60m of expiry.
   4. [ ] Auto-redeem at exhaustion (Experimental)    0% weekly quota; reset ≥72h.
-  5. [ ] Keep retrying at capacity                   After 1, 2, 5, and 15
-                                                     minutes, retry every 15
-                                                     minutes.
+  5. [ ] Keep retrying at capacity                   After 1, 2, 5, and 15 minutes,
+                                                     retry every 15 minutes.
   6. [ ] Compact tool activity                       Keep routine tool details in
                                                      Ctrl+T instead of the main
                                                      conversation.
   7. [*] Disable unnecessary updates to save tokens  Report meaningful progress
                                                      instead of timed status
                                                      updates.
+
 
 
 

@@ -48,10 +48,7 @@ fn current_user_process_is_assigned_before_create_process_returns() {
                 stderr.as_raw_handle() as HANDLE,
             )),
             ChildConsoleMode::NoWindow,
-            LaunchDesktop::prepare(
-                /*use_private_desktop*/ false, /*logs_base_dir*/ None,
-            )
-            .unwrap(),
+            LaunchDesktop::current_user(),
         )
     }
     .unwrap();

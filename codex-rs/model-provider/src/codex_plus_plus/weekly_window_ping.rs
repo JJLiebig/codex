@@ -132,6 +132,7 @@ async fn ping_weekly_window_inner(
         Arc::new(OpenAiModelsEndpoint::new(
             provider_info,
             Some(Arc::clone(&auth_manager)),
+            /*gateway_auth_manager*/ None,
         )),
         Some(Arc::clone(&auth_manager)),
     );
@@ -261,6 +262,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         | ApiError::RateLimit(_)
         | ApiError::InvalidRequest { .. }
         | ApiError::CyberPolicy { .. }
+        | ApiError::BioPolicy { .. }
         | ApiError::MisalignmentPolicyViolation { .. } => {
             WeeklyWindowPingOutcome::Rejected { status: None }
         }

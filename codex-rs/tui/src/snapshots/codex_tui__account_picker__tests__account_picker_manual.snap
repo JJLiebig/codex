@@ -2,10 +2,10 @@
 source: tui/src/account_picker_tests.rs
 expression: terminal.backend()
 ---
-
   Choose account
 
+
   1. first@example.com           Resets: 0  5h   0% (Jul 10 17:00)  Weekly  12% (Jul 14)    In use
-› 2. best@example.com (default)  Resets: 2  5h  72% (Jul 10 18:00)
+› 2. best@example.com (default)  Resets: 2  5h  72% (Jul 10 18:00)                                  
   3. unknown@example.com         Resets: -  Usage unknown
   4. weekly@example.com          Resets: 2  Weekly  84% (Jul 15 12:00)
