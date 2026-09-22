@@ -41,6 +41,7 @@ fn shimmer_and_progress_are_independent_and_obey_master_switch() {
                 let lines = StatusIndicator {
                     row: &row,
                     timer: &timer,
+                    header: Cow::Borrowed(&row.header),
                 }
                 .lines(/*width*/ 80);
                 let header = &lines[0];

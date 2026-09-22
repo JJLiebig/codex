@@ -1186,6 +1186,7 @@ mod tests {
         let line = build_full_line(
             &row,
             /*desc_col*/ 24,
+            /*width*/ 80,
             SelectionDescriptionLayout::Columns,
         );
 

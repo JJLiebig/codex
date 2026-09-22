@@ -588,6 +588,7 @@ async fn command_center_new_preserves_only_selected_server_profiles() -> Result<
         /*log_db*/ None,
         /*state_db*/ None,
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
+        /*initial_account_id*/ None,
     )
     .await?;
     let mut server = AppServerSession::new(

@@ -750,7 +750,7 @@ async fn startup_draft_waits_for_account_picker_before_revealing_composer() {
     pump.initial_screen = StartupDraftInitialScreen::AccountPicker;
     let mut tui = crate::tui::test_support::make_test_tui().expect("create test terminal");
 
-    pump.show_initial_screen(&mut tui)
+    pump.redraw_if_visible(&mut tui)
         .expect("keep the composer hidden before account picker eligibility resolves");
     pump.flush_pending_events(&mut tui)
         .await

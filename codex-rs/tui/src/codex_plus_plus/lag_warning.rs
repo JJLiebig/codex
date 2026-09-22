@@ -1,11 +1,11 @@
-use crate::history_cell::PrefixedWrappedHistoryCell;
+use crate::history_cell::WarningHistoryCell;
 use codex_install_context::codex_plus_plus::ForkReleaseStatus;
 use std::path::Path;
 
 pub(crate) fn lag_warning(
     status: &ForkReleaseStatus,
     codex_home: &Path,
-) -> Option<PrefixedWrappedHistoryCell> {
+) -> Option<WarningHistoryCell> {
     let lag = status.stable_minor_lag?;
     status
         .warning_state_key
