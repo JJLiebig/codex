@@ -932,7 +932,7 @@ fn auto_auth_storage_with_mock(codex_home: &Path) -> (AutoAuthStorage, MockKeyri
 
 fn set_auto_keyring_error(mock_keyring: &MockKeyringStore, codex_home: &Path, operation: &str) {
     mock_keyring.set_error(
-        &compute_keyring_account(codex_home),
+        &compute_keyring_account(codex_home, LocalSecretsNamespace::CodexAuth),
         KeyringError::Invalid("error".into(), operation.into()),
     );
 }
