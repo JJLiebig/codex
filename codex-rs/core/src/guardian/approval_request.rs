@@ -105,6 +105,7 @@ impl GuardianApprovalRequest {
             | Self::WriteStdin { .. }
             | Self::ApplyPatch { .. }
             | Self::McpToolCall { .. }
+            | Self::PreToolUse { .. }
             | Self::RequestPermissions { .. } => None,
         }
     }

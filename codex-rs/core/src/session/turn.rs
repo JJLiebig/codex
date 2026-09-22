@@ -780,7 +780,7 @@ pub(crate) async fn run_turn(
                             &sess,
                             Arc::clone(&step_context),
                             /*fallback_step_context*/ None,
-                            &mut client_session,
+                            client_session,
                             usage_limit_account_attempts,
                             InitialContextInjection::DoNotInject,
                             CompactionReason::ContextLimit,

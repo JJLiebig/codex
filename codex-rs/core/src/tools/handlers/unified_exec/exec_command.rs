@@ -330,7 +330,6 @@ impl ExecCommandHandler {
                 "exec_command shell identity changed after PreToolUse hooks".to_string(),
             ));
         }
-        let process_id = manager.allocate_process_id().await;
         let command = resolved_command.command;
         let shell_type = resolved_command.shell_type;
         let ExecCommandArgs {

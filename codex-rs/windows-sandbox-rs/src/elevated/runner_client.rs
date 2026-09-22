@@ -45,8 +45,6 @@ use windows_sys::Win32::Foundation::HANDLE;
 use windows_sys::Win32::Foundation::HANDLE_FLAG_INHERIT;
 use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
 use windows_sys::Win32::Foundation::SetHandleInformation;
-use windows_sys::Win32::Security::Authentication::Identity::GetUserNameExW;
-use windows_sys::Win32::Security::Authentication::Identity::NameSamCompatible;
 use windows_sys::Win32::System::Diagnostics::Debug::SetErrorMode;
 use windows_sys::Win32::System::IO::CancelSynchronousIo;
 use windows_sys::Win32::System::Pipes::CreatePipe;
@@ -368,17 +366,6 @@ pub(crate) fn spawn_runner_transport(
     mut spawn_request: SpawnRequest,
     desktop_policy: Option<&DesktopPolicy>,
 ) -> Result<RunnerTransport> {
-    fn current_username() -> Result<String> {
-        let mut len: u32 = 0;
-        unsafe {
-            GetUserNameExW(NameSamCompatible, ptr::null_mut(), &mut len);
-        }
-        let mut buffer = vec![0; len as usize];
-        if unsafe { GetUserNameExW(NameSamCompatible, buffer.as_mut_ptr(), &mut len) } == 0 {
-            return Err(std::io::Error::last_os_error()).context("GetUserNameExW failed");
-        }
-        Ok(String::from_utf16_lossy(&buffer[..len as usize]))
-    }
     spawn_request.private_desktop_name = match launch {
         RunnerLaunch::CurrentUser => None,
         RunnerLaunch::Logon(sandbox_creds) => desktop_policy
@@ -387,7 +374,7 @@ pub(crate) fn spawn_runner_transport(
     };
     let (pipe_in_name, pipe_out_name) = pipe_pair();
     let pipe_username = match launch {
-        RunnerLaunch::CurrentUser => current_username()?,
+        RunnerLaunch::CurrentUser => crate::winutil::current_account_name()?,
         RunnerLaunch::Logon(sandbox_creds) => sandbox_creds.username.clone(),
     };
     let h_pipe_in = create_named_pipe(&pipe_in_name, PIPE_ACCESS_OUTBOUND, &pipe_username)?;

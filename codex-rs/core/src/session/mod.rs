@@ -3445,7 +3445,6 @@ impl Session {
         (
             Self::assign_missing_response_item_ids(items),
             image_preparations,
-            || {},
         )
     }
 

@@ -125,14 +125,12 @@ pub(crate) fn review<'a>(
                 ))
             }
             ReviewDecision::Denied { rejection } => Err(rejection),
-            ReviewDecision::TimedOut => Err(
-                codex_prompts::ResolvedModelMessages::from_model(
-                    &invocation.step_context.settings.model_info,
-                )
-                .auto_review()
-                .timeout_instructions
-                .to_string(),
-            ),
+            ReviewDecision::TimedOut => Err(codex_prompts::ResolvedModelMessages::from_model(
+                &invocation.step_context.settings.model_info,
+            )
+            .auto_review()
+            .timeout_instructions
+            .to_string()),
             ReviewDecision::Abort => Err(
                 "Automatic approval review was cancelled. The tool call was blocked.".to_string(),
             ),

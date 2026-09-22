@@ -147,7 +147,7 @@ fn save_session_resolved_fields(
                 Some(BaseInstructionsProvenance::Model { .. })
             )
         {
-            crate::context::without_update_plan_instructions(&sc.base_instructions)
+            codex_prompts::without_update_plan_instructions(&sc.base_instructions)
         } else {
             sc.base_instructions.clone()
         },
