@@ -5,9 +5,12 @@ use std::collections::HashSet;
 use crate::client::ModelClientSession;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
+use codex_config::types::AutomaticAccountSelection;
 use codex_login::AccountId;
 use codex_login::AuthManager;
 use codex_login::auth::ImportedAccountSwitchOutcome;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::UsageLimitReachedError;
 use codex_protocol::protocol::CodexErrorInfo;
 use codex_protocol::protocol::EventMsg;
@@ -79,6 +82,33 @@ pub(crate) async fn switch_and_report(
         report_switch(sess, turn_context, auth_manager, &account_id).await;
     }
     UsageLimitFailoverOutcome::Retried
+}
+
+pub(crate) fn manual_selection_error(
+    turn_context: &TurnContext,
+    usage_limit: &UsageLimitReachedError,
+) -> Option<CodexErr> {
+    let auth_manager = turn_context.auth_manager.as_ref()?;
+    if auth_manager.automatic_account_selection() != AutomaticAccountSelection::Disabled
+        || auth_manager.active_account_id().is_none()
+    {
+        return None;
+    }
+
+    let guidance = "Automatic account selection is disabled. Choose another account in the Codex TUI or enable automatic account selection";
+    let promo_message = Some(match usage_limit.promo_message.as_ref() {
+        Some(promo_message) => format!("{promo_message}\n\n{guidance}"),
+        None => guidance.to_string(),
+    });
+    Some(CodexErr::new(CodexErrorDetails::UsageLimitReached(
+        UsageLimitReachedError {
+            plan_type: usage_limit.plan_type.clone(),
+            resets_at: usage_limit.resets_at,
+            rate_limits: usage_limit.rate_limits.clone(),
+            promo_message,
+            rate_limit_reached_type: usage_limit.rate_limit_reached_type,
+        },
+    )))
 }
 
 async fn report_switch(

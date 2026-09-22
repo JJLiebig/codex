@@ -3613,8 +3613,9 @@ async fn usage_limit_error_emits_rate_limit_event() -> anyhow::Result<()> {
 async fn disabled_account_selection_does_not_fail_over_on_usage_limit() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = MockServer::start().await;
-    let response =
-        ResponseTemplate::new(429).set_body_json(json!({"error": {"type": "usage_limit_reached"}}));
+    let response = ResponseTemplate::new(429)
+        .insert_header("x-codex-promo-message", "Check your plan or credits")
+        .set_body_json(json!({"error": {"type": "usage_limit_reached"}}));
     Mock::given(method("POST"))
         .and(path("/v1/responses"))
         .respond_with(response)
@@ -3679,7 +3680,16 @@ async fn disabled_account_selection_does_not_fail_over_on_usage_limit() -> anyho
             text_elements: Vec::new(),
         }]))
         .await?;
-    wait_for_event(&fixture.codex, |msg| matches!(msg, EventMsg::Error(_))).await;
+    let error = wait_for_event(&fixture.codex, |msg| matches!(msg, EventMsg::Error(_))).await;
+    let EventMsg::Error(error) = error else {
+        unreachable!();
+    };
+    assert!(error.message.contains("Check your plan or credits"));
+    assert!(
+        error
+            .message
+            .contains("Automatic account selection is disabled")
+    );
     assert_eq!(auth_manager.active_account_id(), Some(first.id));
     Ok(())
 }
