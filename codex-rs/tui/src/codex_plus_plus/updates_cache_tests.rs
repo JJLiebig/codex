@@ -12,18 +12,25 @@ async fn dismiss_version_creates_cache_file_when_missing() {
         .await
         .expect("load config");
     let version_file = version_filepath(&config);
+    assert_eq!(
+        version_file,
+        codex_home
+            .path()
+            .join("codex-plus-plus")
+            .join("release-status.json")
+    );
 
     dismiss_version(&config, "999.0.0")
         .await
         .expect("dismiss version");
 
     let info = read_version_info(&version_file).expect("read version info");
-    assert_eq!(info.last_checked_at, DateTime::<Utc>::UNIX_EPOCH);
+    assert_eq!(info.checked_at, std::time::UNIX_EPOCH);
     assert_eq!(
         (
-            info.latest_version.as_str(),
+            info.latest_fork_version.as_deref(),
             info.dismissed_version.as_deref()
         ),
-        ("999.0.0", Some("999.0.0"))
+        (Some("999.0.0"), Some("999.0.0"))
     );
 }
