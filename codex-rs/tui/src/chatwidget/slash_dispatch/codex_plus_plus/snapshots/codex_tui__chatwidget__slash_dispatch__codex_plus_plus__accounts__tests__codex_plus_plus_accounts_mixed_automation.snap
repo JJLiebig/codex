@@ -2,11 +2,11 @@
 source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/accounts_tests.rs
 expression: terminal.backend().to_string()
 ---
-
   Account Automation
   Select the accounts Codex++ may choose automatically.
 
-› 1. [*] one@example.com (current)  In use · Weekly 100% · Waiting
+
+› 1. [*] one@example.com (current)  In use · Weekly 100% · Waiting                          
   2. [ ] two@example.com            Login required · Weekly  80% · Started
   3. [*] three@example.com          Login required · In use · Weekly   9% · Retrying
   4. [*] four@example.com           Account disabled · Weekly · Sign-in required
