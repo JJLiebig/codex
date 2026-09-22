@@ -1804,29 +1804,13 @@ async fn run_sampling_request(
                         }
                         crate::codex_plus_plus::account_failover::UsageLimitFailoverOutcome::Unavailable => {}
                     }
-                    if let Some(auth_manager) = turn_context.auth_manager.as_ref()
-                        && auth_manager.automatic_account_selection()
-                            == codex_config::types::AutomaticAccountSelection::Disabled
-                        && auth_manager.active_account_id().is_some()
-                    {
-                        let account_guidance = "Automatic account selection is disabled. Choose another account in the Codex TUI or enable automatic account selection";
-                        let promo_message = Some(match e.promo_message.as_ref() {
-                            Some(promo_message) => {
-                                format!("{promo_message}\n\n{account_guidance}")
-                            }
-                            None => account_guidance.to_string(),
-                        });
-                        return Err(CodexErr::new(CodexErrorDetails::UsageLimitReached(
-                            codex_protocol::error::UsageLimitReachedError {
-                                plan_type: e.plan_type.clone(),
-                                resets_at: e.resets_at,
-                                rate_limits: e.rate_limits.clone(),
-                                promo_message,
-                                rate_limit_reached_type: e.rate_limit_reached_type,
-                            },
-                        )));
-                    }
-                    return Err(err);
+                    return Err(
+                        crate::codex_plus_plus::account_failover::manual_selection_error(
+                            &turn_context,
+                            e,
+                        )
+                        .unwrap_or(err),
+                    );
                 }
                 _ => err,
             },
