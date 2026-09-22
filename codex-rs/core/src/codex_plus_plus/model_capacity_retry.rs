@@ -1,6 +1,9 @@
 use std::time::Duration;
 
 use crate::client::ModelClientSession;
+use crate::responses_retry::ResponsesStreamRequest;
+use crate::responses_retry::ResponsesStreamRetryState;
+use crate::responses_retry::handle_response_stream_error;
 use crate::session::session::Session;
 use crate::session::turn_context::TurnContext;
 use codex_config::ModelCapacityRetryMode;
@@ -22,6 +25,40 @@ const RETRY_SCHEDULE: [(Duration, &str); 4] = [
 pub(crate) fn applies_to_sampling(err: &CodexErr, session_source: &SessionSource) -> bool {
     matches!(err.details(), CodexErrorDetails::ServerOverloaded)
         && !crate::guardian::is_basic_session_source(session_source)
+}
+
+pub(crate) async fn handle_sampling_error(
+    capacity_retries: &mut u64,
+    retry_state: &mut ResponsesStreamRetryState,
+    max_retries: u64,
+    err: CodexErr,
+    client_session: &mut ModelClientSession,
+    sess: &Session,
+    turn_context: &TurnContext,
+    cancellation_token: &CancellationToken,
+) -> Result<(), CodexErr> {
+    if applies_to_sampling(&err, &turn_context.session_source) {
+        handle(
+            capacity_retries,
+            err,
+            client_session,
+            sess,
+            turn_context,
+            cancellation_token,
+        )
+        .await
+    } else {
+        handle_response_stream_error(
+            retry_state,
+            max_retries,
+            err,
+            client_session,
+            sess,
+            turn_context,
+            ResponsesStreamRequest::Sampling,
+        )
+        .await
+    }
 }
 
 pub(crate) async fn handle(

@@ -30,9 +30,7 @@ use crate::mentions::collect_tool_mentions_from_messages;
 use crate::plugins::build_plugin_injections;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
-use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
-use crate::responses_retry::handle_response_stream_error;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
 use crate::session::daemon_recovery::RecordedTurnInput;
@@ -1820,31 +1818,17 @@ async fn run_sampling_request(
             original_input = Some(prompt.input);
         }
 
-        if crate::codex_plus_plus::model_capacity_retry::applies_to_sampling(
-            &err,
-            &turn_context.session_source,
-        ) {
-            crate::codex_plus_plus::model_capacity_retry::handle(
-                &mut capacity_retries,
-                err,
-                client_session,
-                &sess,
-                &turn_context,
-                &cancellation_token,
-            )
-            .await?;
-        } else {
-            handle_response_stream_error(
-                &mut retry_state,
-                max_retries,
-                err,
-                client_session,
-                &sess,
-                &turn_context,
-                ResponsesStreamRequest::Sampling,
-            )
-            .await?;
-        }
+        crate::codex_plus_plus::model_capacity_retry::handle_sampling_error(
+            &mut capacity_retries,
+            &mut retry_state,
+            max_retries,
+            err,
+            client_session,
+            &sess,
+            &turn_context,
+            &cancellation_token,
+        )
+        .await?;
         turn_context.turn_timing_state.record_sampling_retry();
     }
 }
