@@ -138,7 +138,7 @@ async fn run_startup_account_picker_with_events(
                     | TuiEvent::FocusGained => {
                         draw_view(tui, &view)?
                     }
-                    TuiEvent::FocusLost => {}
+                    TuiEvent::FocusLost | TuiEvent::Mouse(_) => {}
                 }
             }
             _ = tokio::time::sleep_until(deadline), if auto_pick => {

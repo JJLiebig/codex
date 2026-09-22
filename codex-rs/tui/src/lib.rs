@@ -634,6 +634,7 @@ pub(crate) async fn start_embedded_app_server_for_picker(
         /*log_db*/ None,
         &mut state_db,
         Arc::new(EnvironmentManager::default_for_tests()),
+        /*initial_account_id*/ None,
     )
     .await?;
     Ok(
@@ -1745,7 +1746,7 @@ async fn run_ratatui_app(
                     log_db.clone(),
                     &mut state_db,
                     environment_manager.clone(),
-                    initial_account_id,
+                    initial_account_id.clone(),
                 ),
             )
             .await
@@ -1829,6 +1830,7 @@ async fn run_ratatui_app(
                     log_db.clone(),
                     &mut state_db,
                     environment_manager.clone(),
+                    initial_account_id,
                 )
                 .await?;
                 app_server = AppServerSession::new(client, app_server_target.thread_params_mode())
