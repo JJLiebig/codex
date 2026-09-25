@@ -101,6 +101,7 @@ async fn managed_workspace_default_respects_read_only_availability() -> color_ey
             /*state_db*/ None,
             Arc::new(EnvironmentManager::default_for_tests()),
             /*initial_account_id*/ None,
+            Default::default(),
         )
         .await?;
         let app_server = AppServerClient::InProcess(client);

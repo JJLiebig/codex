@@ -1137,6 +1137,7 @@ fn mcp_tools_output_from_statuses_renders_status_only_servers() {
         name: "plugin_docs".to_string(),
         runtime_status: None,
         plugin_id: None,
+        http_origin: None,
         server_info: None,
         tools: HashMap::from([(
             "lookup".to_string(),
@@ -1171,6 +1172,7 @@ fn mcp_tools_output_from_statuses_renders_verbose_inventory() {
         name: "plugin_docs".to_string(),
         runtime_status: None,
         plugin_id: None,
+        http_origin: None,
         server_info: None,
         tools: HashMap::from([(
             "lookup".to_string(),

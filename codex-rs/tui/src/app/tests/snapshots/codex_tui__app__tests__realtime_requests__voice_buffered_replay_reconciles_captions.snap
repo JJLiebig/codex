@@ -1,10 +1,9 @@
 ---
 source: tui/src/app/tests/realtime_requests.rs
-assertion_line: 645
 expression: "normalize_voice_snapshot_directory(&rendered, &app.config.cwd)"
 ---
 ╭────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.0.0)               │
+│ >_ OpenAI Codex (v<VERSION>)             │
 │                                        │
 │ model:     gpt-test   /model to change │
 │ directory: /tmp/project                │
@@ -17,6 +16,8 @@ expression: "normalize_voice_snapshot_directory(&rendered, &app.config.cwd)"
   /permissions - choose what Codex is allowed to do
   /model - choose what model and reasoning effort to use
   /review - review any changes and find issues
+  Welcome to Codex++. Use /codexplusplus for settings and /accounts to enable
+  or disable accounts.
 
 › buffered question
 

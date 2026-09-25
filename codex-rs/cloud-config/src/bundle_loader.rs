@@ -28,8 +28,8 @@ pub(super) fn take_refresher_task() -> Option<AbortHandle> {
         .take()
 }
 
-pub(crate) fn replace_refresh_task(slot: &Mutex<Option<AbortHandle>>, next: AbortHandle) {
-    let mut guard = slot.lock().unwrap_or_else(|err| {
+fn replace_refresher_task(next: AbortHandle) {
+    let mut guard = refresher_task_slot().lock().unwrap_or_else(|err| {
         tracing::warn!("cloud config bundle refresher task slot was poisoned");
         err.into_inner()
     });
@@ -65,7 +65,7 @@ pub fn cloud_config_bundle_loader(
         CLOUD_CONFIG_BUNDLE_TIMEOUT,
     );
     let (loader, refresh_task) = cloud_config_bundle_loader_for_service(service);
-    replace_refresh_task(refresher_task_slot(), refresh_task);
+    replace_refresher_task(refresh_task);
     loader
 }
 
@@ -101,7 +101,7 @@ pub async fn cloud_config_bundle_loader_for_storage(
     let service =
         cloud_config_bundle_service_for_storage(auth_config, enable_codex_api_key_env).await?;
     let (loader, refresh_task) = cloud_config_bundle_loader_for_service(service);
-    replace_refresh_task(refresher_task_slot(), refresh_task);
+    replace_refresher_task(refresh_task);
     Ok(loader)
 }
 

@@ -1,5 +1,6 @@
 mod approvals;
 pub(crate) mod call_trace;
+mod catalog_parameters;
 pub(crate) mod code_mode;
 mod codex_plus_plus;
 pub(crate) mod context;

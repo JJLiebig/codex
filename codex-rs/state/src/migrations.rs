@@ -3,16 +3,17 @@ use std::collections::HashMap;
 
 use sqlx::AssertSqlSafe;
 use sqlx::SqlSafeStr;
-use sqlx::SqlitePool;
 use sqlx::migrate::Migration;
 use sqlx::migrate::Migrator;
+use sqlx_sqlite::SqlitePool;
 
-pub(crate) static STATE_MIGRATOR: Migrator = sqlx::migrate!("./migrations");
-pub(crate) static LOGS_MIGRATOR: Migrator = sqlx::migrate!("./logs_migrations");
-pub(crate) static GOALS_MIGRATOR: Migrator = sqlx::migrate!("./goals_migrations");
-pub(crate) static MEMORIES_MIGRATOR: Migrator = sqlx::migrate!("./memory_migrations");
-pub(crate) static QUEUE_MIGRATOR: Migrator = sqlx::migrate!("./queue_migrations");
-pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator = sqlx::migrate!("./thread_history_migrations");
+pub(crate) static STATE_MIGRATOR: Migrator = sqlx_macros::migrate!("./migrations");
+pub(crate) static LOGS_MIGRATOR: Migrator = sqlx_macros::migrate!("./logs_migrations");
+pub(crate) static GOALS_MIGRATOR: Migrator = sqlx_macros::migrate!("./goals_migrations");
+pub(crate) static MEMORIES_MIGRATOR: Migrator = sqlx_macros::migrate!("./memory_migrations");
+pub(crate) static QUEUE_MIGRATOR: Migrator = sqlx_macros::migrate!("./queue_migrations");
+pub(crate) static THREAD_HISTORY_MIGRATOR: Migrator =
+    sqlx_macros::migrate!("./thread_history_migrations");
 
 #[derive(Clone, Copy)]
 enum MigrationLineEndings {

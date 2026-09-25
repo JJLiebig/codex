@@ -98,8 +98,11 @@ async fn exact_review_receipt_allows_default_handler() -> anyhow::Result<()> {
     );
     let handler = TestHandler { tool_name };
     assert!(handler.pre_tool_use_approval_matches(&invocation, &receipt));
-    let result =
-        handle_any_tool(&handler, invocation, Option::default(), Option::default()).await?;
+    let result = handle_any_tool(
+        &handler, invocation, /*call_state*/ None, /*exact_pre_tool_use_approval*/ None,
+        /*reviewed_exec_command_shell*/ None,
+    )
+    .await?;
 
     assert_eq!(result.call_id, "call-reviewed");
     Ok(())
@@ -634,7 +637,9 @@ async fn code_mode_wait_does_not_expose_default_hook_payloads() {
     let (session, turn) = crate::session::tests::make_session_and_context().await;
     let output = crate::tools::context::FunctionToolOutput::from_text("ok".to_string(), Some(true));
 
-    let wait = crate::tools::handlers::CodeModeWaitHandler;
+    let wait = crate::tools::handlers::CodeModeWaitHandler::new(
+        /*description_override*/ None, /*parameters_override*/ None,
+    );
     let wait_invocation = test_invocation(
         Arc::new(session),
         Arc::new(turn),

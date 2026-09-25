@@ -277,6 +277,7 @@ pub(super) async fn start_recording_app_server_with_realtime_speech(
         state_db,
         Arc::new(codex_exec_server::EnvironmentManager::default_for_tests()),
         /*initial_account_id*/ None,
+        Default::default(),
     )
     .await?;
     let codex_home = config.codex_home.display().to_string();
@@ -665,7 +666,7 @@ pub(super) fn recorded_params(requests: &RecordedRequests, method: &str) -> Vec<
         .collect()
 }
 
-async fn make_history_test_app() -> Result<(App, tempfile::TempDir)> {
+async fn make_history_test_app() -> Result<(Box<App>, tempfile::TempDir)> {
     let mut app = make_test_app().await;
     let codex_home = tempdir()?;
     app.config.codex_home = codex_home.path().to_path_buf().abs();

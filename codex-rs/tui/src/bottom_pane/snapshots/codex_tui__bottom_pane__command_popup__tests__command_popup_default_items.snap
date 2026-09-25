@@ -35,7 +35,7 @@ expression: commands
 /status - show current session configuration and token usage
 /accounts - configure automatic account selection
 /codexplusplus - configure Codex++ settings
-/daemon - Manage the local background server.
+/daemon - Manage the local background server
 /warnings - view retained warnings and diagnostic details
 /cd - change the current working directory
 /pwd - show the current working directory

@@ -63,6 +63,22 @@ async fn auth_manager_with_api_key() -> Arc<AuthManager> {
     )
 }
 
+#[tokio::test]
+async fn loader_registers_refresher_for_account_picker() {
+    let codex_home = tempdir().expect("tempdir");
+    let loader = crate::cloud_config_bundle_loader(
+        auth_manager_with_api_key().await,
+        "https://chatgpt.com/backend-api/".to_string(),
+        codex_home.path().to_path_buf(),
+        codex_login::test_support::transport_default_auth_route_config()
+            .http_client_factory()
+            .clone(),
+    );
+    let task = crate::bundle_loader::take_refresher_task().expect("refresher registered");
+    task.abort();
+    drop(loader);
+}
+
 async fn auth_manager_with_plan_and_identity(
     plan_type: &str,
     chatgpt_user_id: Option<&str>,
@@ -1403,7 +1419,7 @@ async fn production_loader_refreshes_later_configs_and_preserves_failed_refreshe
 }
 
 #[tokio::test(start_paused = true)]
-async fn refresh_stops_on_replacement_or_after_the_last_loader_clone() {
+async fn each_loader_owns_refresh_until_its_last_clone_is_dropped() {
     let codex_home = tempdir().expect("tempdir");
     let fetcher = Arc::new(StaticBundleClient::new(test_bundle()));
     let service = CloudConfigBundleService::new(
@@ -1412,10 +1428,8 @@ async fn refresh_stops_on_replacement_or_after_the_last_loader_clone() {
         codex_home.path().to_path_buf(),
         CLOUD_CONFIG_BUNDLE_TIMEOUT,
     );
-    let (loader, abort_handle) =
+    let (loader, original_task) =
         crate::bundle_loader::cloud_config_bundle_loader_for_service(service);
-    let task_slot = std::sync::Mutex::new(None);
-    crate::bundle_loader::replace_refresh_task(&task_slot, abort_handle);
     let cloned_loader = loader.clone();
     assert_eq!(loader.get().await, Ok(Some(test_bundle())));
     tokio::task::yield_now().await;
@@ -1446,25 +1460,27 @@ async fn refresh_stops_on_replacement_or_after_the_last_loader_clone() {
     );
     let (replacement_loader, replacement_handle) =
         crate::bundle_loader::cloud_config_bundle_loader_for_service(replacement_service);
-    let replacement_task = replacement_handle.clone();
-    crate::bundle_loader::replace_refresh_task(&task_slot, replacement_handle);
+    let replacement_task = replacement_handle;
     assert_eq!(replacement_loader.get().await, Ok(Some(test_bundle())));
 
     tokio::task::yield_now().await;
     tokio::time::advance(CLOUD_CONFIG_BUNDLE_CACHE_REFRESH_INTERVAL + Duration::from_millis(1))
         .await;
     let refresh_deadline = std::time::Instant::now() + Duration::from_secs(5);
-    while replacement_fetcher.request_count.load(Ordering::SeqCst) < 2 {
+    while replacement_fetcher.request_count.load(Ordering::SeqCst) < 2
+        || fetcher.request_count.load(Ordering::SeqCst) < 3
+    {
         assert!(
             std::time::Instant::now() < refresh_deadline,
-            "the replacement refresher should stay active"
+            "both loader owners should keep refreshing"
         );
         tokio::task::yield_now().await;
     }
-    assert_eq!(fetcher.request_count.load(Ordering::SeqCst), 2);
+    assert_eq!(fetcher.request_count.load(Ordering::SeqCst), 3);
 
     drop(cloned_loader);
     tokio::task::yield_now().await;
+    assert!(original_task.is_finished());
     assert!(!replacement_task.is_finished());
 
     drop(replacement_loader);
