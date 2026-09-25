@@ -84,7 +84,7 @@ pub(super) fn launch(
             .context("spawned app-server process has no pid"),
         LaunchKind::Brokered => {
             command.env(super::wmi_broker::STDERR_LOG_ENV, stderr_log);
-            super::wmi_broker::launch(command.as_std())
+            super::wmi_broker::launch(command.as_std()).context(JOB_ERROR)
         }
     }
 }
