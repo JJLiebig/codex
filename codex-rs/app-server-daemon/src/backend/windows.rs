@@ -74,6 +74,14 @@ pub(crate) fn ensure_detached_launch(executable: &Path) -> Result<LaunchKind> {
     windows_detachment::preflight(executable)
 }
 
+pub(crate) fn launch(
+    command: &mut tokio::process::Command,
+    kind: LaunchKind,
+    stderr_log: &Path,
+) -> Result<u32> {
+    windows_detachment::launch(command, kind, stderr_log)
+}
+
 pub(super) struct Process(OwnedHandle);
 
 impl Process {
@@ -235,3 +243,7 @@ mod tests;
 #[path = "codex_plus_plus/windows_detachment.rs"]
 mod windows_detachment;
 pub(crate) use windows_detachment::LaunchKind;
+
+#[path = "codex_plus_plus/wmi_broker.rs"]
+mod wmi_broker;
+pub use wmi_broker::redirect_stderr_from_env;

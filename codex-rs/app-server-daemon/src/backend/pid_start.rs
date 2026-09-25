@@ -245,28 +245,31 @@ impl PidBackend {
                 return Err(error);
             }
         };
-        let child = match command.spawn() {
-            Ok(child) => child,
+        #[cfg(windows)]
+        let spawn = crate::backend::windows::launch(
+            &mut command,
+            launch,
+            &super::stderr_log_file_for_pid_file(&self.pid_file),
+        );
+        #[cfg(not(windows))]
+        let spawn = command
+            .spawn()
+            .map_err(anyhow::Error::from)
+            .and_then(|child| child.id().context("spawned app-server process has no pid"));
+        let pid = match spawn {
+            Ok(pid) => pid,
             Err(err) => {
                 if replacement.is_none() {
                     let _ = fs::remove_file(&self.pid_file).await;
                 }
                 return Err(err).with_context(|| {
-                    let job_hint = if cfg!(windows) {
-                        " (the Windows host job must allow breakaway)"
-                    } else {
-                        ""
-                    };
                     format!(
-                        "failed to spawn detached app-server process using {}{job_hint}",
+                        "failed to spawn detached app-server process using {}",
                         self.codex_bin.display()
                     )
                 });
             }
         };
-        let pid = child
-            .id()
-            .context("spawned app-server process has no pid")?;
         let record = match async {
             #[cfg(windows)]
             super::super::windows::Process::open(pid)?

@@ -1,5 +1,4 @@
-//! A Windows daemon may remain in a harmless outer job after breaking away
-//! from the terminal's kill-on-close job.
+//! Escape the entire caller job chain before starting a long-lived daemon.
 
 use std::io;
 use std::os::windows::io::AsRawHandle;
@@ -23,12 +22,25 @@ const JOB_ERROR: &str =
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum LaunchKind {
     Detached,
-    DurableJob,
+    Brokered,
 }
 
 pub(super) fn preflight(executable: &Path) -> Result<LaunchKind> {
-    let mut child = match suspended_command(executable, CREATE_BREAKAWAY_FROM_JOB).spawn() {
-        Ok(child) => child,
+    let launch = match suspended_command(executable, CREATE_BREAKAWAY_FROM_JOB).spawn() {
+        Ok(mut child) => {
+            let associated = in_job(child.as_raw_handle() as _);
+            child
+                .kill()
+                .context("failed to terminate suspended launch probe")?;
+            child
+                .wait()
+                .context("failed to reap suspended launch probe")?;
+            if associated? {
+                LaunchKind::Brokered
+            } else {
+                LaunchKind::Detached
+            }
+        }
         Err(error) => {
             if error.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32)
                 && in_job(unsafe { GetCurrentProcess() })?
@@ -40,32 +52,41 @@ pub(super) fn preflight(executable: &Path) -> Result<LaunchKind> {
                 probe
                     .wait()
                     .context("failed to reap suspended launch probe")?;
-                anyhow::bail!(JOB_ERROR);
+                LaunchKind::Brokered
+            } else {
+                return Err(error)
+                    .context("cannot launch detached daemon; existing daemon was not stopped");
             }
-            return Err(error)
-                .context("cannot launch detached daemon; existing daemon was not stopped");
         }
     };
-    let associated = in_job(child.as_raw_handle() as _);
-    child
-        .kill()
-        .context("failed to terminate suspended launch probe")?;
-    child
-        .wait()
-        .context("failed to reap suspended launch probe")?;
-    if associated? {
-        ensure_residual_job_is_durable()?;
-        Ok(LaunchKind::DurableJob)
-    } else {
-        Ok(LaunchKind::Detached)
+    if matches!(launch, LaunchKind::Brokered) {
+        super::wmi_broker::preflight(executable).context(JOB_ERROR)?;
     }
+    Ok(launch)
 }
 
 pub(super) fn verify_spawned(process: isize, launch: LaunchKind) -> Result<()> {
-    if in_job(process)? && !matches!(launch, LaunchKind::DurableJob) {
+    if matches!(launch, LaunchKind::Detached) && in_job(process)? {
         anyhow::bail!(JOB_ERROR);
     }
     Ok(())
+}
+
+pub(super) fn launch(
+    command: &mut tokio::process::Command,
+    kind: LaunchKind,
+    stderr_log: &Path,
+) -> Result<u32> {
+    match kind {
+        LaunchKind::Detached => command
+            .spawn()?
+            .id()
+            .context("spawned app-server process has no pid"),
+        LaunchKind::Brokered => {
+            command.env(super::wmi_broker::STDERR_LOG_ENV, stderr_log);
+            super::wmi_broker::launch(command.as_std())
+        }
+    }
 }
 
 fn in_job(process: isize) -> Result<bool> {
@@ -88,39 +109,4 @@ fn suspended_command(executable: &Path, flags: u32) -> Command {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     command
-}
-
-// QueryInformationJobObject(NULL) reports the calling process's job, so run
-// this probe with the same breakaway flag as the eventual daemon process.
-fn ensure_residual_job_is_durable() -> Result<()> {
-    // The supported Windows targets are 64-bit: this structure is 144 bytes,
-    // with LimitFlags at byte 16 and KILL_ON_JOB_CLOSE at bit 0x2000.
-    const SCRIPT: &str = r#"
-$source = 'using System; using System.Runtime.InteropServices; public static class CodexJobProbe { [DllImport("kernel32.dll", SetLastError=true)] public static extern IntPtr GetCurrentProcess(); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool IsProcessInJob(IntPtr process, IntPtr job, out bool result); [DllImport("kernel32.dll", SetLastError=true)] public static extern bool QueryInformationJobObject(IntPtr job, int kind, byte[] data, int size, out int returned); }'
-Add-Type -TypeDefinition $source -ErrorAction Stop
-if ([IntPtr]::Size -ne 8) { exit 2 }
-$associated = $false
-if (![CodexJobProbe]::IsProcessInJob([CodexJobProbe]::GetCurrentProcess(), [IntPtr]::Zero, [ref]$associated)) { exit 2 }
-if (!$associated) { exit 0 }
-$data = New-Object byte[] 144
-$returned = 0
-if (![CodexJobProbe]::QueryInformationJobObject([IntPtr]::Zero, 9, $data, $data.Length, [ref]$returned)) { exit 2 }
-if (([BitConverter]::ToUInt32($data, 16) -band 0x2000) -ne 0) { exit 42 }
-"#;
-    let system_root = std::env::var_os("SystemRoot").context("SystemRoot is unavailable")?;
-    let powershell = Path::new(&system_root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
-    let output = Command::new(powershell)
-        .args(["-NoProfile", "-NonInteractive", "-Command", SCRIPT])
-        .creation_flags(DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
-        .output()
-        .context("failed to check residual daemon job")?;
-    match output.status.code() {
-        Some(0) => Ok(()),
-        Some(42) => anyhow::bail!(JOB_ERROR),
-        _ => anyhow::bail!(
-            "failed to check residual daemon job (exit code {:?}): {}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ),
-    }
 }
