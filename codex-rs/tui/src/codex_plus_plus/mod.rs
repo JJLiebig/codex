@@ -3,6 +3,7 @@
 mod account_identity_freshness;
 mod account_policy;
 mod auto_redeem_resets;
+pub(crate) mod daemon_startup;
 pub(crate) mod destructive_command_guard;
 #[cfg(any(not(debug_assertions), test))]
 mod lag_warning;

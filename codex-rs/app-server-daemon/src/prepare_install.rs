@@ -167,6 +167,10 @@ async fn prepare_from_package(
     validate_package(source)?;
     // A local build may replace the executable while confirmation is pending.
     let running_identity = managed_install::executable_identity(running_exe).await?;
+    #[cfg(windows)]
+    if mode == InstallMode::Missing {
+        crate::backend::windows::ensure_detached_launch(running_exe)?;
+    }
     if mode == InstallMode::Replace {
         if !confirm(&InstallRequest {
             source: source.to_path_buf(),

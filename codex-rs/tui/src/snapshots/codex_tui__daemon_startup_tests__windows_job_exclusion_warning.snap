@@ -1,0 +1,7 @@
+---
+source: tui/src/daemon_startup_tests.rs
+assertion_line: 459
+expression: text
+---
+⚠ Running without the shared background server: this terminal requires embedded
+  mode.
