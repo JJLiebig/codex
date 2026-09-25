@@ -6,6 +6,24 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows_sys::Win32::System::Threading::TerminateProcess;
 
 #[test]
+fn detached_launch_preflight_accepts_durable_launch() {
+    let executable = std::env::current_exe().expect("test executable");
+    super::ensure_detached_launch(&executable).expect("durable launch from this host");
+}
+
+#[test]
+fn detached_launch_preflight_keeps_unrelated_launch_error() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let error = super::ensure_detached_launch(directory.path()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot launch detached daemon; existing daemon was not stopped"),
+        "{error:#}"
+    );
+}
+
+#[test]
 fn detached_launch_preflight_rejects_restrictive_job() {
     const CHILD: &str = "CODEX_TEST_RESTRICTIVE_LAUNCH_JOB";
     let executable = std::env::current_exe().expect("test executable");
@@ -25,7 +43,13 @@ fn detached_launch_preflight_rejects_restrictive_job() {
             0
         );
         // A new job does not permit breakaway. Reject before any lifecycle mutation.
-        assert!(super::ensure_detached_launch(&executable).is_err());
+        let error = super::ensure_detached_launch(&executable).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("host Job Object prevents daemon detachment"),
+            "{error:#}"
+        );
         return;
     }
     let output = std::process::Command::new(executable)

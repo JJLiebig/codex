@@ -235,6 +235,16 @@ impl PidBackend {
             }
         }
 
+        #[cfg(windows)]
+        let launch = match crate::backend::windows::ensure_detached_launch(&codex_bin) {
+            Ok(launch) => launch,
+            Err(error) => {
+                if replacement.is_none() {
+                    let _ = fs::remove_file(&self.pid_file).await;
+                }
+                return Err(error);
+            }
+        };
         let child = match command.spawn() {
             Ok(child) => child,
             Err(err) => {
@@ -261,7 +271,7 @@ impl PidBackend {
             #[cfg(windows)]
             super::super::windows::Process::open(pid)?
                 .context("daemon exited during launch")?
-                .ensure_detached()?;
+                .ensure_detached(launch)?;
             let process_start_time = read_process_start_time(pid).await?;
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             let process_identity = super::identity::read_process_details(pid)
