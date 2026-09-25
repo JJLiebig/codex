@@ -7,10 +7,7 @@ use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
-use std::os::windows::process::CommandExt;
 use std::path::Path;
-use std::process::Command;
-use std::process::Stdio;
 
 use anyhow::Context;
 use anyhow::Result;
@@ -28,15 +25,11 @@ use windows_sys::Win32::Storage::FileSystem::LOCKFILE_FAIL_IMMEDIATELY;
 use windows_sys::Win32::Storage::FileSystem::LockFileEx;
 use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
 use windows_sys::Win32::System::JobObjects::CreateJobObjectW;
-use windows_sys::Win32::System::JobObjects::IsProcessInJob;
 use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_BREAKAWAY_OK;
 use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
 use windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
 use windows_sys::Win32::System::JobObjects::JobObjectExtendedLimitInformation;
 use windows_sys::Win32::System::JobObjects::SetInformationJobObject;
-use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
-use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
-use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::System::Threading::GetProcessId;
 use windows_sys::Win32::System::Threading::GetProcessTimes;
@@ -77,40 +70,16 @@ pub(crate) fn ensure_not_elevated() -> Result<()> {
     Ok(())
 }
 
-// Probe the actual child association: escaping an inner job can leave an outer
-// job attached. Suspend the image so no application code runs before cleanup.
-pub(crate) fn ensure_detached_launch(executable: &Path) -> Result<()> {
-    let mut child = Command::new(executable)
-        .creation_flags(CREATE_SUSPENDED | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .context("cannot launch detached daemon; existing daemon was not stopped")?;
-    let mut in_job = 0;
-    let result = if unsafe {
-        IsProcessInJob(
-            child.as_raw_handle() as _,
-            /*jobhandle*/ 0,
-            &mut in_job,
-        )
-    } == 0
-    {
-        Err(io::Error::last_os_error()).context("failed to verify daemon launch capability")
-    } else if in_job != 0 {
-        Err(anyhow::anyhow!(
-            "host Job Object prevents daemon detachment; start from a host that allows breakaway"
-        ))
-    } else {
-        Ok(())
-    };
-    child
-        .kill()
-        .context("failed to terminate suspended launch probe")?;
-    child
-        .wait()
-        .context("failed to reap suspended launch probe")?;
-    result
+pub(crate) fn ensure_detached_launch(executable: &Path) -> Result<LaunchKind> {
+    windows_detachment::preflight(executable)
+}
+
+pub(crate) fn launch(
+    command: &mut tokio::process::Command,
+    kind: LaunchKind,
+    stderr_log: &Path,
+) -> Result<u32> {
+    windows_detachment::launch(command, kind, stderr_log)
 }
 
 pub(super) struct Process(OwnedHandle);
@@ -170,25 +139,11 @@ impl Process {
         }
     }
 
-    pub(super) fn ensure_detached(&self) -> Result<()> {
-        let mut in_job = 0;
-        if unsafe {
-            IsProcessInJob(
-                self.0.as_raw_handle() as _,
-                /*jobhandle*/ 0,
-                &mut in_job,
-            )
-        } == 0
+    pub(super) fn ensure_detached(&self, launch: LaunchKind) -> Result<()> {
+        if let Err(error) = windows_detachment::verify_spawned(self.0.as_raw_handle() as _, launch)
         {
-            let error = io::Error::last_os_error();
             self.terminate()?;
-            return Err(error).context("failed to verify daemon detachment");
-        }
-        if in_job != 0 {
-            self.terminate()?;
-            anyhow::bail!(
-                "host Job Object prevents daemon detachment; start from a host that allows breakaway"
-            );
+            return Err(error);
         }
         Ok(())
     }
@@ -284,3 +239,11 @@ fn process_job(process: isize) -> Result<OwnedHandle> {
 #[cfg(test)]
 #[path = "windows_tests.rs"]
 mod tests;
+
+#[path = "codex_plus_plus/windows_detachment.rs"]
+mod windows_detachment;
+pub(crate) use windows_detachment::LaunchKind;
+
+#[path = "codex_plus_plus/wmi_broker.rs"]
+mod wmi_broker;
+pub use wmi_broker::redirect_stderr_from_env;

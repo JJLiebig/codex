@@ -592,18 +592,32 @@ pub(super) async fn run_main_inner(
                 crossterm::terminal::disable_raw_mode()?;
                 let result = codex_app_server_daemon::start_with_features(&daemon_features).await;
                 daemon_telemetry::record_start(&config, &result).await;
-                result.map_err(|err| {
-                    std::io::Error::other(format!("{err:#}\n{}", daemon_startup::FAILURE_HINT))
-                })
+                Ok::<_, std::io::Error>(result)
             })
             .await?;
-        managed_daemon = output.backend.is_some();
-        app_server_target = AppServerTarget::LocalDaemon {
-            endpoint: RemoteAppServerEndpoint::UnixSocket {
-                socket_path: AbsolutePathBuf::from_absolute_path_checked(output.socket_path)?,
-            },
-            allow_embedded_fallback: false,
-        };
+        match output {
+            Ok(output) => {
+                managed_daemon = output.backend.is_some();
+                app_server_target = AppServerTarget::LocalDaemon {
+                    endpoint: RemoteAppServerEndpoint::UnixSocket {
+                        socket_path: AbsolutePathBuf::from_absolute_path_checked(
+                            output.socket_path,
+                        )?,
+                    },
+                    allow_embedded_fallback: false,
+                };
+            }
+            Err(error) if codex_plus_plus::daemon_startup::requires_embedded(&error) => {
+                app_server_target = AppServerTarget::Embedded;
+                daemon_exclusion = Some("this terminal");
+            }
+            Err(error) => {
+                return Err(std::io::Error::other(format!(
+                    "{error:#}\n{}",
+                    daemon_startup::FAILURE_HINT
+                )));
+            }
+        }
     }
     // The overview must inspect the shared server's agents regardless of local settings.
     let compatibility_warning = if cli.agents_overview {

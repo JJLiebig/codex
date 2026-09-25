@@ -6,6 +6,8 @@ use backend::windows::try_lock_file;
 mod client;
 mod install_lock;
 mod launch;
+#[cfg(windows)]
+pub use backend::windows::redirect_stderr_from_env;
 pub use launch::restart_with_features;
 pub use launch::start_with_features;
 mod managed_install;

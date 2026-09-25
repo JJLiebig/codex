@@ -6,7 +6,19 @@ use windows_sys::Win32::System::Threading::CREATE_NO_WINDOW;
 use windows_sys::Win32::System::Threading::TerminateProcess;
 
 #[test]
-fn detached_launch_preflight_rejects_restrictive_job() {
+fn detached_launch_preflight_keeps_unrelated_launch_error() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let error = super::ensure_detached_launch(directory.path()).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("cannot launch detached daemon; existing daemon was not stopped"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn detached_launch_preflight_brokers_restrictive_job_when_available() {
     const CHILD: &str = "CODEX_TEST_RESTRICTIVE_LAUNCH_JOB";
     let executable = std::env::current_exe().expect("test executable");
     if std::env::var_os(CHILD).is_some() {
@@ -24,14 +36,22 @@ fn detached_launch_preflight_rejects_restrictive_job() {
             },
             0
         );
-        // A new job does not permit breakaway. Reject before any lifecycle mutation.
-        assert!(super::ensure_detached_launch(&executable).is_err());
+        // This job forbids direct breakaway; WMI may be unavailable on a test host.
+        match super::ensure_detached_launch(&executable) {
+            Ok(launch) => assert!(matches!(launch, super::LaunchKind::Brokered)),
+            Err(error) => assert!(
+                error
+                    .to_string()
+                    .contains("host Job Object prevents daemon detachment"),
+                "{error:#}"
+            ),
+        }
         return;
     }
     let output = std::process::Command::new(executable)
         .args([
             "--exact",
-            "backend::windows::tests::detached_launch_preflight_rejects_restrictive_job",
+            "backend::windows::tests::detached_launch_preflight_brokers_restrictive_job_when_available",
             "--nocapture",
         ])
         .env(CHILD, "1")

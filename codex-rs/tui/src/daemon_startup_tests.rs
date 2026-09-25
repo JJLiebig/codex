@@ -441,3 +441,20 @@ fn daemon_exclusion_warning_snapshot() {
         .join("\n");
     insta::assert_snapshot!("daemon_exclusion_warning", text);
 }
+
+#[cfg(windows)]
+#[test]
+fn windows_job_exclusion_warning_snapshot() {
+    use crate::history_cell::HistoryCell;
+    let cell = crate::history_cell::StartupWarningsCell::new(vec![
+        "Running without the shared background server: this terminal requires embedded mode."
+            .into(),
+    ]);
+    let text = cell
+        .transcript_lines(/*width*/ 80)
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!("windows_job_exclusion_warning", text);
+}
