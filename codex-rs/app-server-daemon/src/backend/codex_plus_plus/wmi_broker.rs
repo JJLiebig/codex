@@ -97,10 +97,10 @@ fn create(command: &Command, flags: u32) -> Result<u32> {
         .map(|arg| unicode(arg, "daemon argument").map(|arg| quote_windows_arg(&arg)))
         .collect::<Result<Vec<_>>>()?
         .join(" ");
-    let current_directory = command
-        .get_current_dir()
-        .map(Path::to_path_buf)
-        .unwrap_or(std::env::current_dir()?);
+    let current_directory = match command.get_current_dir() {
+        Some(directory) => directory.to_path_buf(),
+        None => std::env::current_dir()?,
+    };
     let input = CreateInput {
         command_line,
         current_directory: unicode(current_directory.as_os_str(), "daemon directory")?,
