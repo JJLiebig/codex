@@ -2698,6 +2698,7 @@ requires_openai_auth = {requires_openai_auth}
             /*log_db*/ None,
             state_db,
             Arc::new(EnvironmentManager::default_for_tests()),
+            /*initial_account_id*/ None,
             Default::default(),
         )
         .await

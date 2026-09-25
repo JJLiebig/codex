@@ -717,7 +717,9 @@ async fn realtime_items_preserve_older_thread_history_writers() {
     .await
     .expect("existing turn-scoped item should be inserted");
 
-    THREAD_HISTORY_MIGRATOR
+    runtime_migrator_for_pool(&pool, &THREAD_HISTORY_MIGRATOR)
+        .await
+        .expect("reconcile migration checksums")
         .run(&pool)
         .await
         .expect("realtime item migration should apply");

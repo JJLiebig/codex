@@ -28,6 +28,16 @@ pub(super) fn take_refresher_task() -> Option<AbortHandle> {
         .take()
 }
 
+fn replace_refresher_task(next: AbortHandle) {
+    let mut guard = refresher_task_slot().lock().unwrap_or_else(|err| {
+        tracing::warn!("cloud config bundle refresher task slot was poisoned");
+        err.into_inner()
+    });
+    if let Some(previous) = guard.replace(next) {
+        previous.abort();
+    }
+}
+
 struct CloudConfigBundleLoaderLifetime<C> {
     service: Arc<CloudConfigBundleService<C>>,
     refresh_task: JoinHandle<()>,
@@ -54,7 +64,8 @@ pub fn cloud_config_bundle_loader(
         codex_home,
         CLOUD_CONFIG_BUNDLE_TIMEOUT,
     );
-    let (loader, _) = cloud_config_bundle_loader_for_service(service);
+    let (loader, refresh_task) = cloud_config_bundle_loader_for_service(service);
+    replace_refresher_task(refresh_task);
     loader
 }
 
@@ -89,7 +100,8 @@ pub async fn cloud_config_bundle_loader_for_storage(
 ) -> std::io::Result<CloudConfigBundleLoader> {
     let service =
         cloud_config_bundle_service_for_storage(auth_config, enable_codex_api_key_env).await?;
-    let (loader, _) = cloud_config_bundle_loader_for_service(service);
+    let (loader, refresh_task) = cloud_config_bundle_loader_for_service(service);
+    replace_refresher_task(refresh_task);
     Ok(loader)
 }
 

@@ -33,6 +33,8 @@ expression: commands
 /diff - show git diff (including untracked files)
 /mention - mention a file
 /status - show current session configuration and token usage
+/accounts - configure automatic account selection
+/codexplusplus - configure Codex++ settings
 /daemon - Manage the local background server
 /warnings - view retained warnings and diagnostic details
 /cd - change the current working directory

@@ -29,6 +29,7 @@ fn normalize_voice_snapshot_directory(rendered: &str, cwd: &Path) -> String {
     );
     rendered
         .replace(&cwd, &padded_placeholder)
+        .replace(crate::version::codex_cli_version(), "<VERSION>")
         .lines()
         .map(str::trim_end)
         .collect::<Vec<_>>()

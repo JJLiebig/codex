@@ -1162,12 +1162,16 @@ async fn responses_websocket_enabled_ignores_inactive_imported_accounts() -> any
         "test_originator".to_string(),
         /*model_verbosity*/ None,
         /*content_item_kinds_enabled*/ true,
+        /*reasoning_effort_override_enabled*/ false,
         /*enable_request_compression*/ false,
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
         /*concurrent_reasoning_summaries_enabled*/ false,
         /*attestation_provider*/ None,
         HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
+        codex_model_provider::WorkspaceRoutingContext::new(
+            "https://chatgpt.com/backend-api".into(),
+        ),
     );
 
     assert!(client.responses_websocket_enabled());

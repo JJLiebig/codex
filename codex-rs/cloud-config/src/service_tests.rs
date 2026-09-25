@@ -63,6 +63,22 @@ async fn auth_manager_with_api_key() -> Arc<AuthManager> {
     )
 }
 
+#[tokio::test]
+async fn loader_registers_refresher_for_account_picker() {
+    let codex_home = tempdir().expect("tempdir");
+    let loader = crate::cloud_config_bundle_loader(
+        auth_manager_with_api_key().await,
+        "https://chatgpt.com/backend-api/".to_string(),
+        codex_home.path().to_path_buf(),
+        codex_login::test_support::transport_default_auth_route_config()
+            .http_client_factory()
+            .clone(),
+    );
+    let task = crate::bundle_loader::take_refresher_task().expect("refresher registered");
+    task.abort();
+    drop(loader);
+}
+
 async fn auth_manager_with_plan_and_identity(
     plan_type: &str,
     chatgpt_user_id: Option<&str>,
