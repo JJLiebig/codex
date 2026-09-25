@@ -371,8 +371,8 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
 /// Preserve completion delivery when another task temporarily replaces the owning turn.
 pub(crate) async fn next_submission(
     session: &Arc<Session>,
-    submissions: &async_channel::Receiver<codex_protocol::protocol::Submission>,
-) -> Option<codex_protocol::protocol::Submission> {
+    submissions: &async_channel::Receiver<crate::session::Submission>,
+) -> Option<crate::session::Submission> {
     loop {
         tokio::select! {
             biased;

@@ -1,7 +1,6 @@
 use anyhow::Context;
 use codex_config::config_toml::ConfigLockfileToml;
 use codex_config::config_toml::ConfigToml;
-use codex_config::config_toml::OrchestratorFeatureToml;
 use codex_config::config_toml::OrchestratorToml;
 use codex_config::types::MemoriesToml;
 use codex_features::CurrentTimeReminderConfigToml;
@@ -239,12 +238,6 @@ fn save_config_resolved_fields(
         .skills
         .get_or_insert_with(Default::default)
         .include_instructions = Some(config.include_skill_instructions);
-    lock_config
-        .orchestrator
-        .get_or_insert_with(OrchestratorToml::default)
-        .skills
-        .get_or_insert_with(OrchestratorFeatureToml::default)
-        .enabled = Some(config.orchestrator_skills_enabled);
     lock_config
         .orchestrator
         .get_or_insert_with(OrchestratorToml::default)

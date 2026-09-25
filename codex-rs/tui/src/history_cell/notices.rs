@@ -269,7 +269,7 @@ impl HistoryCell for SafetyAccessBlockCell {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Eq, PartialEq)]
 pub(crate) struct DeprecationNoticeCell {
     summary: String,
     details: Option<String>,

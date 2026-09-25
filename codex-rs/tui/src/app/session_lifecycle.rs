@@ -487,6 +487,9 @@ impl App {
     pub(super) fn replace_chat_widget(&mut self, mut chat_widget: ChatWidget) {
         chat_widget.weekly_start_supported = self.chat_widget.weekly_start_supported;
         self.retain_realtime_replay_state_before_replace();
+        if !self.chat_widget.realtime_conversation_is_running() {
+            self.retain_realtime_replay_state_before_replace();
+        }
         chat_widget.cyber_policy_notice = self.chat_widget.cyber_policy_notice.clone();
         self.commit_animation = None;
         // Transfer the last-written terminal title to the replacement widget
@@ -521,7 +524,11 @@ impl App {
         }
         chat_widget.restore_kill_buffer_snapshot(self.chat_widget.take_kill_buffer_snapshot());
         crate::markdown_render::preferences::init(chat_widget.local_settings.tui.rendering);
-        self.chat_widget = chat_widget;
+        let mut previous = std::mem::replace(&mut self.chat_widget, chat_widget);
+        if previous.realtime_conversation_is_running() {
+            previous.park_voice();
+            self.background_voice = Some(Box::new(previous));
+        }
         self.sync_active_agent_label();
     }
 
@@ -691,10 +698,6 @@ impl App {
         self.recap.seed_from_progress(recap_progress, now);
         self.schedule_recap_check(thread_id, now);
 
-        // The old widget owns the local helper and its undelivered answers.
-        // Transfer replay state before stopping its backend voice session.
-        self.retain_realtime_replay_state_before_replace();
-        self.stop_realtime_conversation(app_server).await;
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
         if is_replay_only
             && self
@@ -795,9 +798,28 @@ impl App {
         Ok(())
     }
 
-    pub(super) fn reset_thread_event_state(&mut self) {
-        self.abort_all_thread_event_listeners();
-        self.thread_event_channels.clear();
+    pub(super) async fn reset_thread_event_state(&mut self) {
+        let voice_owner = self.voice_owner_thread_id();
+        if voice_owner.is_some() {
+            for (thread_id, channel) in &self.thread_event_channels {
+                if Some(*thread_id) != voice_owner {
+                    for request in channel.store.lock().await.pending_replay_requests() {
+                        self.pending_app_server_requests
+                            .resolve_notification(&thread_id.to_string(), request.id());
+                    }
+                }
+            }
+        }
+        self.thread_event_listener_tasks.retain(|id, task| {
+            if Some(*id) == voice_owner {
+                true
+            } else {
+                task.abort();
+                false
+            }
+        });
+        self.thread_event_channels
+            .retain(|id, _| Some(*id) == voice_owner);
         self.pending_realtime_speech_replay.clear();
         self.pending_realtime_transcript_replay.clear();
         self.realtime_replay_order.clear();
@@ -811,7 +833,9 @@ impl App {
         self.last_subagent_backfill_attempt = None;
         self.primary_session_configured = None;
         self.pending_primary_events.clear();
-        self.pending_app_server_requests.clear();
+        if voice_owner.is_none() {
+            self.pending_app_server_requests.clear();
+        }
         self.pending_startup_thread_start = false;
         self.pending_server_version_notice = None;
         self.chat_widget.set_pending_thread_approvals(Vec::new());
@@ -976,14 +1000,11 @@ impl App {
             .await
         {
             Ok(mut started) => {
-                self.shutdown_current_thread(app_server).await;
-                let tracked_thread_ids: Vec<ThreadId> =
-                    self.thread_event_channels.keys().copied().collect();
-                for thread_id in tracked_thread_ids {
-                    if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
-                        tracing::warn!("failed to unsubscribe tracked thread {thread_id}: {err}");
-                    }
-                }
+                self.detach_current_thread_for_navigation(
+                    app_server,
+                    Some(started.session.thread_id),
+                )
+                .await;
                 self.local_settings = self.local_settings.reloaded(&config);
                 self.refresh_server_version_overview_notice(codex_cli_version());
                 self.config = config;
@@ -1057,11 +1078,19 @@ impl App {
         // Initial messages are for freshly attached primary threads only. Thread switches and
         // resume/fork flows pass `None` so they cannot replay old history and then auto-submit a new
         // user turn by accident.
+        if let Some(mut receiver) = self.active_thread_rx.take() {
+            while let Ok(event) = receiver.try_recv() {
+                self.handle_thread_event_now_recovering_file_changes(event)
+                    .await;
+            }
+            self.active_thread_rx = Some(receiver);
+        }
+        self.store_active_thread_receiver().await;
         self.reset_for_thread_switch(tui)?;
         self.pending_thread_switch_resets += 1;
         self.app_event_tx
             .send(AppEvent::ResetTranscriptForThreadSwitch);
-        self.reset_thread_event_state();
+        self.reset_thread_event_state().await;
         let init = self.chatwidget_init_for_forked_or_resumed_thread(
             tui,
             self.config.clone(),
@@ -1308,12 +1337,8 @@ impl App {
             && self.chat_widget.thread_id() == Some(resumed_thread_id))
         .then(|| self.chat_widget.capture_thread_input_state())
         .flatten();
-        if self.chat_widget.thread_id() == Some(resumed_thread_id) {
-            // The successful resume has already subscribed this connection to the same thread.
-            self.shutdown_side_threads(app_server).await;
-        } else {
-            self.shutdown_current_thread(app_server).await;
-        }
+        self.detach_current_thread_for_navigation(app_server, Some(resumed_thread_id))
+            .await;
         self.local_settings = local_settings;
         self.refresh_server_version_overview_notice(codex_cli_version());
         self.config = resume_config;

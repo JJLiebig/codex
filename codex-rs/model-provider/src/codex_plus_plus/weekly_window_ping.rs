@@ -260,6 +260,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         | ApiError::UsageNotIncluded
         | ApiError::RateLimitExceeded { .. }
         | ApiError::RateLimit(_)
+        | ApiError::InvalidPrompt { .. }
         | ApiError::InvalidRequest { .. }
         | ApiError::CyberPolicy { .. }
         | ApiError::BioPolicy { .. }

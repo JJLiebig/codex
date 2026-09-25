@@ -36,6 +36,7 @@ async fn experimental_features_use_selected_server_profile_and_preserve_task_set
         /*state_db*/ None,
         Arc::new(EnvironmentManager::default_for_tests()),
         /*initial_account_id*/ None,
+        Default::default(),
     ))
     .await?;
     let mut server = AppServerSession::new(
