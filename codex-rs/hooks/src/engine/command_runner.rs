@@ -231,18 +231,20 @@ pub(crate) async fn run_command(
     }
 
     #[cfg(windows)]
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    #[cfg(windows)]
     let mut process_tree_job = JobObject::create().ok();
     #[cfg(windows)]
     let child = match process_tree_job.as_ref() {
-        Some(job) => match job.spawn_contained(&mut command) {
+        Some(job) => match job.spawn_contained_no_window(&mut command) {
             Ok(child) => Ok(child),
             Err(_) => {
                 process_tree_job = None;
-                command.creation_flags(0);
+                command.creation_flags(CREATE_NO_WINDOW);
                 command.spawn()
             }
         },
-        None => command.spawn(),
+        None => command.creation_flags(CREATE_NO_WINDOW).spawn(),
     };
     #[cfg(not(windows))]
     let child = command.spawn();
