@@ -78,8 +78,7 @@ pub(super) fn launch(
     stderr_log: &Path,
 ) -> Result<u32> {
     match kind {
-        LaunchKind::Detached => command
-            .spawn()?
+        LaunchKind::Detached => super::spawn_without_inheriting_stdio(command)?
             .id()
             .context("spawned app-server process has no pid"),
         LaunchKind::Brokered => {
