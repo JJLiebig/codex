@@ -236,45 +236,32 @@ impl PidBackend {
         }
 
         #[cfg(windows)]
-        let launch = match crate::backend::windows::ensure_detached_launch(&codex_bin) {
-            Ok(launch) => launch,
-            Err(error) => {
-                if replacement.is_none() {
-                    let _ = fs::remove_file(&self.pid_file).await;
-                }
-                return Err(error);
-            }
-        };
-        #[cfg(windows)]
-        let spawn = crate::backend::windows::launch(
-            &mut command,
-            launch,
-            &super::stderr_log_file_for_pid_file(&self.pid_file),
-        );
+        let child = super::super::windows::spawn_without_inheriting_stdio(&mut command);
         #[cfg(not(windows))]
-        let spawn = command
-            .spawn()
-            .map_err(anyhow::Error::from)
-            .and_then(|child| child.id().context("spawned app-server process has no pid"));
-        let pid = match spawn {
-            Ok(pid) => pid,
+        let child = command.spawn().map_err(anyhow::Error::from);
+        let child = match child {
+            Ok(child) => child,
             Err(err) => {
                 if replacement.is_none() {
                     let _ = fs::remove_file(&self.pid_file).await;
                 }
                 return Err(err).with_context(|| {
+                    let job_hint = if cfg!(windows) {
+                        " (the Windows host job must allow breakaway)"
+                    } else {
+                        ""
+                    };
                     format!(
-                        "failed to spawn detached app-server process using {}",
+                        "failed to spawn detached app-server process using {}{job_hint}",
                         self.codex_bin.display()
                     )
                 });
             }
         };
+        let pid = child
+            .id()
+            .context("spawned app-server process has no pid")?;
         let record = match async {
-            #[cfg(windows)]
-            super::super::windows::Process::open(pid)?
-                .context("daemon exited during launch")?
-                .ensure_detached(launch)?;
             let process_start_time = read_process_start_time(pid).await?;
             #[cfg(any(target_os = "linux", target_os = "macos"))]
             let process_identity = super::identity::read_process_details(pid)
