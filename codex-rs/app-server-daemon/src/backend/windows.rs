@@ -3,15 +3,21 @@
 //! Managed servers must not elevate ordinary clients sharing the account's socket.
 //! Installer jobs contain extraction processes when an update is cancelled.
 //! Detached launches stop the launcher's original stdio handles from propagating.
+//! Launch probes distinguish job restrictions from other failures without running the binary.
 
+use std::fmt;
 use std::io;
 use std::os::windows::io::AsRawHandle;
 use std::os::windows::io::FromRawHandle;
 use std::os::windows::io::OwnedHandle;
+use std::os::windows::process::CommandExt;
 use std::path::Path;
+use std::process::Command;
+use std::process::Stdio;
 
 use anyhow::Context;
 use anyhow::Result;
+use windows_sys::Win32::Foundation::ERROR_ACCESS_DENIED;
 use windows_sys::Win32::Foundation::ERROR_INVALID_HANDLE;
 use windows_sys::Win32::Foundation::ERROR_INVALID_PARAMETER;
 use windows_sys::Win32::Foundation::ERROR_LOCK_VIOLATION;
@@ -35,6 +41,9 @@ use windows_sys::Win32::System::JobObjects::JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
 use windows_sys::Win32::System::JobObjects::JOBOBJECT_EXTENDED_LIMIT_INFORMATION;
 use windows_sys::Win32::System::JobObjects::JobObjectExtendedLimitInformation;
 use windows_sys::Win32::System::JobObjects::SetInformationJobObject;
+use windows_sys::Win32::System::Threading::CREATE_BREAKAWAY_FROM_JOB;
+use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+use windows_sys::Win32::System::Threading::DETACHED_PROCESS;
 use windows_sys::Win32::System::Threading::GetCurrentProcess;
 use windows_sys::Win32::System::Threading::GetProcessId;
 use windows_sys::Win32::System::Threading::GetProcessTimes;
@@ -107,16 +116,52 @@ pub(crate) fn ensure_not_elevated() -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn ensure_detached_launch(executable: &Path) -> Result<LaunchKind> {
-    windows_detachment::preflight(executable)
+/// A launch that only fails when asked to leave the launcher's Windows job.
+/// Automatic CLI startup may use its embedded server; lifecycle operations
+/// must still return this error before stopping an existing daemon.
+#[derive(Debug)]
+pub struct DetachedLaunchRestricted;
+
+impl fmt::Display for DetachedLaunchRestricted {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(
+            "this Windows launcher prevents background processes from outliving it (for example, cargo run); build and run codex.exe directly to use the background server",
+        )
+    }
 }
 
-pub(crate) fn launch(
-    command: &mut tokio::process::Command,
-    kind: LaunchKind,
-    stderr_log: &Path,
-) -> Result<u32> {
-    windows_detachment::launch(command, kind, stderr_log)
+// Check that breakaway launch is permitted before stopping an existing daemon.
+// An outer system job may remain attached; membership alone does not establish
+// whether it will terminate the daemon. Suspend the probe before cleanup.
+pub(crate) fn ensure_detached_launch(executable: &Path) -> Result<()> {
+    let mut command = Command::new(executable);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_SUSPENDED | DETACHED_PROCESS | CREATE_BREAKAWAY_FROM_JOB);
+    let (mut child, launch_result) = match command.spawn() {
+        Ok(child) => (child, Ok(())),
+        Err(err) if err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) => {
+            // Access denied can also mean the file cannot be executed. Only
+            // classify a job restriction if removing breakaway makes it work.
+            // This diagnostic child stays suspended and is always reaped.
+            command.creation_flags(CREATE_SUSPENDED | DETACHED_PROCESS);
+            let child = match command.spawn() {
+                Ok(child) => child,
+                Err(_) => return Err(err).context("cannot launch detached daemon"),
+            };
+            (child, Err(err).context(DetachedLaunchRestricted))
+        }
+        Err(err) => return Err(err).context("cannot launch detached daemon"),
+    };
+    child
+        .kill()
+        .context("failed to terminate suspended launch probe")?;
+    child
+        .wait()
+        .context("failed to reap suspended launch probe")?;
+    launch_result
 }
 
 pub(super) struct Process(OwnedHandle);
@@ -174,15 +219,6 @@ impl Process {
             WAIT_OBJECT_0 => Ok(false),
             _ => Err(io::Error::last_os_error()).context("failed to wait for daemon process"),
         }
-    }
-
-    pub(super) fn ensure_detached(&self, launch: LaunchKind) -> Result<()> {
-        if let Err(error) = windows_detachment::verify_spawned(self.0.as_raw_handle() as _, launch)
-        {
-            self.terminate()?;
-            return Err(error);
-        }
-        Ok(())
     }
 
     pub(super) fn terminate(&self) -> Result<()> {
@@ -276,11 +312,3 @@ fn process_job(process: isize) -> Result<OwnedHandle> {
 #[cfg(test)]
 #[path = "windows_tests.rs"]
 mod tests;
-
-#[path = "codex_plus_plus/windows_detachment.rs"]
-mod windows_detachment;
-pub(crate) use windows_detachment::LaunchKind;
-
-#[path = "codex_plus_plus/wmi_broker.rs"]
-mod wmi_broker;
-pub use wmi_broker::redirect_stderr_from_env;
