@@ -29,6 +29,9 @@ unsafe extern "system" {
     fn NtResumeProcess(process_handle: HANDLE) -> NTSTATUS;
 }
 
+#[path = "codex_plus_plus/contained_spawn.rs"]
+mod codex_plus_plus;
+
 /// Owns a Windows Job Object used to terminate a spawned process tree.
 #[derive(Debug)]
 pub struct JobObject {

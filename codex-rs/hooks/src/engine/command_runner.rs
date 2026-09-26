@@ -4,6 +4,8 @@ use std::ffi::OsStr;
 use std::ffi::OsString;
 use std::future::Future;
 use std::io::ErrorKind;
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
 use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -44,6 +46,8 @@ use codex_protocol::protocol::HookOutputEntry;
 use codex_protocol::protocol::HookOutputEntryKind;
 
 const MAX_CONCURRENT_ASYNC_HOOKS: usize = 8;
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 /// Owns command execution and bounded asynchronous work for one session.
 #[derive(Clone)]
@@ -234,15 +238,15 @@ pub(crate) async fn run_command(
     let mut process_tree_job = JobObject::create().ok();
     #[cfg(windows)]
     let child = match process_tree_job.as_ref() {
-        Some(job) => match job.spawn_contained(&mut command) {
+        Some(job) => match job.spawn_contained_no_window(&mut command) {
             Ok(child) => Ok(child),
             Err(_) => {
                 process_tree_job = None;
-                command.creation_flags(0);
+                command.creation_flags(CREATE_NO_WINDOW);
                 command.spawn()
             }
         },
-        None => command.spawn(),
+        None => command.creation_flags(CREATE_NO_WINDOW).spawn(),
     };
     #[cfg(not(windows))]
     let child = command.spawn();
@@ -360,6 +364,7 @@ impl Drop for ProcessTreeGuard {
             } else {
                 let _ = std::process::Command::new("taskkill")
                     .args(["/PID", &process_id.to_string(), "/T", "/F"])
+                    .creation_flags(CREATE_NO_WINDOW)
                     .stdin(Stdio::null())
                     .stdout(Stdio::null())
                     .stderr(Stdio::null())
