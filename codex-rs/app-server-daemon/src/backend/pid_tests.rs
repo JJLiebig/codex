@@ -149,6 +149,13 @@ async fn start_retries_stale_empty_pid_file_under_its_own_lock() {
         assert!(!backend.lock_file.exists());
         return;
     }
+    #[cfg(windows)]
+    assert!(
+        err.to_string()
+            .starts_with("cannot launch detached daemon; existing daemon was not stopped"),
+        "{err:#}"
+    );
+    #[cfg(not(windows))]
     assert!(
         err.to_string()
             .starts_with("failed to spawn detached app-server process using ")
