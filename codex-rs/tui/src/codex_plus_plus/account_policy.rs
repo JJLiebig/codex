@@ -188,6 +188,11 @@ pub(crate) async fn persist_settings(
             .codex_plus_plus_settings_verification_failed(err.to_string());
         return;
     }
+    // Display preferences belong to the client. Adopt only the local disk readback above,
+    // never the connected server's effective configuration response.
+    app.chat_widget.local_settings.tui.show_footer_hints =
+        app.local_settings.tui.show_footer_hints;
+    app.chat_widget.local_settings.tui.show_tooltips = app.local_settings.tui.show_tooltips;
     app.chat_widget
         .sync_codex_plus_plus_settings_config(&app.config);
     sync_scheduler(app);
