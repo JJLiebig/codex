@@ -41,6 +41,7 @@ rust_binary(
     deps = [
         "//codex-rs/exec-server",
         "//codex-rs/http-client",
+        "//codex-rs/utils/pty",
         "//codex-rs/windows-sandbox-rs",
         "@crates//:tokio",
     ],

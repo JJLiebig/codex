@@ -37,10 +37,11 @@ pub struct SpawnRequest<'a> {
     pub windows_sandbox: Option<WindowsSandboxSpawnRequest<'a>>,
     pub tty: bool,
     pub stdin_open: bool,
-    pub inherited_fds: &'a [i32],
+    pub inherited_fds: codex_utils_pty::ChildFds<'a>,
 }
 
 /// Spawn a process using the backend selected by the prepared sandbox request.
+#[tracing::instrument(name = "codex.process.spawn", skip_all)]
 pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> {
     let tty = request.tty;
     let finish_spawn = |spawned| {
@@ -137,7 +138,7 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
             request.cwd,
             request.env,
             request.arg0,
-            request.inherited_fds,
+            request.inherited_fds.as_slice(),
         )
         .await
     } else {
@@ -147,7 +148,7 @@ pub async fn spawn_process(request: SpawnRequest<'_>) -> Result<SpawnedProcess> 
             request.cwd,
             request.env,
             request.arg0,
-            request.inherited_fds,
+            request.inherited_fds.as_slice(),
         )
         .await
     };

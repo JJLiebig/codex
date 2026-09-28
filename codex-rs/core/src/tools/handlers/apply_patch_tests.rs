@@ -296,10 +296,11 @@ fn write_permissions_for_paths_skip_dirs_already_writable_under_workspace_root()
 
     let permissions = write_permissions_for_paths(
         &[file_path.into()],
-        &sandbox_policy,
-        &local_context(&cwd.into()),
-        PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled),
-    );
+        &PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled)
+            .prepare_matching(&sandbox_policy, &local_context(&cwd.into()))
+            .expect("prepare patch matching"),
+    )
+    .expect("derive write permissions");
 
     assert_eq!(permissions, None);
 }
@@ -322,10 +323,11 @@ fn write_permissions_for_paths_keep_dirs_outside_workspace_root() {
 
     let permissions = write_permissions_for_paths(
         &[file_path.into()],
-        &sandbox_policy,
-        &local_context(&cwd_abs.into()),
-        PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled),
-    );
+        &PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled)
+            .prepare_matching(&sandbox_policy, &local_context(&cwd_abs.into()))
+            .expect("prepare patch matching"),
+    )
+    .expect("derive write permissions");
     let expected_outside = outside.abs();
 
     assert_eq!(
@@ -349,10 +351,11 @@ fn write_permissions_for_paths_do_not_widen_workspace_root_target() {
     );
     let permissions = write_permissions_for_paths(
         &[cwd.clone().into()],
-        &sandbox_policy,
-        &local_context(&cwd.into()),
-        PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled),
-    );
+        &PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled)
+            .prepare_matching(&sandbox_policy, &local_context(&cwd.into()))
+            .expect("prepare patch matching"),
+    )
+    .expect("derive write permissions");
 
     assert_eq!(permissions, None);
 }
@@ -369,10 +372,11 @@ fn write_permissions_for_paths_do_not_regrant_an_already_writable_parent() {
 
     let permissions = write_permissions_for_paths(
         &[file_path.into()],
-        &sandbox_policy,
-        &local_context(&cwd.into()),
-        PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled),
-    );
+        &PatchSandboxRoute::Platform(WindowsSandboxLevel::Disabled)
+            .prepare_matching(&sandbox_policy, &local_context(&cwd.into()))
+            .expect("prepare patch matching"),
+    )
+    .expect("derive write permissions");
 
     assert_eq!(permissions, None);
 }
@@ -391,10 +395,11 @@ fn write_permissions_for_windows_paths_uses_executor_uris() {
     assert_eq!(
         write_permissions_for_paths(
             &[outside],
-            &policy,
-            &context,
-            PatchSandboxRoute::ExecutorManaged,
+            &PatchSandboxRoute::ExecutorManaged
+                .prepare_matching(&policy, &context)
+                .expect("prepare patch matching"),
         )
+        .expect("derive write permissions")
         .and_then(|profile| profile.file_system)
         .map(|permissions| permissions.entries),
         Some(vec![FileSystemSandboxEntry::new(
