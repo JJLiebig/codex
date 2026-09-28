@@ -68,6 +68,12 @@ impl LocalSettings {
                 effects: config.tui_effects,
                 rendering: config.tui_rendering,
                 show_tooltips: config.show_tooltips,
+                show_footer_hints: config
+                    .config_layer_stack
+                    .effective_config()
+                    .get("tui")
+                    .and_then(|tui| tui.get("show_footer_hints"))
+                    .and_then(toml::Value::as_bool),
                 show_server_version_notice: config.tui_show_server_version_notice,
                 auto_recap: config.tui_auto_recap,
                 disable_paste_burst: Some(config.disable_paste_burst),
@@ -185,3 +191,7 @@ impl LocalSettings {
 #[cfg(test)]
 #[path = "local_settings_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "codex_plus_plus/hint_settings_tests.rs"]
+mod hint_settings_tests;
