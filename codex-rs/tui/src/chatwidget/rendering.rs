@@ -258,6 +258,7 @@ impl ChatWidget {
                     textarea_right_reserve: right_reserve,
                     separate_status_line: command_popup_placement
                         != crate::bottom_pane::CommandPopupPlacement::AboveComposer,
+                    hide_footer_hints: !self.local_settings.tui.show_footer_hints.unwrap_or(true),
                     command_popup_placement,
                     footer,
                 },
