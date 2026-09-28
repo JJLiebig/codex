@@ -830,10 +830,15 @@ pub struct Tui {
     #[serde(default)]
     pub rendering: TuiRendering,
 
-    /// Show startup tooltips in the TUI welcome screen.
+    /// Show startup, working, and completion tips in the TUI.
     /// Defaults to `true`.
     #[serde(default = "default_true")]
     pub show_tooltips: bool,
+
+    /// Show the separate passive shortcuts and warning-count row below the status line.
+    /// Defaults to `true`. Status, explicit help, navigation, and input controls remain available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub show_footer_hints: Option<bool>,
 
     /// Show informational notices about connected app server version differences.
     /// Defaults to `true`; this does not control compatibility errors or version status.
