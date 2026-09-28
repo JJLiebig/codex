@@ -1498,7 +1498,9 @@ impl Session {
     pub(crate) async fn get_prompt_base_instructions(&self) -> BaseInstructions {
         let config = self.get_config().await;
         let mut instructions = self.get_base_instructions().await;
-        if codex_config::disable_unnecessary_updates(&config.config_layer_stack) {
+        if !self.is_private_guardian_reviewer().await
+            && codex_config::disable_unnecessary_updates(&config.config_layer_stack)
+        {
             instructions.text =
                 crate::codex_plus_plus::quiet_updates::instructions(&instructions.text);
         }

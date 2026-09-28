@@ -1328,6 +1328,7 @@ async fn responses_websocket_enabled_ignores_inactive_imported_accounts() -> any
         codex_model_provider::WorkspaceRoutingContext::new(
             "https://chatgpt.com/backend-api".into(),
         ),
+        Vec::new(),
     );
 
     assert!(client.responses_websocket_enabled());

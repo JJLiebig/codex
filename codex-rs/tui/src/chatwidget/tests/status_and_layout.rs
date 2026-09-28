@@ -171,7 +171,7 @@ async fn model_capacity_retry_warning_renders_snapshot() {
         "The selected model is at capacity. Retrying in 1 minute (1/4).",
     );
 
-    let cells = drain_insert_history(&mut rx);
+    let cells = drain_insert_history_transcript(&mut rx);
     let warning = cells
         .iter()
         .map(|lines| lines_to_single_string(lines))

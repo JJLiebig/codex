@@ -317,11 +317,12 @@ async fn ambiguous_outcomes_are_not_replayed_and_the_attempt_is_bounded() {
             ApiError::UsageNotIncluded,
             ApiError::RateLimitExceeded {
                 message: "retry later".to_string(),
-                delay: Some(Duration::from_secs(1)),
+                retry_after: None,
             },
+            ApiError::FlexUnavailable,
         ]
         .map(|error| classify_error(&error)),
-        [WeeklyWindowPingOutcome::Rejected { status: None }; 2]
+        [WeeklyWindowPingOutcome::Rejected { status: None }; 3]
     );
 
     let server = MockServer::start().await;

@@ -1,5 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/status_and_layout.rs
+assertion_line: 189
 expression: rendered
 ---
 ⚠ The selected model is at capacity. Retrying in 1 minute (1/4).
@@ -11,4 +12,4 @@ expression: rendered
 "                                                                                "
 "› Ask Codex to do anything                                                      "
 "                                                                                "
-"  gpt-5.6-sol default · /tmp/project                                            "
+"  GPT-5.6-Sol default · /tmp/project                                            "

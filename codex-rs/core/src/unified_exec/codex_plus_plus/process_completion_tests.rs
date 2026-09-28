@@ -61,3 +61,28 @@ async fn completion_wait_releases_on_cleanup_without_exit_event() {
         .await
         .expect("cleanup releases the waiter without an exit event");
 }
+
+#[tokio::test]
+async fn completion_output_retains_already_polled_output() {
+    let process = crate::unified_exec::process_tests::remote_process(
+        WriteStatus::Accepted,
+        /*terminate_error*/ None,
+        SandboxType::None,
+    )
+    .await;
+    {
+        let mut output = process.output.output_buffer.lock().await;
+        output.push_chunk(b"already returned to the model");
+        output.pending = Default::default();
+    }
+    process
+        .output
+        .output_closed
+        .store(true, std::sync::atomic::Ordering::Release);
+
+    let output = process
+        .completion_output(/*session_id*/ 1000, Some(0))
+        .await;
+    assert_eq!(output.output_tail, "already returned to the model");
+    assert!(!output.truncated);
+}

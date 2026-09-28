@@ -9,6 +9,7 @@ use pretty_assertions::assert_eq;
 fn format_guardian_action_pretty_reports_no_truncation_for_small_payload() -> serde_json::Result<()>
 {
     let action = GuardianApprovalRequest::ApplyPatch {
+        environment_id: "local".to_string(),
         id: "patch-1".to_string(),
         cwd: test_path_buf("/tmp").abs().into(),
         files: Vec::new(),

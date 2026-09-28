@@ -288,7 +288,7 @@ impl CommandExecManager {
                 windows_sandbox: None,
                 tty: false,
                 stdin_open: stream_stdin,
-                inherited_fds: &[],
+                inherited_fds: codex_utils_pty::ChildFds::Inherited(&[]),
             })
             .await
         };

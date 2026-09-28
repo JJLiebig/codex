@@ -259,6 +259,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         | ApiError::UsageLimitReached { .. }
         | ApiError::UsageNotIncluded
         | ApiError::RateLimitExceeded { .. }
+        | ApiError::FlexUnavailable
         | ApiError::RateLimit(_)
         | ApiError::InvalidPrompt { .. }
         | ApiError::InvalidRequest { .. }
@@ -275,7 +276,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         ApiError::Transport(_)
         | ApiError::Stream(_)
         | ApiError::Retryable { .. }
-        | ApiError::ServerOverloaded
+        | ApiError::ServerOverloaded { .. }
         | ApiError::ContextWindowExceeded => WeeklyWindowPingOutcome::Ambiguous { status: None },
     }
 }

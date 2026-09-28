@@ -1,10 +1,11 @@
 ---
 source: tui/src/startup_draft_layout_tests.rs
-expression: "format!(\"cursor={:?}\\n{frame}\",\nlayout.cursor_pos(area)).replace(crate::version::CODEX_CLI_VERSION,\n\"<VERSION>\")"
+assertion_line: 29
+expression: "format!(\"cursor={:?}\\n{frame}\",\nlayout.cursor_pos(area)).replace(crate::version::codex_cli_version(),\n\"<VERSION>\")"
 ---
 cursor=Some((13, 12))
                                                 
-  >_ OpenAI Codex (v<VERSION>)                      
+  >_ OpenAI Codex (v<VERSION>)                    
      loading                                    
                                                 
   Pull up a prompt.                             
