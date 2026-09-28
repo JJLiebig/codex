@@ -1,16 +1,16 @@
 ---
 source: tui/src/startup_draft_tests.rs
+assertion_line: 859
 expression: frames
 ---
 before account picker: hidden (0x0 viewport)
 ---
 after account picker:
-╭───────────────────────────────────────╮
-│ >_ OpenAI Codex (v<VERSION>)            │
-│                                       │
-│ model:     loading   /model to change │
-│ directory: loading                    │
-╰───────────────────────────────────────╯
+
+  >_ OpenAI Codex (v<VERSION>)
+     loading
+
+  Pull up a prompt.
 
 
 › Ask Codex to do anything

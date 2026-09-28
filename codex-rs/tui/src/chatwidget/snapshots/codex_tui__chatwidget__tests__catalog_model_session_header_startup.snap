@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/tests/app_server.rs
-assertion_line: 99
+assertion_line: 101
 expression: rendered
 ---
 OpenAI Codex (v<VERSION>)
@@ -14,3 +14,5 @@ directory: /tmp/thread-settings
   /permissions - choose what Codex is allowed to do
   /model - choose what model and reasoning effort to use
   /review - review any changes and find issues
+  Welcome to Codex++. Use /codexplusplus for settings and /accounts to enable
+  or disable accounts.

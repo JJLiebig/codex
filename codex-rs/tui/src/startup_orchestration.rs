@@ -584,12 +584,10 @@ pub(super) async fn run_main_inner(
     daemon_features.retain(|_, enabled| *enabled);
     let mut managed_daemon = false;
     if auto_start_daemon && daemon_exclusion.is_none() {
-        startup_draft.flush_pending_events().await?;
         let output = startup_draft
-            .tui_mut()
-            .with_restored(|| async {
-                // Package installation may print progress; keep ordinary Ctrl+C handling.
-                crossterm::terminal::disable_raw_mode()?;
+            .run_until(async {
+                // Daemon startup needs no terminal input. Keep the composer visible and
+                // responsive while it checks the running server or prepares an installation.
                 let result = codex_app_server_daemon::start_with_features(&daemon_features).await;
                 daemon_telemetry::record_start(&config, &result).await;
                 match result {
@@ -604,7 +602,7 @@ pub(super) async fn run_main_inner(
                     ))),
                 }
             })
-            .await?;
+            .await??;
         if let Some(output) = output {
             managed_daemon = output.backend.is_some();
             app_server_target = AppServerTarget::LocalDaemon {
@@ -902,7 +900,9 @@ pub(super) async fn run_main_inner(
 
     let otel_tracing_layer = otel.as_ref().and_then(|o| o.tracing_layer());
 
-    let log_db = state_db.clone().map(log_db::start);
+    let log_db = state_db
+        .clone()
+        .map(|state_db| log_db::start(state_db, std::sync::Arc::new(feedback.clone())));
     let log_db_layer = log_db
         .clone()
         .map(|layer| layer.with_filter(log_db::default_filter()));

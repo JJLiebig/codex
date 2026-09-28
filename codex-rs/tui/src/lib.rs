@@ -132,6 +132,7 @@ mod config_update;
 pub(crate) mod custom_terminal;
 mod daybreak;
 mod experimental_features;
+mod markdown_copy;
 mod permission_discovery;
 mod pets;
 mod worktree_browser;
@@ -232,6 +233,7 @@ mod transcript_mode;
 mod transcript_reflow;
 mod transcript_view;
 mod tui;
+mod turn_tip;
 mod ui_consts;
 mod unarchive_prompt;
 pub(crate) mod update_action;
@@ -1339,6 +1341,7 @@ async fn run_ratatui_app(
                 show_trust_screen: should_show_trust_screen_flag,
                 remote_project_trust: None,
                 login_status,
+                app_server_target: app_server_target.clone(),
                 app_server_request_handle: app_server
                     .as_ref()
                     .map(AppServerSession::request_handle),

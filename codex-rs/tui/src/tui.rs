@@ -102,6 +102,9 @@ pub(crate) struct InitializedTerminal {
     pub(crate) stderr_guard: terminal_stderr::TerminalStderrGuard,
 }
 
+pub(crate) use keyboard_modes::VscodeDetection;
+pub(crate) use keyboard_modes::detect_vscode_terminal;
+
 pub(crate) fn running_in_vscode_terminal() -> bool {
     keyboard_modes::running_in_vscode_terminal()
 }
@@ -676,11 +679,12 @@ pub enum TuiEvent {
     FocusLost,
 }
 
-/// The overlay requesting pointer reports; ordinary pickers retain alternate-scroll input.
+/// The current screen's pointer policy; ordinary pickers retain alternate-scroll input.
 #[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum OverlayInput {
     #[default]
     Default,
+    Onboarding,
     Transcript,
     StaticPager,
     Usage,
@@ -690,7 +694,7 @@ impl OverlayInput {
     fn captures_mouse(self, owned_screen: bool) -> bool {
         match self {
             Self::Default => owned_screen,
-            Self::StaticPager => false,
+            Self::Onboarding | Self::StaticPager => false,
             Self::Transcript | Self::Usage => true,
         }
     }
@@ -702,6 +706,7 @@ pub struct Tui {
     event_broker: Arc<EventBroker>,
     pub(crate) terminal: Terminal,
     pending_history_lines: Vec<PendingHistoryLines>,
+    clear_thread_switch_on_draw: bool,
     screen_size: ScreenSizePolicy,
     ambient_pet_image_state: crate::pets::PetImageRenderState,
     pet_picker_preview_image_state: crate::pets::PetImageRenderState,
@@ -722,9 +727,9 @@ pub struct Tui {
     alt_screen_enabled: bool,
     // Keep the alternate screen alive when an overlay closes.
     owned_screen: bool,
-    overlay_input: OverlayInput,
-    // Selection copies survive closing a transcript overlay or startup session picker.
-    selection_clipboard_lease: Option<crate::clipboard_copy::ClipboardLease>,
+    pub(crate) overlay_input: OverlayInput,
+    // Copies and native ownership survive closing an overlay or startup picker.
+    pub(crate) clipboard: crate::clipboard_copy::worker::ClipboardWorker,
     // Keeps unmanaged process stderr writes out of the inline viewport.
     _stderr_guard: terminal_stderr::TerminalStderrGuard,
 }
@@ -777,6 +782,7 @@ impl Tui {
             event_broker: Arc::new(event_broker),
             terminal,
             pending_history_lines: vec![],
+            clear_thread_switch_on_draw: false,
             screen_size: ScreenSizePolicy::default(),
             ambient_pet_image_state: crate::pets::PetImageRenderState::default(),
             pet_picker_preview_image_state: crate::pets::PetImageRenderState::default(),
@@ -793,7 +799,7 @@ impl Tui {
             alt_screen_enabled: true,
             owned_screen: false,
             overlay_input: OverlayInput::Default,
-            selection_clipboard_lease: None,
+            clipboard: Default::default(),
             _stderr_guard: stderr_guard,
         }
     }
@@ -1165,6 +1171,33 @@ impl Tui {
         self.pending_history_lines.clear();
     }
 
+    pub(crate) fn clear_for_thread_switch(&mut self) -> Result<()> {
+        self.clear_thread_switch_on_draw = false;
+        if self.is_alt_screen_active() {
+            self.leave_alt_screen()?;
+        }
+        if self.is_owned_screen() {
+            self.terminal.clear()?;
+        } else {
+            self.terminal.clear_scrollback_and_visible_screen_ansi()?;
+            let mut area = self.terminal.viewport_area;
+            if area.y > 0 {
+                area.y = 0;
+                self.terminal.set_viewport_area(area);
+            }
+        }
+        Ok(())
+    }
+
+    /// Keep the current frame visible until the next synchronized draw.
+    pub(crate) fn defer_thread_switch_clear(&mut self) {
+        self.clear_thread_switch_on_draw = true;
+    }
+
+    pub(crate) fn has_deferred_thread_switch_clear(&self) -> bool {
+        self.clear_thread_switch_on_draw
+    }
+
     /// Resize the inline viewport for the resize-reflow path.
     ///
     /// Unlike the legacy draw path, this path does not scroll rows above the viewport when the
@@ -1276,6 +1309,10 @@ impl Tui {
                 )?;
             }
 
+            if self.clear_thread_switch_on_draw {
+                self.clear_for_thread_switch()?;
+                pending_viewport_area = None;
+            }
             if self.owned_screen && !self.is_alt_screen_active() {
                 self.enter_alt_screen()?;
                 pending_viewport_area = None;
@@ -1423,6 +1460,9 @@ impl Tui {
                 )?;
             }
 
+            if self.clear_thread_switch_on_draw {
+                self.clear_for_thread_switch()?;
+            }
             if self.owned_screen && !self.is_alt_screen_active() {
                 self.enter_alt_screen()?;
             }

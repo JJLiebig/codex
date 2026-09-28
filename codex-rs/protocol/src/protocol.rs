@@ -647,6 +647,9 @@ pub enum Op {
     ThreadSettings {
         /// Sparse thread-settings overrides to apply.
         thread_settings: ThreadSettingsOverrides,
+        /// When present, report validation errors here instead of emitting an error event.
+        /// Successful updates still emit `ThreadSettingsApplied` for all callers.
+        reply: Option<oneshot::Sender<CodexResult<()>>>,
     },
 
     /// Update only the named running turn, without changing future settings.
@@ -1858,6 +1861,7 @@ pub enum CodexErrorInfo {
     SessionBudgetExceeded,
     UsageLimitExceeded,
     RateLimitExceeded,
+    FlexUnavailable,
     ServerOverloaded,
     CyberPolicy,
     BioPolicy,
@@ -1901,6 +1905,7 @@ impl CodexErrorInfo {
             | Self::SessionBudgetExceeded
             | Self::UsageLimitExceeded
             | Self::RateLimitExceeded
+            | Self::FlexUnavailable
             | Self::ServerOverloaded
             | Self::CyberPolicy
             | Self::BioPolicy
@@ -5586,6 +5591,7 @@ mod tests {
             started_at_ms: 10,
             item: TurnItem::CommandExecution(CommandExecutionItem {
                 model_context: None,
+                sandbox_type: None,
                 id: "exec-1".into(),
                 plugin_id: Some("sample@openai-curated".into()),
                 script_path: Some("scripts/run.py".into()),
@@ -5613,6 +5619,7 @@ mod tests {
             completed_at_ms: 20,
             item: TurnItem::CommandExecution(CommandExecutionItem {
                 model_context: None,
+                sandbox_type: None,
                 id: "exec-1".into(),
                 plugin_id: Some("sample@openai-curated".into()),
                 script_path: Some("scripts/run.py".into()),

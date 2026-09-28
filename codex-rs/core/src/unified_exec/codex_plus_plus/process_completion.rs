@@ -20,13 +20,13 @@ impl UnifiedExecProcess {
                     .await;
         }
         let output = self.output.output_buffer.lock().await;
-        let bytes = output.to_bytes();
+        let bytes = output.transcript.to_bytes();
         let start = bytes.len().saturating_sub(2048);
         crate::context::codex_plus_plus::BackgroundProcessExit {
             session_id,
             exit_code,
             output_tail: String::from_utf8_lossy(&bytes[start..]).into_owned(),
-            truncated: output.total_bytes() > bytes.len() - start,
+            truncated: output.transcript.total_bytes() > bytes.len() - start,
         }
     }
 

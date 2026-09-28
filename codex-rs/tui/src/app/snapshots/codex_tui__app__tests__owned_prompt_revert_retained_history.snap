@@ -1,11 +1,11 @@
 ---
 source: tui/src/app/tests.rs
-assertion_line: 8342
+assertion_line: 8536
 expression: transcript
 ---
-  /permissions - choose what Codex is allowed to do
-  /model - choose what model and reasoning effort to use
   /review - review any changes and find issues
+  Welcome to Codex++. Use /codexplusplus for settings and /accounts to enable
+  or disable accounts.
 
 
 › retained prompt
