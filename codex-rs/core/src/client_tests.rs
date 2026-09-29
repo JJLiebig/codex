@@ -21,7 +21,10 @@ use codex_api::AgentIdentityTelemetry;
 use codex_api::ApiError;
 use codex_api::ResponseEvent;
 use codex_api::TransportError;
+use codex_http_client::HttpClient;
+use codex_http_client::HttpClientBuilder;
 use codex_http_client::HttpClientFactory;
+use codex_http_client::HttpTransport;
 use codex_http_client::OutboundProxyPolicy;
 use codex_login::AccountStore;
 use codex_login::AuthCredentialsStoreMode;
@@ -139,6 +142,87 @@ fn test_model_client_with_thread_id(
 
 fn test_model_provider() -> SharedModelProvider {
     test_model_client(SessionSource::Cli).state.provider.clone()
+}
+
+#[derive(Debug)]
+struct TestHttpClientProvider {
+    inner: SharedModelProvider,
+    client: HttpClient,
+}
+
+impl ModelProvider for TestHttpClientProvider {
+    fn info(&self) -> &ModelProviderInfo {
+        self.inner.info()
+    }
+
+    fn api_http_client(&self) -> codex_protocol::error::Result<Option<HttpClient>> {
+        Ok(Some(self.client.clone()))
+    }
+
+    fn auth_manager(&self) -> Option<Arc<AuthManager>> {
+        self.inner.auth_manager()
+    }
+
+    fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
+        self.inner.auth()
+    }
+
+    fn account_state(&self) -> ProviderAccountResult {
+        self.inner.account_state()
+    }
+
+    fn models_manager(
+        &self,
+        codex_home: PathBuf,
+        config_model_catalog: Option<ModelsResponse>,
+    ) -> SharedModelsManager {
+        self.inner.models_manager(codex_home, config_model_catalog)
+    }
+}
+
+#[tokio::test]
+async fn responses_http_uses_provider_owned_client() -> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(/*status*/ 200))
+        .mount(&server)
+        .await;
+    let mut headers = http::HeaderMap::new();
+    headers.insert(
+        "x-test-provider-client",
+        http::HeaderValue::from_static("used"),
+    );
+    let client = HttpClientBuilder::new()
+        .default_headers(headers)
+        .build_direct()?;
+    let mut info = test_model_provider().info().clone();
+    info.base_url = Some(format!("{}/v1", server.uri()));
+    let mut model_client = test_model_client(SessionSource::Exec);
+    Arc::get_mut(&mut model_client.state).unwrap().provider = Arc::new(TestHttpClientProvider {
+        inner: create_model_provider(info, /*auth_manager*/ None),
+        client,
+    });
+    let provider = model_client.state.provider.api_provider().await?;
+    let transport = model_client.build_api_transport(
+        &provider,
+        "/responses",
+        codex_login::default_client::ClientRedirectPolicy::Default,
+    )?;
+    let request = provider
+        .build_request(http::Method::POST, "/responses")
+        .with_json(&json!({"input": "provider transport"}));
+    assert_eq!(
+        transport.execute(request).await?.status,
+        http::StatusCode::OK
+    );
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].headers.get("x-test-provider-client").unwrap(),
+        "used"
+    );
+    Ok(())
 }
 
 #[tokio::test]
