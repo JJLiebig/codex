@@ -21,7 +21,9 @@ use serde::Deserialize;
 use serde::Serialize;
 
 const TESTED_VERSION: &str = "7.3.12";
-const STARTUP_ATTEMPTS: usize = 100;
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
+// Windows can take over a second to report refusal on a stopped loopback listener.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const STATE_LIMIT: u64 = 16 * 1024;
 
 #[derive(Clone, Debug)]
@@ -101,7 +103,7 @@ impl CliProxyRuntime {
         let config_path = dir.join("config.yaml");
         let mut state = match read_state(&state_path)? {
             Some(state) => {
-                match handle.block_on(probe_owned(&state, factory, tls.clone()))? {
+                match handle.block_on(probe_owned(&state, factory, tls.clone(), PROBE_TIMEOUT))? {
                     Some(true) => return Ok(state.endpoint()),
                     Some(false) => {
                         return Err(io::Error::other(
@@ -162,13 +164,20 @@ impl CliProxyRuntime {
             return Err(error);
         }
         let started = (|| -> io::Result<RuntimeEndpoint> {
-            for _ in 0..STARTUP_ATTEMPTS {
+            let deadline = std::time::Instant::now() + STARTUP_TIMEOUT;
+            while let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) {
                 if let Some(status) = child.try_wait()? {
                     return Err(io::Error::other(format!(
                         "CLIProxyAPI exited during startup ({status}); check the executable and owned configuration"
                     )));
                 }
-                if handle.block_on(probe_owned(&state, factory, tls.clone()))? == Some(true) {
+                if handle.block_on(probe_owned(
+                    &state,
+                    factory,
+                    tls.clone(),
+                    remaining.min(PROBE_TIMEOUT),
+                ))? == Some(true)
+                {
                     return Ok(state.endpoint());
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -323,12 +332,13 @@ async fn probe_owned(
     state: &RuntimeState,
     factory: &HttpClientFactory,
     tls: HttpClientTlsConfig,
+    timeout: Duration,
 ) -> io::Result<Option<bool>> {
     let url = format!("https://127.0.0.1:{}/v0/management/auth-files", state.port);
     let response = pinned_client(factory, tls, &state.endpoint().base_url)?
         .get(url)
         .bearer_auth(&state.management_key)
-        .timeout(Duration::from_secs(1))
+        .timeout(timeout)
         .send()
         .await;
     match response {

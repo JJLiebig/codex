@@ -47,7 +47,7 @@ fn stop_test_proxy(pid: u32) -> io::Result<()> {
 }
 
 fn test_factory() -> HttpClientFactory {
-    HttpClientFactory::new(codex_http_client::OutboundProxyPolicy::Direct)
+    HttpClientFactory::new(codex_http_client::OutboundProxyPolicy::ReqwestDefault)
 }
 
 #[tokio::test]
@@ -104,7 +104,10 @@ async fn foreign_listener_cannot_be_adopted_or_reused_after_reconnect() -> io::R
                 let (stream, _) = listener.accept().await?;
                 if let Ok(mut stream) = acceptor.accept(stream).await {
                     let mut request = [0_u8; 1024];
-                    let len = stream.read(&mut request).await?;
+                    let len = stream.read(&mut request).await.unwrap_or(0);
+                    if len == 0 {
+                        continue;
+                    }
                     received.extend_from_slice(&request[..len]);
                     stream
                         .write_all(
