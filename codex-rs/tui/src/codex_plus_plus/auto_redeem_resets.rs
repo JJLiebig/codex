@@ -19,7 +19,6 @@ use codex_login::ResetMutationLease;
 use codex_login::refresh_auth_from_storage;
 use codex_login::token_data::TokenData;
 use codex_model_provider::WeeklyWindowPingOutcome;
-use codex_model_provider::WeeklyWindowPingRequest;
 use codex_model_provider::ping_weekly_window;
 use codex_protocol::protocol::RateLimitReachedType;
 use codex_protocol::protocol::RateLimitSnapshot;
@@ -32,6 +31,7 @@ use std::path::PathBuf;
 use crate::account_usage;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
+use crate::codex_plus_plus::native_account_maintenance;
 use crate::history_cell;
 use crate::legacy_core::config::Config;
 
@@ -270,15 +270,10 @@ impl ResetAccount<'_> {
     }
 
     async fn activate_weekly(&self) -> WeeklyWindowPingOutcome {
-        let mut auth_config = self.config.auth_config();
-        auth_config.codex_home = self.home.clone();
-        ping_weekly_window(WeeklyWindowPingRequest {
-            auth_config,
-            model_provider_id: self.config.model_provider_id.clone(),
-            model_provider: self.config.model_provider.clone(),
-            chatgpt_base_url: self.config.chatgpt_base_url.clone(),
-            http_client_factory: self.config.http_client_factory(),
-        })
+        ping_weekly_window(native_account_maintenance::ping_request(
+            self.config,
+            self.home.clone(),
+        ))
         .await
     }
 }

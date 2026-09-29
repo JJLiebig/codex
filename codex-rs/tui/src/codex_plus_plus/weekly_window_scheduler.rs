@@ -15,7 +15,6 @@ use codex_login::WeeklyWindowError;
 use codex_login::WeeklyWindowRetryableError;
 use codex_login::WeeklyWindowUsage;
 use codex_model_provider::WeeklyWindowPingOutcome;
-use codex_model_provider::preflight_weekly_window_ping;
 use tokio::sync::watch;
 use tokio::task::JoinHandle;
 use tokio::time::MissedTickBehavior;
@@ -23,6 +22,7 @@ use tokio::time::MissedTickBehavior;
 use crate::account_usage;
 use crate::app_event_sender::AppEventSender;
 use crate::codex_plus_plus::auto_redeem_resets;
+use crate::codex_plus_plus::preflight_native_account_maintenance;
 use crate::legacy_core::config::Config;
 
 const SCAN_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -144,14 +144,8 @@ async fn scan(
     if !settings.enabled() {
         return;
     }
-    let http_client_factory = config.http_client_factory();
     let mut fresh_redemption = auto_redeem_resets::FreshRedemption::Allowed;
-    if let Err(outcome) = preflight_weekly_window_ping(
-        &config.model_provider_id,
-        &config.model_provider,
-        &config.chatgpt_base_url,
-        &http_client_factory,
-    ) {
+    if let Err(outcome) = preflight_native_account_maintenance(&config) {
         tracing::warn!(?outcome, "weekly-window scheduler unsupported");
         settings.weekly = false;
         fresh_redemption = auto_redeem_resets::FreshRedemption::RecoveryOnly;

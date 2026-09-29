@@ -7,6 +7,7 @@ pub(crate) mod destructive_command_guard;
 #[cfg(any(not(debug_assertions), test))]
 mod lag_warning;
 mod model_capacity_retry;
+mod native_account_maintenance;
 mod release_status;
 pub(crate) mod runtime_version;
 mod startup_accounts;
@@ -24,6 +25,7 @@ use destructive_command_guard::RepairReason;
 #[cfg(not(debug_assertions))]
 pub(crate) use lag_warning::lag_warning;
 pub(crate) use model_capacity_retry::status_details as model_capacity_retry_status_details;
+pub(crate) use native_account_maintenance::preflight as preflight_native_account_maintenance;
 #[cfg(any(not(debug_assertions), test))]
 pub(crate) use release_status::dismiss_version;
 #[cfg(any(not(debug_assertions), test))]

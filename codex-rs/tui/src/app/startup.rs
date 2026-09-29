@@ -699,13 +699,7 @@ impl App {
             }
         };
         chat_widget.weekly_start_supported = app_server.uses_embedded_app_server()
-            && codex_model_provider::preflight_weekly_window_ping(
-                &config.model_provider_id,
-                &config.model_provider,
-                &config.chatgpt_base_url,
-                &config.http_client_factory(),
-            )
-            .is_ok();
+            && crate::codex_plus_plus::preflight_native_account_maintenance(&config).is_ok();
         let startup_session_cancelled = initial_started_thread.is_none()
             && !pending_startup_thread_start
             && !start_in_agents_overview;

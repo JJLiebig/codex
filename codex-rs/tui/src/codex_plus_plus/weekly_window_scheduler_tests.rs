@@ -3,7 +3,48 @@ use std::sync::atomic::AtomicBool;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
+use codex_http_client::OutboundProxyPolicy;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_model_provider_info::OPENAI_PROVIDER_ID;
+
 use super::*;
+use crate::codex_plus_plus::native_account_maintenance;
+
+#[tokio::test]
+async fn custom_conversation_provider_keeps_native_maintenance_eligible() {
+    let home = tempfile::tempdir().unwrap();
+    let mut config = crate::legacy_core::config::ConfigBuilder::default()
+        .codex_home(home.path().into())
+        .build()
+        .await
+        .unwrap();
+    config.model_provider_id = "custom".to_string();
+    config.model_provider =
+        ModelProviderInfo::create_openai_provider(Some("http://localhost:1234/v1".to_string()));
+    let account_home = home.path().join("accounts/acct_test");
+    let request = native_account_maintenance::ping_request(&config, account_home.clone());
+    assert_eq!(request.auth_config.codex_home, account_home);
+    assert_eq!(request.model_provider_id, OPENAI_PROVIDER_ID);
+    assert_eq!(preflight_native_account_maintenance(&config), Ok(()));
+
+    config.respect_system_proxy = true;
+    let routed = native_account_maintenance::ping_request(&config, home.path().into());
+    assert_eq!(
+        routed.http_client_factory.outbound_proxy_policy(),
+        OutboundProxyPolicy::RespectSystemProxy
+    );
+    assert_eq!(
+        preflight_native_account_maintenance(&config),
+        Err(WeeklyWindowPingOutcome::UnsupportedRouting)
+    );
+
+    config.respect_system_proxy = false;
+    config.chatgpt_base_url = "https://other.example/backend-api".to_string();
+    assert_eq!(
+        preflight_native_account_maintenance(&config),
+        Err(WeeklyWindowPingOutcome::UnsupportedConfiguration)
+    );
+}
 
 #[tokio::test(start_paused = true)]
 async fn schedule_scans_on_time_and_observes_disable_until_dropped() {

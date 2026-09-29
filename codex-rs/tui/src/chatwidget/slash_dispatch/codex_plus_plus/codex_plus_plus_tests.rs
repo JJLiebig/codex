@@ -82,6 +82,46 @@ fn settings_unsupported_snapshot() {
     );
 }
 
+#[tokio::test]
+async fn custom_provider_keeps_maintenance_controls_snapshot() {
+    let home = tempfile::tempdir().expect("temporary home");
+    let mut config = crate::legacy_core::config::ConfigBuilder::default()
+        .codex_home(home.path().into())
+        .build()
+        .await
+        .expect("test config");
+    config.model_provider_id = "custom".to_string();
+    config.model_provider = codex_model_provider_info::ModelProviderInfo::create_openai_provider(
+        Some("http://localhost:1234/v1".to_string()),
+    );
+    let (tx, _rx) = unbounded_channel();
+    let keymap = settings_list_keymap(RuntimeKeymap::defaults().list);
+    let view = ListSelectionView::new(
+        codex_plus_plus_settings_params(
+            AutomaticAccountSelection::Disabled,
+            WeeklyUsageWindowAutoStart::Enabled,
+            Some(AutoRedeemResets::default()),
+            ModelCapacityRetryMode::Bounded,
+            ToolActivityPresentation::Full,
+            /*current_quiet_updates*/ true,
+            crate::codex_plus_plus::preflight_native_account_maintenance(&config).is_ok(),
+            /*dcg_status*/ None,
+            &keymap,
+        ),
+        AppEventSender::new(tx),
+        keymap,
+    );
+    let mut terminal =
+        Terminal::new(VT100Backend::new(/*width*/ 84, /*height*/ 24)).expect("terminal");
+    terminal
+        .draw(|frame| view.render(frame.area(), frame.buffer_mut()))
+        .expect("render settings");
+    insta::assert_snapshot!(
+        "codex_plus_plus_settings_custom_provider_maintenance",
+        terminal.backend().to_string()
+    );
+}
+
 #[test]
 fn unsupported_settings_save_only_the_visible_settings() {
     let (mut view, mut rx) = settings_view(
