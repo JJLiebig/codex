@@ -37,6 +37,12 @@ pub(super) struct RuntimeEndpoint {
     pub management_key: String,
 }
 
+/// Retains the existing runtime lock so startup cannot race stopped-file cleanup.
+pub(super) struct AttachedRuntime {
+    pub endpoint: Option<RuntimeEndpoint>,
+    _lock: File,
+}
+
 #[derive(Deserialize, Serialize)]
 struct RuntimeState {
     port: u16,
@@ -63,6 +69,53 @@ impl CliProxyRuntime {
 
     pub(super) fn home(&self) -> &Path {
         &self.home
+    }
+
+    pub(super) async fn attach_only(
+        &self,
+        factory: HttpClientFactory,
+    ) -> io::Result<Option<AttachedRuntime>> {
+        let runtime = self.clone();
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let dir = runtime.home.join("cli-proxy");
+            match fs::symlink_metadata(&dir) {
+                Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+                Ok(metadata) if metadata.is_dir() => {}
+                Ok(_) => return Err(io::Error::other("CLIProxyAPI directory is invalid")),
+                Err(error) => return Err(error),
+            }
+            let lock = OpenOptions::new()
+                .create(true)
+                .truncate(false)
+                .read(true)
+                .write(true)
+                .open(dir.join("runtime.lock"))?;
+            lock.lock()?;
+            let endpoint = match read_state(&dir.join("runtime.json"))? {
+                Some(state) => match handle.block_on(probe_owned(
+                    &state,
+                    &factory,
+                    runtime.tls_config()?,
+                    PROBE_TIMEOUT,
+                ))? {
+                    Some(true) => Some(state.endpoint()),
+                    None => None,
+                    Some(false) => {
+                        return Err(io::Error::other(
+                            "CLIProxyAPI runtime could not be verified",
+                        ));
+                    }
+                },
+                None => None,
+            };
+            Ok(Some(AttachedRuntime {
+                endpoint,
+                _lock: lock,
+            }))
+        })
+        .await
+        .map_err(io::Error::other)?
     }
 
     pub(super) async fn ensure(&self, factory: HttpClientFactory) -> io::Result<RuntimeEndpoint> {

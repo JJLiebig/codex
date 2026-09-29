@@ -18,18 +18,18 @@ use super::cli_proxy_runtime::CliProxyRuntime;
 use super::cli_proxy_runtime::RuntimeEndpoint;
 
 const NATIVE_PREFIX: &str = "codex-native-";
-const MANAGEMENT_TIMEOUT: Duration = Duration::from_secs(5);
+pub(super) const MANAGEMENT_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Deserialize)]
-struct Inventory {
-    files: Vec<AuthFile>,
+pub(super) struct Inventory {
+    pub files: Vec<AuthFile>,
 }
 
 #[derive(Deserialize)]
-struct AuthFile {
-    name: String,
+pub(super) struct AuthFile {
+    pub name: String,
     #[serde(rename = "type")]
-    provider: String,
+    pub provider: String,
 }
 
 impl CliProxyRuntime {
@@ -52,7 +52,7 @@ impl CliProxyRuntime {
     }
 }
 
-fn native_record(credential: &NativeCredential) -> (String, Value) {
+pub(super) fn native_record(credential: &NativeCredential) -> (String, Value) {
     let (source, account) = match &credential.source {
         NativeCredentialSource::Root(account) => ("root", account),
         NativeCredentialSource::Imported(account) => ("imported", account),
@@ -71,10 +71,29 @@ fn native_record(credential: &NativeCredential) -> (String, Value) {
     (format!("{prefix}.json"), record)
 }
 
-fn owned_filename(name: &str) -> bool {
+pub(super) fn owned_filename(name: &str) -> bool {
     (name.starts_with("codex-native-root-") || name.starts_with("codex-native-imported-"))
         && name.ends_with(".json")
         && !name.contains(['/', '\\'])
+}
+
+pub(super) async fn delete_auth_file(
+    client: &HttpClient,
+    url: &url::Url,
+    management_key: &str,
+    name: &str,
+) -> io::Result<()> {
+    acknowledged(
+        client
+            .delete(url.clone())
+            .query(&[("name", name)])
+            .bearer_auth(management_key)
+            .timeout(MANAGEMENT_TIMEOUT)
+            .send()
+            .await
+            .map_err(io::Error::other)?,
+    )
+    .await
 }
 
 async fn reconcile(
@@ -103,17 +122,7 @@ async fn reconcile(
             && file.provider == "codex"
             && !desired.contains_key(&file.name)
         {
-            acknowledged(
-                client
-                    .delete(url.clone())
-                    .query(&[("name", &file.name)])
-                    .bearer_auth(&endpoint.management_key)
-                    .timeout(MANAGEMENT_TIMEOUT)
-                    .send()
-                    .await
-                    .map_err(io::Error::other)?,
-            )
-            .await?;
+            delete_auth_file(client, &url, &endpoint.management_key, &file.name).await?;
         }
     }
     for (name, record) in desired {
@@ -166,7 +175,7 @@ async fn reconcile(
     Ok(())
 }
 
-async fn acknowledged(response: HttpResponse) -> io::Result<()> {
+pub(super) async fn acknowledged(response: HttpResponse) -> io::Result<()> {
     let response: Value = response
         .error_for_status()
         .map_err(io::Error::other)?
