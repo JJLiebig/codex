@@ -4,15 +4,18 @@ use std::fs::OpenOptions;
 use std::io;
 use std::io::Read;
 use std::io::Write;
-use std::net::SocketAddr;
 use std::net::TcpListener;
-use std::net::TcpStream;
 use std::path::Path;
 use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::time::Duration;
 
+use codex_http_client::ClientRouteClass;
+use codex_http_client::HttpClient;
+use codex_http_client::HttpClientBuilder;
+use codex_http_client::HttpClientFactory;
+use codex_http_client::HttpClientTlsConfig;
 use rand::RngCore;
 use serde::Deserialize;
 use serde::Serialize;
@@ -53,7 +56,7 @@ struct RuntimeState {
 impl RuntimeState {
     fn endpoint(&self) -> RuntimeEndpoint {
         RuntimeEndpoint {
-            base_url: format!("http://127.0.0.1:{}/v1", self.port),
+            base_url: format!("https://127.0.0.1:{}/v1", self.port),
             inference_key: self.inference_key.clone(),
         }
     }
@@ -68,16 +71,21 @@ impl CliProxyRuntime {
         &self.home
     }
 
-    pub(super) async fn ensure(&self) -> io::Result<RuntimeEndpoint> {
+    pub(super) async fn ensure(&self, factory: HttpClientFactory) -> io::Result<RuntimeEndpoint> {
         let runtime = self.clone();
-        tokio::task::spawn_blocking(move || runtime.ensure_blocking())
+        let handle = tokio::runtime::Handle::current();
+        codex_uds::prepare_private_socket_directory(self.home.join("cli-proxy")).await?;
+        tokio::task::spawn_blocking(move || runtime.ensure_blocking(&handle, &factory))
             .await
             .map_err(io::Error::other)?
     }
 
-    fn ensure_blocking(&self) -> io::Result<RuntimeEndpoint> {
+    fn ensure_blocking(
+        &self,
+        handle: &tokio::runtime::Handle,
+        factory: &HttpClientFactory,
+    ) -> io::Result<RuntimeEndpoint> {
         let dir = self.home.join("cli-proxy");
-        private_dir(&dir)?;
         let lock_path = dir.join("runtime.lock");
         let lock = OpenOptions::new()
             .create(true)
@@ -87,11 +95,22 @@ impl CliProxyRuntime {
             .open(lock_path)?;
         lock.lock()?;
 
+        let cert_path = dir.join("certificate.pem");
+        let key_path = dir.join("private-key.pem");
+        if !cert_path.exists() && !key_path.exists() {
+            let rcgen::CertifiedKey { cert, signing_key } =
+                rcgen::generate_simple_self_signed(vec!["127.0.0.1".into()])
+                    .map_err(io::Error::other)?;
+            write_private(&key_path, signing_key.serialize_pem().as_bytes())?;
+            write_private(&cert_path, cert.pem().as_bytes())?;
+        }
+        // A partial identity fails closed rather than rotating a pin used by other sessions.
+        let tls = self.tls_config()?;
         let state_path = dir.join("runtime.json");
         let config_path = dir.join("config.yaml");
         let mut state = match read_state(&state_path)? {
             Some(state) => {
-                match probe_owned(state.port, &state.management_key)? {
+                match handle.block_on(probe_owned(&state, factory, tls.clone()))? {
                     Some(true) => return Ok(state.endpoint()),
                     Some(false) => {
                         return Err(io::Error::other(
@@ -116,11 +135,13 @@ impl CliProxyRuntime {
                 state
             }
         };
-        private_dir(&dir.join("auth"))?;
+        handle.block_on(codex_uds::prepare_private_socket_directory(
+            dir.join("auth"),
+        ))?;
         if config_path.exists() {
             fs::remove_file(&config_path)?;
         }
-        write_config(&config_path, &dir.join("auth"), &state)?;
+        write_config(&config_path, &dir, &state)?;
         let executable = self.compatible_executable()?;
         if state.pid == 0 {
             // Persist the keys before launch so another host can attach after a crash.
@@ -156,7 +177,7 @@ impl CliProxyRuntime {
                         "CLIProxyAPI exited during startup ({status}); check the executable and owned configuration"
                     )));
                 }
-                if probe_owned(state.port, &state.management_key)? == Some(true) {
+                if handle.block_on(probe_owned(&state, factory, tls.clone()))? == Some(true) {
                     return Ok(state.endpoint());
                 }
                 std::thread::sleep(Duration::from_millis(100));
@@ -170,6 +191,20 @@ impl CliProxyRuntime {
             let _ = child.wait();
         }
         started
+    }
+
+    pub(super) fn http_client(&self, factory: &HttpClientFactory) -> io::Result<HttpClient> {
+        let state = read_state(&self.home.join("cli-proxy/runtime.json"))?
+            .ok_or_else(|| io::Error::other("CLIProxyAPI runtime has not started"))?;
+        pinned_client(factory, self.tls_config()?, &state.endpoint().base_url)
+    }
+
+    fn tls_config(&self) -> io::Result<HttpClientTlsConfig> {
+        let dir = self.home.join("cli-proxy");
+        fs::metadata(dir.join("private-key.pem"))?;
+        HttpClientTlsConfig::default()
+            .with_root_certificate_pem(&fs::read(dir.join("certificate.pem"))?)
+            .map_err(io::Error::other)
     }
 
     fn compatible_executable(&self) -> io::Result<PathBuf> {
@@ -214,32 +249,21 @@ fn random_key() -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-fn private_dir(path: &Path) -> io::Result<()> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::DirBuilderExt;
-        let mut builder = fs::DirBuilder::new();
-        builder.recursive(true).mode(0o700).create(path)?;
-        fs::set_permissions(path, std::os::unix::fs::PermissionsExt::from_mode(0o700))?;
-    }
-    #[cfg(not(unix))]
-    fs::create_dir_all(path)?;
-    if !fs::symlink_metadata(path)?.is_dir() {
-        return Err(io::Error::other(
-            "CLIProxyAPI state path must be a directory",
-        ));
-    }
-    Ok(())
-}
-
-fn write_config(path: &Path, auth_dir: &Path, state: &RuntimeState) -> io::Result<()> {
-    let auth_dir = auth_dir
-        .to_str()
-        .ok_or_else(|| io::Error::other("CLIProxyAPI auth path is not valid Unicode"))?;
-    let auth_dir = serde_json::to_string(auth_dir)?;
+fn write_config(path: &Path, dir: &Path, state: &RuntimeState) -> io::Result<()> {
+    let yaml_path = |name: &str| -> io::Result<String> {
+        let path = dir.join(name);
+        serde_json::to_string(
+            path.to_str()
+                .ok_or_else(|| io::Error::other("CLIProxyAPI path is not valid Unicode"))?,
+        )
+        .map_err(io::Error::other)
+    };
+    let auth_dir = yaml_path("auth")?;
+    let cert = yaml_path("certificate.pem")?;
+    let key = yaml_path("private-key.pem")?;
     let text = format!(
-        "host: \"127.0.0.1\"\nport: {}\nauth-dir: {}\napi-keys: [\"{}\"]\nremote-management:\n  allow-remote: false\n  secret-key: \"{}\"\n  disable-control-panel: true\nforce-model-prefix: true\ndisable-claude-cloak-mode: true\ndisable-image-generation: \"passthrough\"\nrequest-retry: 0\nmax-retry-interval: 0\nrequest-log: false\nlogging-to-file: false\nrouting:\n  session-affinity: true\nstreaming:\n  keepalive-seconds: 0\n  bootstrap-retries: 0\ncodex:\n  optimize-multi-agent-v2: true\n  identity-confuse: false\n",
-        state.port, auth_dir, state.inference_key, state.management_key
+        "host: \"127.0.0.1\"\nport: {}\ntls:\n  enable: true\n  cert: {cert}\n  key: {key}\nauth-dir: {auth_dir}\napi-keys: [\"{}\"]\nremote-management:\n  allow-remote: false\n  secret-key: \"{}\"\n  disable-control-panel: true\nforce-model-prefix: true\ndisable-claude-cloak-mode: true\ndisable-image-generation: \"passthrough\"\nrequest-retry: 0\nmax-retry-interval: 0\nrequest-log: false\nlogging-to-file: false\nrouting:\n  session-affinity: true\nstreaming:\n  keepalive-seconds: 0\n  bootstrap-retries: 0\ncodex:\n  optimize-multi-agent-v2: true\n  identity-confuse: false\n",
+        state.port, state.inference_key, state.management_key
     );
     write_private(path, text.as_bytes())
 }
@@ -288,45 +312,50 @@ fn write_private(path: &Path, bytes: &[u8]) -> io::Result<()> {
     file.sync_all()
 }
 
-fn probe(port: u16, key: &str) -> io::Result<Option<bool>> {
-    let address = SocketAddr::from(([127, 0, 0, 1], port));
-    let mut stream = match TcpStream::connect_timeout(&address, Duration::from_millis(200)) {
-        Ok(stream) => stream,
-        Err(error)
-            if matches!(
-                error.kind(),
-                io::ErrorKind::ConnectionRefused | io::ErrorKind::TimedOut
-            ) =>
-        {
-            return Ok(None);
-        }
-        Err(error) => return Err(error),
-    };
-    stream.set_read_timeout(Some(Duration::from_secs(1)))?;
-    stream.set_write_timeout(Some(Duration::from_secs(1)))?;
-    write!(
-        stream,
-        "GET /v0/management/auth-files HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer {key}\r\nConnection: close\r\n\r\n"
-    )?;
-    let mut response = [0_u8; 64];
-    let mut length = 0;
-    while length < response.len() && !response[..length].contains(&b'\n') {
-        let read = stream.read(&mut response[length..])?;
-        if read == 0 {
-            break;
-        }
-        length += read;
-    }
-    Ok(Some(
-        response[..length].starts_with(b"HTTP/1.1 200")
-            || response[..length].starts_with(b"HTTP/1.0 200"),
-    ))
+fn pinned_client(
+    factory: &HttpClientFactory,
+    tls: HttpClientTlsConfig,
+    base_url: &str,
+) -> io::Result<HttpClient> {
+    let origin = url::Url::parse(base_url).map_err(io::Error::other)?;
+    let factory = factory
+        .clone()
+        .with_network_policy(factory.network_policy().clone().restrict_to_origin(origin));
+    Ok(HttpClientBuilder::new()
+        .default_headers(codex_login::default_client::default_headers())
+        .without_redirects()
+        .without_request_logging()
+        .build_with_tls(&factory, ClientRouteClass::Api, tls))
 }
 
-fn probe_owned(port: u16, key: &str) -> io::Result<Option<bool>> {
-    match probe(port, key)? {
-        Some(true) => Ok(Some(probe(port, "invalid-codex-probe")? == Some(false))),
-        other => Ok(other),
+async fn probe_owned(
+    state: &RuntimeState,
+    factory: &HttpClientFactory,
+    tls: HttpClientTlsConfig,
+) -> io::Result<Option<bool>> {
+    let url = format!("https://127.0.0.1:{}/v0/management/auth-files", state.port);
+    let response = pinned_client(factory, tls, &state.endpoint().base_url)?
+        .get(url)
+        .bearer_auth(&state.management_key)
+        .timeout(Duration::from_secs(1))
+        .send()
+        .await;
+    match response {
+        Ok(response) => Ok(Some(response.status().is_success())),
+        Err(error) => {
+            // TLS/policy failures are occupied, untrusted endpoints. Only refusal permits restart.
+            let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);
+            while let Some(error) = source {
+                if error
+                    .downcast_ref::<io::Error>()
+                    .is_some_and(|error| error.kind() == io::ErrorKind::ConnectionRefused)
+                {
+                    return Ok(None);
+                }
+                source = error.source();
+            }
+            Ok(Some(false))
+        }
     }
 }
 
