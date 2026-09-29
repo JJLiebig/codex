@@ -7,6 +7,7 @@ pub(crate) mod destructive_command_guard;
 #[cfg(any(not(debug_assertions), test))]
 mod lag_warning;
 mod model_capacity_retry;
+mod native_account_maintenance;
 mod release_status;
 pub(crate) mod runtime_version;
 mod startup_accounts;
