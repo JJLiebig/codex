@@ -203,18 +203,11 @@ impl CliProxyRuntime {
         }
         state.executable = executable.clone();
         let mut command = Command::new(&executable);
+        configure_owned_command(&mut command, &dir);
         command
-            .arg("-config")
-            .arg(&config_path)
-            .current_dir(&dir)
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-        }
         let mut child = command
             .spawn()
             .map_err(|error| io::Error::new(error.kind(), format!("start CLIProxyAPI: {error}")))?;
@@ -260,12 +253,56 @@ impl CliProxyRuntime {
         pinned_client(factory, self.tls_config()?, &state.endpoint().base_url)
     }
 
+    pub(super) fn claude_login_command(&self) -> io::Result<Command> {
+        let dir = self.home.join("cli-proxy");
+        let state = read_state(&dir.join("runtime.json"))?
+            .ok_or_else(|| io::Error::other("Claude sign-in needs the owned runtime"))?;
+        let executable = super::cli_proxy_executable::installed_executable(
+            /*explicit*/ None,
+            [state.executable],
+        )?
+        .ok_or_else(|| io::Error::other("The saved sign-in executable is incompatible"))?;
+        let mut command = Command::new(&executable);
+        configure_owned_command(&mut command, &dir);
+        command.arg("-claude-login");
+        Ok(command)
+    }
+
     fn tls_config(&self) -> io::Result<HttpClientTlsConfig> {
         let dir = self.home.join("cli-proxy");
         fs::metadata(dir.join("private-key.pem"))?;
         HttpClientTlsConfig::default()
             .with_root_certificate_pem(&fs::read(dir.join("certificate.pem"))?)
             .map_err(io::Error::other)
+    }
+}
+
+fn configure_owned_command(command: &mut Command, dir: &Path) {
+    command
+        .arg("-config")
+        .arg(dir.join("config.yaml"))
+        .current_dir(dir);
+    // v7.3.14 reads these selectors before -config; never redirect owned credentials/config.
+    for selector in [
+        "PGSTORE_DSN",
+        "GITSTORE_GIT_URL",
+        "OBJECTSTORE_ENDPOINT",
+        "HOME_JWT",
+    ] {
+        command
+            .env_remove(selector)
+            .env_remove(selector.to_ascii_lowercase());
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // A terminal Ctrl+C must not stop the shared server while cancelling sign-in.
+        command.process_group(/*pgroup*/ 0);
     }
 }
 

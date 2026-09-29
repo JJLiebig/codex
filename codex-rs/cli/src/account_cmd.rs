@@ -8,6 +8,9 @@ use codex_login::AccountStore;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
 
+#[path = "codex_plus_plus/claude_accounts.rs"]
+mod claude_accounts;
+
 #[derive(Debug, Parser)]
 pub(crate) struct AccountCli {
     #[clap(skip)]
@@ -27,6 +30,9 @@ pub(crate) enum AccountSubcommand {
 
     /// List imported accounts.
     List,
+
+    /// Add or list Claude subscription accounts.
+    Claude(claude_accounts::ClaudeAccountCli),
 }
 
 #[derive(Debug, Args)]
@@ -78,6 +84,7 @@ pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Resu
         AccountSubcommand::List => {
             print_accounts(store.list().context("failed to list accounts")?);
         }
+        AccountSubcommand::Claude(args) => claude_accounts::run(args, &config).await?,
     }
     Ok(())
 }

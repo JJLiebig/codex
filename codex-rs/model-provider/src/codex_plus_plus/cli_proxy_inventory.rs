@@ -113,7 +113,7 @@ pub(super) async fn read_inventory(
     .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "CLIProxyAPI inventory timed out"))?
 }
 
-async fn read_json<T: DeserializeOwned>(
+pub(super) async fn read_json<T: DeserializeOwned>(
     transport: &ReqwestTransport,
     url: url::Url,
     endpoint: &RuntimeEndpoint,
