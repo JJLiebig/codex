@@ -27,6 +27,7 @@ use sha2::Digest;
 use sha2::Sha256;
 
 use super::cli_proxy_runtime::CliProxyRuntime;
+use super::cli_proxy_runtime::RuntimeEndpoint;
 use crate::BearerAuthProvider;
 use crate::auth::ProviderAuthScope;
 use crate::auth::ResolvedProviderAuth;
@@ -84,6 +85,18 @@ impl CliProxyModelProvider {
             })
     }
 
+    async fn prepare(&self) -> CoreResult<RuntimeEndpoint> {
+        let manager = self.auth_manager().ok_or_else(|| {
+            codex_protocol::error::CodexErr::UnsupportedOperation(
+                "CLIProxyAPI needs a CODEX_HOME auth runtime".into(),
+            )
+        })?;
+        Ok(self
+            .runtime()?
+            .prepare(&manager, manager.http_client_factory())
+            .await?)
+    }
+
     fn models_endpoint(&self, home: Option<PathBuf>) -> Arc<dyn ModelsEndpointClient> {
         let runtime = self.runtime.clone().or_else(|| {
             home.map(|home| {
@@ -93,7 +106,7 @@ impl CliProxyModelProvider {
                 )
             })
         });
-        Arc::new(CliProxyModelsEndpoint::new(runtime))
+        Arc::new(CliProxyModelsEndpoint::new(runtime, self.auth_manager()))
     }
 }
 
@@ -129,7 +142,7 @@ impl ModelProvider for CliProxyModelProvider {
 
     fn api_provider(&self) -> ModelProviderFuture<'_, CoreResult<Provider>> {
         Box::pin(async move {
-            let endpoint = self.runtime()?.ensure(self.http_client_factory()?).await?;
+            let endpoint = self.prepare().await?;
             let mut provider = self.info.to_api_provider(/*auth_mode*/ None)?;
             provider.base_url = endpoint.base_url;
             Ok(provider)
@@ -137,19 +150,12 @@ impl ModelProvider for CliProxyModelProvider {
     }
 
     fn runtime_base_url(&self) -> ModelProviderFuture<'_, CoreResult<Option<String>>> {
-        Box::pin(async move {
-            Ok(Some(
-                self.runtime()?
-                    .ensure(self.http_client_factory()?)
-                    .await?
-                    .base_url,
-            ))
-        })
+        Box::pin(async move { Ok(Some(self.prepare().await?.base_url)) })
     }
 
     fn api_auth(&self) -> ModelProviderFuture<'_, CoreResult<SharedAuthProvider>> {
         Box::pin(async move {
-            let endpoint = self.runtime()?.ensure(self.http_client_factory()?).await?;
+            let endpoint = self.prepare().await?;
             Ok(Arc::new(BearerAuthProvider::new(endpoint.inference_key)) as SharedAuthProvider)
         })
     }
@@ -210,17 +216,22 @@ impl ModelProvider for CliProxyModelProvider {
 struct CliProxyModelsEndpoint {
     runtime: Option<CliProxyRuntime>,
     identity: Option<String>,
+    auth_manager: Option<Arc<AuthManager>>,
 }
 
 impl CliProxyModelsEndpoint {
-    fn new(runtime: Option<CliProxyRuntime>) -> Self {
+    fn new(runtime: Option<CliProxyRuntime>, auth_manager: Option<Arc<AuthManager>>) -> Self {
         let identity = runtime.as_ref().map(|runtime| {
             let mut digest = Sha256::new();
             digest.update(b"cli-proxy-models-v1");
             digest.update(runtime.home().as_os_str().as_encoded_bytes());
             format!("{:x}", digest.finalize())
         });
-        Self { runtime, identity }
+        Self {
+            runtime,
+            identity,
+            auth_manager,
+        }
     }
 }
 
@@ -256,7 +267,14 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
                     "CLIProxyAPI needs an inference host with a CODEX_HOME auth runtime".into(),
                 )
             })?;
-            let endpoint = runtime.ensure(http_client_factory.clone()).await?;
+            let manager = self.auth_manager.as_ref().ok_or_else(|| {
+                codex_protocol::error::CodexErr::UnsupportedOperation(
+                    "CLIProxyAPI needs a CODEX_HOME auth runtime".into(),
+                )
+            })?;
+            let endpoint = runtime
+                .prepare(manager, http_client_factory.clone())
+                .await?;
             let mut provider = ModelProviderInfo::create_cli_proxy_provider()
                 .to_api_provider(/*auth_mode*/ None)?;
             provider.base_url = endpoint.base_url;
