@@ -76,22 +76,16 @@ impl CodexImagesBackend {
     }
 
     /// Resolves the provider and auth required for the current image API request.
-    async fn client(&self) -> Result<ImagesClient<ReqwestTransport>, ImageBackendError> {
-        let provider = self
-            .provider
-            .api_provider()
-            .await
-            .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
-        let auth = self
-            .provider
-            .api_auth()
-            .await
-            .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
-        let transport = if let Some(client) = self
-            .provider
-            .api_http_client()
-            .map_err(|err| ImageBackendError::from_message(err.to_string()))?
-        {
+    async fn client(
+        &self,
+        model: &mut String,
+    ) -> Result<ImagesClient<ReqwestTransport>, ImageBackendError> {
+        let prepared =
+            codex_model_provider::prepare_configured_request(self.provider.as_ref(), model)
+                .await
+                .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
+        *model = prepared.model;
+        let transport = if let Some(client) = prepared.http_client {
             ReqwestTransport::from_http_client(client)
         } else {
             create_transport_for_routes_async(
@@ -101,16 +95,20 @@ impl CodexImagesBackend {
             .await
             .map_err(|err| ImageBackendError::from_message(err.to_string()))?
         };
-        Ok(ImagesClient::new(transport, provider, auth))
+        Ok(ImagesClient::new(
+            transport,
+            prepared.provider,
+            prepared.auth.auth,
+        ))
     }
 
     /// Sends a standalone image generation request through the configured Images client.
     pub(crate) async fn generate(
         &self,
-        request: ImageGenerationRequest,
+        mut request: ImageGenerationRequest,
         turn_id: &str,
     ) -> Result<(ImageResponse, Option<String>), ImageBackendError> {
-        self.client()
+        self.client(&mut request.model)
             .await?
             .generate(
                 &request,
@@ -123,10 +121,10 @@ impl CodexImagesBackend {
     /// Sends a standalone image edit request through the configured Images client.
     pub(crate) async fn edit(
         &self,
-        request: ImageEditRequest,
+        mut request: ImageEditRequest,
         turn_id: &str,
     ) -> Result<(ImageResponse, Option<String>), ImageBackendError> {
-        self.client()
+        self.client(&mut request.model)
             .await?
             .edit(
                 &request,

@@ -1,0 +1,146 @@
+//! Immutable request routing through an owned proxy publication snapshot.
+
+use std::sync::Arc;
+
+use codex_api::Provider;
+use codex_http_client::HttpClient;
+use codex_login::NativeCredentialSource;
+use codex_protocol::error::CodexErr;
+use codex_protocol::error::Result;
+
+use super::cli_proxy_credentials::owned_filename;
+use super::cli_proxy_inventory::CredentialModels;
+use crate::ModelProvider;
+use crate::ResolvedProviderAuth;
+
+/// Endpoint, credentials and wire model resolved together, before body encoding.
+pub struct PreparedModelRequest {
+    pub provider: Provider,
+    pub auth: ResolvedProviderAuth,
+    pub http_client: Option<HttpClient>,
+    pub model: String,
+    pub route: Option<ProxyRequestRoute>,
+}
+
+#[cfg(test)]
+#[path = "prepared_request_tests.rs"]
+mod tests;
+
+/// Non-secret membership retained from the same guarded publication as this request.
+#[derive(Debug)]
+pub struct ProxyRequestRoute {
+    pub auth_revision: u64,
+    inventory: Arc<[CredentialModels]>,
+    native_credential: Option<usize>,
+}
+
+impl ProxyRequestRoute {
+    pub fn native_source(&self) -> Option<&NativeCredentialSource> {
+        self.inventory.get(self.native_credential?)?.source.as_ref()
+    }
+
+    pub fn native_auth_index(&self) -> Option<&str> {
+        self.inventory
+            .get(self.native_credential?)?
+            .auth_index
+            .as_deref()
+    }
+}
+
+/// Preserve the configured-provider path for tools without session-scoped auth.
+pub async fn prepare_configured_request(
+    provider: &dyn ModelProvider,
+    model: &str,
+) -> Result<PreparedModelRequest> {
+    if let Some(prepared) = provider.prepare_request(model).await? {
+        return Ok(prepared);
+    }
+    Ok(PreparedModelRequest {
+        provider: provider.api_provider().await?,
+        auth: ResolvedProviderAuth::new(provider.api_auth().await?),
+        http_client: provider.api_http_client()?,
+        model: model.to_owned(),
+        route: None,
+    })
+}
+
+pub(super) fn resolve_route(
+    model: &str,
+    selected: Option<&NativeCredentialSource>,
+    inventory: Vec<CredentialModels>,
+    auth_revision: u64,
+) -> Result<(String, ProxyRequestRoute)> {
+    let unavailable = || {
+        CodexErr::UnsupportedOperation(format!(
+            "Model {model:?} is unavailable for the selected account; refresh the model list or choose another model"
+        ))
+    };
+    let mut wire_model = None;
+    let mut native_credential = None;
+    let mut ownership = None;
+    for (index, credential) in inventory.iter().enumerate() {
+        if credential.disabled {
+            continue;
+        }
+        for member in &credential.models {
+            let canonical = credential
+                .prefix
+                .as_ref()
+                .and_then(|prefix| member.id.strip_prefix(prefix)?.strip_prefix('/'));
+            if canonical.unwrap_or(&member.id) != model {
+                continue;
+            }
+            let provider = credential
+                .provider
+                .as_deref()
+                .filter(|value| !value.is_empty());
+            let native = credential.source.is_some();
+            let valid = (native || !owned_filename(&credential.name))
+                && credential
+                    .auth_index
+                    .as_ref()
+                    .is_some_and(|value| !value.is_empty())
+                && match provider {
+                    Some("codex") => {
+                        member.provider.as_deref() == Some("openai")
+                            && member.owned_by.as_deref() == Some("openai")
+                    }
+                    Some(provider) => member.provider.as_deref() == Some(provider),
+                    None => false,
+                };
+            if !valid
+                || (native && canonical.is_none())
+                || ownership.is_some_and(|previous| previous != (native, provider))
+            {
+                return Err(unavailable());
+            }
+            ownership = Some((native, provider));
+            if native {
+                if credential.source.as_ref() != selected {
+                    continue;
+                }
+                // A prefix must identify one credential and one exact advertised model.
+                if wire_model.is_some()
+                    || inventory.iter().enumerate().any(|(other, entry)| {
+                        other != index
+                            && !entry.disabled
+                            && (entry.auth_index == credential.auth_index
+                                || entry.models.iter().any(|model| model.id == member.id))
+                    })
+                {
+                    return Err(unavailable());
+                }
+                native_credential = Some(index);
+            }
+            wire_model = Some(member.id.clone());
+        }
+    }
+    Ok((
+        wire_model.ok_or_else(unavailable)?,
+        ProxyRequestRoute {
+            auth_revision,
+            inventory: inventory.into(),
+            native_credential,
+        },
+    ))
+}

@@ -36,6 +36,9 @@ use std::sync::atomic::Ordering;
 #[path = "client_tool_metadata.rs"]
 mod tool_metadata;
 
+#[path = "codex_plus_plus/prepared_memory_request.rs"]
+mod prepared_memory_request;
+
 use crate::CodexResponsesHeaders;
 use crate::tools::ExecutedToolCalls;
 use async_channel::Sender;
@@ -744,14 +747,8 @@ impl ModelClient {
             return Ok(Vec::new());
         }
 
-        let client_setup = self
-            .current_client_setup(ClientRouting::ConfiguredProvider)
-            .await?;
-        let transport = self.build_api_transport(
-            &client_setup.api_provider,
-            MEMORIES_SUMMARIZE_ENDPOINT,
-            client_setup.redirect_policy,
-        )?;
+        let (client_setup, transport, wire_model) =
+            self.memory_request_setup(&model_info.slug).await?;
         let request_telemetry = Self::build_request_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(
@@ -768,7 +765,7 @@ impl ModelClient {
                 .with_telemetry(Some(request_telemetry));
 
         let payload = ApiMemorySummarizeInput {
-            model: model_info.slug.clone(),
+            model: wire_model,
             raw_memories,
             reasoning: effort
                 .map(|effort| model_info.resolve_reasoning_effort(effort))

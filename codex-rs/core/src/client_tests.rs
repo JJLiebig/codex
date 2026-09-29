@@ -159,6 +159,23 @@ impl ModelProvider for TestHttpClientProvider {
         Ok(Some(self.client.clone()))
     }
 
+    fn prepare_request<'a>(
+        &'a self,
+        model: &'a str,
+    ) -> ModelProviderFuture<
+        'a,
+        codex_protocol::error::Result<Option<codex_model_provider::PreparedModelRequest>>,
+    > {
+        Box::pin(async move {
+            let mut prepared =
+                codex_model_provider::prepare_configured_request(self.inner.as_ref(), model)
+                    .await?;
+            prepared.model = format!("captured/{model}");
+            prepared.http_client = Some(self.client.clone());
+            Ok(Some(prepared))
+        })
+    }
+
     fn auth_manager(&self) -> Option<Arc<AuthManager>> {
         self.inner.auth_manager()
     }
@@ -1681,6 +1698,57 @@ async fn summarize_memories_returns_empty_for_empty_input() {
         .await
         .expect("empty summarize request should succeed");
     assert_eq!(output.len(), 0);
+}
+
+#[tokio::test]
+async fn summarize_memories_uses_prepared_wire_model_without_changing_model_info()
+-> anyhow::Result<()> {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/v1/memories/trace_summarize"))
+        .respond_with(ResponseTemplate::new(/*status*/ 200).set_body_json(json!({"output":[]})))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let mut client = test_model_client(SessionSource::Internal(
+        InternalSessionSource::MemoryConsolidation,
+    ));
+    let mut info = client.state.provider.info().clone();
+    info.base_url = Some(format!("{}/v1", server.uri()));
+    Arc::get_mut(&mut client.state).unwrap().provider = Arc::new(TestHttpClientProvider {
+        inner: create_model_provider(info, /*auth_manager*/ None),
+        client: HttpClientBuilder::new().build_direct()?,
+    });
+    let model = test_model_info();
+    let original_model = model.clone();
+    client
+        .summarize_memories(
+            vec![codex_api::RawMemory {
+                id: "trace".into(),
+                metadata: codex_api::RawMemoryMetadata {
+                    source_path: "source".into(),
+                },
+                items: vec![json!({"text":"unchanged"})],
+            }],
+            &model,
+            /*effort*/ None,
+            &test_session_telemetry(),
+        )
+        .await?;
+    let requests = server.received_requests().await.unwrap();
+    assert_eq!(
+        requests[0].body_json::<serde_json::Value>()?,
+        json!({
+            "model":format!("captured/{}", model.slug),
+            "traces":[{"id":"trace","metadata":{"source_path":"source"},"items":[{"text":"unchanged"}]}],
+        })
+    );
+    assert_eq!(
+        requests[0].headers.get("x-openai-subagent").unwrap(),
+        "memory_consolidation"
+    );
+    assert_eq!(model, original_model);
+    Ok(())
 }
 
 #[tokio::test]

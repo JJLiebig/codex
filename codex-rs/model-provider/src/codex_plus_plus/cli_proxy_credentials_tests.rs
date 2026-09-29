@@ -106,7 +106,7 @@ impl Fixture {
                 ("GET", "/v0/management/auth-files") => ResponseTemplate::new(200)
                     .insert_header("X-CPA-VERSION", "7.3.14")
                     .set_body_json(json!({"files": files.iter().map(|(name, record)| {
-                            json!({"name": name, "type": record["type"], "extra": true})
+                            json!({"name": name, "type": record["type"], "auth_index": name, "disabled": false, "extra": true})
                         }).collect::<Vec<_>>(), "observed_at": "ignored"})),
                 ("GET", "/v0/management/auth-files/download") => {
                     match files.get(name.as_deref().unwrap()) {
@@ -115,7 +115,11 @@ impl Fixture {
                     }
                 }
                 ("GET", "/v0/management/auth-files/models") => {
-                    ResponseTemplate::new(200).set_body_json(json!({"models": []}))
+                    let models: Vec<_> = files.get(name.as_deref().unwrap())
+                        .and_then(|record| record["prefix"].as_str())
+                        .map(|prefix| json!({"id": format!("{prefix}/future-9.7"), "type":"openai", "owned_by":"openai"}))
+                        .into_iter().collect();
+                    ResponseTemplate::new(200).set_body_json(json!({"models": models}))
                 }
                 ("POST", "/v0/management/auth-files") => {
                     notification.notify_one();
@@ -343,6 +347,111 @@ fn write_auth(home: &Path, label: &str) {
 }
 
 #[tokio::test]
+async fn prepared_request_keeps_source_and_wire_body_after_selection_changes() {
+    use codex_api::ReqwestTransport;
+    use codex_api::ResponsesClient;
+    let fixture = Fixture::new(Duration::ZERO).await;
+    write_auth(fixture.home.path(), "root");
+    let manager = fixture.manager().await;
+    let provider = create_model_provider(
+        ModelProviderInfo::create_cli_proxy_provider(),
+        Some(manager.clone()),
+    );
+    let first = provider
+        .prepare_request("future-9.7")
+        .await
+        .unwrap()
+        .unwrap();
+    let first_source = first
+        .route
+        .as_ref()
+        .unwrap()
+        .native_source()
+        .unwrap()
+        .clone();
+    assert!(matches!(first_source, NativeCredentialSource::Root(_)));
+    let imported = AccountStore::new(fixture.home.path().to_path_buf())
+        .import_current(
+            /*label*/ None,
+            AuthCredentialsStoreMode::File,
+            AuthKeyringBackendKind::default(),
+        )
+        .unwrap();
+    manager
+        .activate_imported_account(&imported.id)
+        .await
+        .unwrap();
+    let second = provider
+        .prepare_request("future-9.7")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        second.route.as_ref().unwrap().native_source(),
+        Some(&NativeCredentialSource::Imported(imported.id.clone()))
+    );
+    assert_eq!(
+        first.route.as_ref().unwrap().native_source(),
+        Some(&first_source)
+    );
+    let NativeCredentialSource::Root(root_id) = &first_source else {
+        unreachable!()
+    };
+    let expected = vec![
+        json!({"input":[], "prompt_cache_key":"stable-session", "model":format!("codex-native-root-{root_id}/future-9.7")}),
+        json!({"input":[], "prompt_cache_key":"stable-session", "model":format!("codex-native-imported-{}/future-9.7", imported.id)}),
+    ];
+    Mock::given(wiremock::matchers::path("/v1/responses"))
+        .respond_with(ResponseTemplate::new(/*status*/ 200).set_body_json(json!({"output":"ok"})))
+        .with_priority(/*priority*/ 1)
+        .mount(&fixture.server)
+        .await;
+    for prepared in [first, second] {
+        let client = ResponsesClient::new(
+            ReqwestTransport::from_http_client(prepared.http_client.unwrap()),
+            prepared.provider,
+            prepared.auth.auth,
+        );
+        let stream = client
+            .stream(
+                json!({"model":prepared.model,"input":[],"prompt_cache_key":"stable-session"}),
+                codex_api::build_session_headers(
+                    Some("stable-session".into()),
+                    Some("stable-thread".into()),
+                ),
+                codex_api::Compression::None,
+                /*turn_state*/ None,
+            )
+            .await
+            .unwrap();
+        drop(stream);
+    }
+    let bodies: Vec<Value> = fixture
+        .server
+        .received_requests()
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|request| request.url.path() == "/v1/responses")
+        .map(|request| {
+            assert_eq!(request.headers.get("session-id").unwrap(), "stable-session");
+            assert_eq!(request.headers.get("thread-id").unwrap(), "stable-thread");
+            serde_json::from_slice(&request.body).unwrap()
+        })
+        .collect();
+    assert_eq!(bodies, expected);
+    assert!(
+        fixture
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .all(|request| request.url.path() != "/v1/models")
+    );
+}
+
+#[tokio::test]
 async fn rich_catalogue_loads_three_accounts_losslessly_and_rejects_above_owned_limit() {
     let fixture = Fixture::new(Duration::ZERO).await;
     let manager = fixture.manager().await;
@@ -535,7 +644,7 @@ async fn publication_guards_block_native_mutation_and_stale_publishers_use_new_d
 }
 
 #[tokio::test]
-async fn catalogue_auth_change_during_inventory_does_not_publish_stale_generation() {
+async fn catalogue_auth_change_during_download_does_not_publish_stale_generation() {
     let fixture = Fixture::new(Duration::ZERO).await;
     write_auth(fixture.home.path(), "old");
     let auth = fixture.manager().await;
@@ -552,7 +661,7 @@ async fn catalogue_auth_change_during_inventory_does_not_publish_stale_generatio
         .respond_with(move |_: &Request| {
             ResponseTemplate::new(200).set_body_json(json!({"models": *response.lock().unwrap()}))
         })
-        .with_priority(1)
+        .with_priority(/*priority*/ 2)
         .mount(&fixture.server)
         .await;
     let initial = manager
@@ -564,11 +673,12 @@ async fn catalogue_auth_change_during_inventory_does_not_publish_stale_generatio
     *catalogue.lock().unwrap() = vec![model.clone()];
     let entered = Arc::new(Notify::new());
     let notification = entered.clone();
-    let inventory = Mock::given(wiremock::matchers::path("/v0/management/auth-files/models"))
+    let response = catalogue.clone();
+    let inventory = Mock::given(wiremock::matchers::path("/v1/models"))
         .respond_with(move |_: &Request| {
             notification.notify_one();
             ResponseTemplate::new(200)
-                .set_body_json(json!({"models": []}))
+                .set_body_json(json!({"models": *response.lock().unwrap()}))
                 .set_delay(Duration::from_millis(500))
         })
         .with_priority(1)

@@ -123,6 +123,40 @@ impl ModelProvider for CliProxyModelProvider {
         ))
     }
 
+    fn prepare_request<'a>(
+        &'a self,
+        model: &'a str,
+    ) -> ModelProviderFuture<'a, CoreResult<Option<crate::PreparedModelRequest>>> {
+        Box::pin(async move {
+            let manager = self.auth_manager().ok_or_else(|| {
+                codex_protocol::error::CodexErr::UnsupportedOperation(
+                    "CLIProxyAPI needs a CODEX_HOME auth runtime".into(),
+                )
+            })?;
+            let prepared = self
+                .runtime()?
+                .prepare_inventory(&manager, manager.http_client_factory())
+                .await?;
+            let (model, route) = super::prepared_request::resolve_route(
+                model,
+                prepared.selected_source.as_ref(),
+                prepared.inventory,
+                prepared.generation,
+            )?;
+            let mut provider = self.info.to_api_provider(/*auth_mode*/ None)?;
+            provider.base_url = prepared.endpoint.base_url;
+            Ok(Some(crate::PreparedModelRequest {
+                provider,
+                auth: ResolvedProviderAuth::new(Arc::new(BearerAuthProvider::new(
+                    prepared.endpoint.inference_key,
+                ))),
+                http_client: Some(prepared.client),
+                model,
+                route: Some(route),
+            }))
+        })
+    }
+
     fn capabilities(&self) -> ProviderCapabilities {
         ProviderCapabilities {
             remote_compaction: RemoteCompactionSupport::V2,
