@@ -64,7 +64,13 @@ impl CliProxyModelsManager {
             {
                 return Ok(());
             }
-            if let Some(cache) = &self.cache {
+            // Generations are process-local; another host's disk cache cannot satisfy an
+            // auth change this manager has actually observed.
+            if current
+                .as_ref()
+                .is_none_or(|(current_identity, _)| *current_identity == identity)
+                && let Some(cache) = &self.cache
+            {
                 match cache.load(&version).await {
                     Ok(Some(entry))
                         if identity.is_some()

@@ -80,6 +80,17 @@ async fn refresh_replaces_complete_snapshots_including_empty_and_keeps_failures(
 
     // Observed auth changes bypass a fresh snapshot without a per-turn network fetch.
     endpoint.1.fetch_add(1, Ordering::SeqCst);
+    // A newer cache written by another host can coincidentally have the same generation.
+    let mut other_host_entry = manager.snapshot.read().await.clone().unwrap();
+    other_host_entry.identity = endpoint.identity();
+    other_host_entry.fetched_at += chrono::Duration::seconds(1);
+    manager
+        .cache
+        .as_ref()
+        .unwrap()
+        .store(&other_host_entry)
+        .await
+        .unwrap();
     manager.refresh_after_auth_change(factory.clone()).await;
     manager
         .refresh_if_new_etag("unchanged-rich-catalogue".into(), factory.clone())
