@@ -26,8 +26,6 @@ use winapi::um::jobapi::IsProcessInJob;
 use winapi::um::processthreadsapi::OpenProcess;
 use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
 
-use pretty_assertions::assert_eq;
-
 const READY_MARKER: &str = "__CODEX_CHILD_READY__";
 const VALUE_MARKER: &str = "__CODEX_CHILD_VALUE__";
 const CONSOLE_TEST_ROLE_ENV: &str = "CODEX_PTY_CONSOLE_TEST_ROLE";
