@@ -21,11 +21,14 @@ async fn windows_owned_runtime_attaches_and_restarts() -> io::Result<()> {
     let before = read_state(&state_path)?.expect("owned state");
     assert!(before.pid > 0);
     stop_test_proxy(before.pid)?;
+    // A later host can reuse the saved executable without the first host's override.
+    let runtime = CliProxyRuntime::new(home.path().to_path_buf(), None);
     let after = runtime.ensure(test_factory()).await?;
     let restarted = read_state(&state_path)?.expect("restarted state");
     assert_eq!(first.base_url, after.base_url);
     assert_eq!(first.inference_key, after.inference_key);
     assert_ne!(before.pid, restarted.pid);
+    assert_eq!(before.executable, restarted.executable);
     stop_test_proxy(restarted.pid)?;
     Ok(())
 }

@@ -134,7 +134,7 @@ impl CliProxyRuntime {
             fs::remove_file(&config_path)?;
         }
         write_config(&config_path, &dir, &state)?;
-        let executable = self.compatible_executable()?;
+        let executable = self.compatible_executable(&state.executable)?;
         if state.pid == 0 {
             // Persist the keys before launch so another host can attach after a crash.
             write_state(&state_path, &state)?;
@@ -206,7 +206,7 @@ impl CliProxyRuntime {
             .map_err(io::Error::other)
     }
 
-    fn compatible_executable(&self) -> io::Result<PathBuf> {
+    fn compatible_executable(&self, saved_executable: &Path) -> io::Result<PathBuf> {
         let explicit = self.executable.as_ref();
         let candidates: Vec<PathBuf> = match explicit {
             Some(path) if path.is_absolute() => vec![path.clone()],
@@ -224,6 +224,11 @@ impl CliProxyRuntime {
                     })
                 })
                 .filter(|path| path.is_file())
+                .chain(
+                    saved_executable
+                        .is_absolute()
+                        .then(|| saved_executable.to_path_buf()),
+                )
                 .collect(),
         };
         for path in candidates {
