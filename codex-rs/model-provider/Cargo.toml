@@ -28,15 +28,18 @@ codex-protocol = { workspace = true }
 codex-response-debug-context = { workspace = true }
 codex-secrets = { workspace = true }
 codex-uds = { workspace = true }
+flate2 = { workspace = true }
 http = { workspace = true }
 rand = { workspace = true }
 rcgen = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+tar = { workspace = true }
 tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true }
+zip = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
