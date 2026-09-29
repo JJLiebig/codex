@@ -87,12 +87,20 @@ impl CodexImagesBackend {
             .api_auth()
             .await
             .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
-        let transport = create_transport_for_routes_async(
-            self.http_client_factory.clone(),
-            ClientRouteClass::Api,
-        )
-        .await
-        .map_err(|err| ImageBackendError::from_message(err.to_string()))?;
+        let transport = if let Some(client) = self
+            .provider
+            .api_http_client()
+            .map_err(|err| ImageBackendError::from_message(err.to_string()))?
+        {
+            ReqwestTransport::from_http_client(client)
+        } else {
+            create_transport_for_routes_async(
+                self.http_client_factory.clone(),
+                ClientRouteClass::Api,
+            )
+            .await
+            .map_err(|err| ImageBackendError::from_message(err.to_string()))?
+        };
         Ok(ImagesClient::new(transport, provider, auth))
     }
 
