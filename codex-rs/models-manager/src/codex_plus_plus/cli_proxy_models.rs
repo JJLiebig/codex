@@ -1,14 +1,14 @@
 //! Authoritative owned-proxy discovery, shared by parent and child sessions.
 
 use super::*;
-use tokio::sync::Mutex;
+use tokio::sync::Semaphore;
 
 /// Keeps the last complete canonical catalogue, including a successful empty result.
 /// Cached metadata is only a discovery view; it grants no credential routing authority.
 #[derive(Debug)]
 pub struct CliProxyModelsManager {
     snapshot: RwLock<Option<ModelsCacheEntry>>,
-    refresh: Mutex<()>,
+    refresh: Semaphore,
     cache: Option<Arc<dyn ModelsCache>>,
     endpoint: SharedModelsEndpointClient,
 }
@@ -30,7 +30,7 @@ impl CliProxyModelsManager {
     ) -> Self {
         Self {
             snapshot: RwLock::new(None),
-            refresh: Mutex::new(()),
+            refresh: Semaphore::new(/*permits*/ 1),
             cache,
             endpoint,
         }
@@ -42,7 +42,11 @@ impl CliProxyModelsManager {
         factory: HttpClientFactory,
     ) -> CoreResult<()> {
         // Serialize refreshes so a slower earlier reply cannot overwrite a newer catalogue.
-        let _refresh = self.refresh.lock().await;
+        let _refresh = self
+            .refresh
+            .acquire()
+            .await
+            .map_err(std::io::Error::other)?;
         let version = crate::client_version_to_whole();
         let identity = self.endpoint.identity();
         let current = self
