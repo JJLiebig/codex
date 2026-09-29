@@ -39,7 +39,7 @@ pub(super) async fn run(args: ClaudeAccountCli, config: &Config) -> anyhow::Resu
                     eprintln!("Complete Claude sign-in in your browser. Press Ctrl+C to cancel.");
                     run_login(command, tokio::signal::ctrl_c(), |url| {
                         eprintln!("Open this link if your browser did not open:");
-                        println!("authorization_url: {}", serde_json::to_string(url).expect("URL string"));
+                        println!("authorization_url: {}", serde_json::Value::String(url.to_owned()));
                     }).await.map(|()| println!("status: signed_in"))
                 }
                 Err(_) => Err(io::Error::other(
@@ -57,10 +57,7 @@ pub(super) async fn run(args: ClaudeAccountCli, config: &Config) -> anyhow::Resu
         }
     };
     if let Err(error) = result {
-        println!(
-            "error: {}",
-            serde_json::to_string(&error.to_string()).expect("error string")
-        );
+        println!("error: {}", serde_json::Value::String(error.to_string()));
         return Err(error.into());
     }
     Ok(())
@@ -81,8 +78,11 @@ fn format_accounts(accounts: Option<&[ClaudeAccount]>) -> String {
         };
         output.push_str(&format!(
             "  {},{},{}\n",
-            serde_json::to_string(&account.name).expect("name string"),
-            serde_json::to_string(&account.email).expect("email value"),
+            serde_json::Value::String(account.name.clone()),
+            account
+                .email
+                .clone()
+                .map_or(serde_json::Value::Null, serde_json::Value::String),
             status,
         ));
     }
@@ -107,7 +107,9 @@ async fn run_login(
             io::Error::other("Could not start Claude sign-in. Retry codex account claude add.")
         })?;
     // v7.3.14 treats manual-prompt EOF as empty input and keeps waiting for the browser.
-    let stdout = child.stdout.take().expect("piped login stdout");
+    let stdout = child.stdout.take().ok_or_else(|| {
+        io::Error::other("Could not read Claude sign-in output. Retry codex account claude add.")
+    })?;
     tokio::select! {
         result = async {
             let saved = match read_login_output(stdout, on_authorization_url).await {

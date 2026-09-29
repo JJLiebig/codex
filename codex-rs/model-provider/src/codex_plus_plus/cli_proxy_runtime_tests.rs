@@ -1,6 +1,38 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[cfg(unix)]
+#[test]
+fn owned_server_survives_terminal_group_cancellation() -> io::Result<()> {
+    use std::os::unix::process::CommandExt;
+    let home = tempfile::tempdir()?;
+    let mut cli = Command::new("sleep")
+        .arg("60")
+        .process_group(/*pgroup*/ 0)
+        .spawn()?;
+    // Model the inherited foreground group. Owned configuration must detach this child.
+    let mut command = Command::new("sh");
+    command
+        .args(["-c", "exec sleep 60", "fake-owned-server"])
+        .process_group(cli.id() as i32);
+    configure_owned_command(&mut command, home.path());
+    let mut server = command.spawn()?;
+    let signal = Command::new("/bin/kill")
+        .args(["-INT", "--", &format!("-{}", cli.id())])
+        .status();
+    if !signal.as_ref().is_ok_and(std::process::ExitStatus::success) {
+        let _ = cli.kill();
+    }
+    let _ = cli.wait();
+    let survived = server.try_wait()?.is_none();
+    // Always stop only our synthetic fixtures, including when the assertion fails.
+    let _ = server.kill();
+    let _ = server.wait();
+    assert!(signal?.success());
+    assert!(survived, "terminal group SIGINT stopped the shared server");
+    Ok(())
+}
+
 #[test]
 fn owned_launch_cannot_redirect_private_config_or_credentials() -> io::Result<()> {
     let home = tempfile::tempdir()?;

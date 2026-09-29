@@ -24,12 +24,12 @@ fn fake_login(lines: &[&str], exit_code: u8) -> Command {
         let script = lines
             .iter()
             .map(|line| format!("printf '%s\\n' '{}'", line.replace('\'', "'\"'\"'")))
+            .chain([format!(
+                "printf '%s\\n' 'secret-error' >&2; exit {exit_code}"
+            )])
             .collect::<Vec<_>>()
             .join("; ");
-        command.args([
-            "-c",
-            &format!("{script}; printf '%s\\n' 'secret-error' >&2; exit {exit_code}"),
-        ]);
+        command.args(["-c", &script]);
         command
     }
 }

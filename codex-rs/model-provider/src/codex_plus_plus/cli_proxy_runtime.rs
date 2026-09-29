@@ -298,6 +298,12 @@ fn configure_owned_command(command: &mut Command, dir: &Path) {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // A terminal Ctrl+C must not stop the shared server while cancelling sign-in.
+        command.process_group(/*pgroup*/ 0);
+    }
 }
 
 fn random_key() -> String {
