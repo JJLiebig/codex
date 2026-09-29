@@ -40,6 +40,8 @@ impl CliProxyRuntime {
     ) -> io::Result<RuntimeEndpoint> {
         // Runtime startup/probing must finish before taking the native topology guards.
         let endpoint = self.ensure(factory.clone()).await?;
+        // Reload the selected native source, including a login written after this host started.
+        manager.reload().await;
         manager.auth().await;
         let client = self.http_client(&factory)?;
         let snapshot = manager.export_native_credentials().await?;

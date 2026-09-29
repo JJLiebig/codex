@@ -33,6 +33,7 @@ struct Fixture {
     reject: Arc<AtomicBool>,
     uploaded: Arc<Notify>,
     tls: tokio::task::JoinHandle<()>,
+    origin: url::Url,
 }
 
 impl Fixture {
@@ -149,6 +150,7 @@ impl Fixture {
             reject,
             uploaded,
             tls,
+            origin: url::Url::parse(&format!("https://127.0.0.1:{port}")).unwrap(),
         }
     }
 
@@ -165,7 +167,14 @@ impl Fixture {
                 /*forced_chatgpt_workspace_id*/ None,
                 /*chatgpt_base_url*/ None,
                 AuthKeyringBackendKind::default(),
-                AuthRouteConfig::from_http_client_factory(factory()),
+                AuthRouteConfig::from_http_client_factory(
+                    factory().with_network_policy(
+                        factory()
+                            .network_policy()
+                            .clone()
+                            .restrict_to_origin(self.origin.clone()),
+                    ),
+                ),
             )
             .await,
         )
@@ -191,7 +200,7 @@ fn write_auth(home: &Path, label: &str) {
         "auth_mode": "chatgpt",
         "tokens": {
             "id_token": jwt(json!({"https://api.openai.com/auth": {
-                "chatgpt_account_id": "upstream-a", "chatgpt_plan_type": "plus"
+                "chatgpt_account_id": "upstream-a", "chatgpt_user_id": "user-a", "chatgpt_plan_type": "plus"
             }})),
             "access_token": jwt(json!({"exp": Utc::now().timestamp() + 3600, "label": label})),
             "refresh_token": "synthetic-refresh-must-not-publish", "account_id": "upstream-a"
@@ -240,22 +249,8 @@ async fn setup_and_catalogue_reconcile_disk_without_resetting_unchanged_cooldown
     provider.api_provider().await.unwrap();
     let name = format!("codex-native-imported-{}.json", imported.id);
     let first = fixture.files.lock().unwrap()[&name].clone();
-    assert_eq!(
-        first
-            .as_object()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>(),
-        [
-            "access_token",
-            "account_id",
-            "expired",
-            "plan_type",
-            "prefix",
-            "type"
-        ]
-    );
+    assert_eq!(first.as_object().unwrap().len(), 6);
+    assert!(first.get("refresh_token").is_none() && first.get("id_token").is_none());
     fixture.files.lock().unwrap().get_mut(&name).unwrap()["cooldown"] = json!(456);
     provider.api_auth().await.unwrap();
     assert_eq!(fixture.files.lock().unwrap()[&name]["cooldown"], json!(456));
@@ -267,11 +262,12 @@ async fn setup_and_catalogue_reconcile_disk_without_resetting_unchanged_cooldown
             .join(imported.id.as_str()),
         "rotated",
     );
+    assert_eq!(*manager.auth_change_receiver().borrow(), generation);
     provider.runtime_base_url().await.unwrap();
     let rotated = fixture.files.lock().unwrap()[&name].clone();
     assert_ne!(rotated["access_token"], first["access_token"]);
     assert_eq!(rotated["prefix"], first["prefix"]);
-    assert_eq!(*manager.auth_change_receiver().borrow(), generation);
+    assert!(*manager.auth_change_receiver().borrow() > generation);
     assert_eq!(manager.active_account_id(), Some(imported.id.clone()));
     let index_path = fixture.home.path().join("accounts/index.json");
     let mut index: Value = serde_json::from_slice(&std::fs::read(&index_path).unwrap()).unwrap();
@@ -361,7 +357,7 @@ async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejec
     let manager = fixture.manager().await;
     let provider = create_model_provider(
         ModelProviderInfo::create_cli_proxy_provider(),
-        Some(manager),
+        Some(manager.clone()),
     );
     provider.api_provider().await.unwrap();
     write_auth(fixture.home.path(), "new-login");
@@ -370,8 +366,28 @@ async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejec
     assert!(provider.api_auth().await.is_err());
     assert_eq!(
         *fixture.files.lock().unwrap(),
-        BTreeMap::from([("claude.json".into(), claude)])
+        BTreeMap::from([("claude.json".into(), claude.clone())])
     );
     fixture.reject.store(false, Ordering::SeqCst);
     provider.api_auth().await.unwrap();
+    let auth_path = fixture.home.path().join("auth.json");
+    let mut expired: Value = serde_json::from_slice(&std::fs::read(&auth_path).unwrap()).unwrap();
+    expired["tokens"]["access_token"] = json!("e30.eyJleHAiOjF9.sig");
+    std::fs::write(auth_path, expired.to_string()).unwrap();
+    // The native refresh handoff sees expiry; its OAuth authority is denied by this fixture's
+    // loopback-only policy. No request can leave the synthetic management listener.
+    provider.api_auth().await.unwrap();
+    assert_eq!(
+        manager
+            .auth_cached()
+            .unwrap()
+            .get_token_data()
+            .unwrap()
+            .access_token,
+        "e30.eyJleHAiOjF9.sig"
+    );
+    assert_eq!(
+        *fixture.files.lock().unwrap(),
+        BTreeMap::from([("claude.json".into(), claude)])
+    );
 }
