@@ -38,6 +38,9 @@ use crate::provider::ProviderCapabilities;
 use crate::provider::RemoteCompactionSupport;
 use crate::provider::SharedModelProvider;
 
+// Ten account copies of the current 392,476-byte rich catalogue fit with growth headroom.
+const OWNED_MODEL_CATALOG_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug)]
 pub(crate) struct CliProxyModelProvider {
     info: ModelProviderInfo,
@@ -97,7 +100,7 @@ impl CliProxyModelProvider {
             .await?)
     }
 
-    fn models_endpoint(&self, home: Option<PathBuf>) -> Arc<dyn ModelsEndpointClient> {
+    pub(super) fn models_endpoint(&self, home: Option<PathBuf>) -> Arc<dyn ModelsEndpointClient> {
         let runtime = self.runtime.clone().or_else(|| {
             home.map(|home| {
                 CliProxyRuntime::new(
@@ -223,7 +226,7 @@ impl CliProxyModelsEndpoint {
     fn new(runtime: Option<CliProxyRuntime>, auth_manager: Option<Arc<AuthManager>>) -> Self {
         let identity = runtime.as_ref().map(|runtime| {
             let mut digest = Sha256::new();
-            digest.update(b"cli-proxy-models-v1");
+            digest.update(b"cli-proxy-models-v2-canonical");
             digest.update(runtime.home().as_os_str().as_encoded_bytes());
             format!("{:x}", digest.finalize())
         });
@@ -272,8 +275,8 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
                     "CLIProxyAPI needs a CODEX_HOME auth runtime".into(),
                 )
             })?;
-            let endpoint = runtime
-                .prepare(manager, http_client_factory.clone())
+            let (endpoint, inventory) = runtime
+                .prepare_catalogue(manager, http_client_factory.clone())
                 .await?;
             let mut provider = ModelProviderInfo::create_cli_proxy_provider()
                 .to_api_provider(/*auth_mode*/ None)?;
@@ -287,7 +290,11 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
             let client = ModelsClient::new(transport, provider, auth);
             let (models, etag) = tokio::time::timeout(
                 Duration::from_secs(5),
-                client.list_models(request_url, HeaderMap::new(), Some(1024 * 1024)),
+                client.list_models(
+                    request_url,
+                    HeaderMap::new(),
+                    Some(OWNED_MODEL_CATALOG_BYTES),
+                ),
             )
             .await
             .map_err(|_| codex_protocol::error::CodexErr::RequestTimeout)?
@@ -298,7 +305,7 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
                 )
             })?;
             Ok(ModelsEndpointResponse {
-                models,
+                models: super::cli_proxy_inventory::normalize_catalogue(models, &inventory),
                 etag,
                 identity,
             })
