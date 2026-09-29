@@ -30,27 +30,29 @@ fn exact_route_rejects_missing_selected_membership_and_conflicting_ownership() {
         })
         .collect();
     for (index, selected) in sources.iter().enumerate() {
-        let (wire, route) = resolve_route(
-            "future-9.7",
-            Some(selected),
-            inventory.clone(),
-            /*auth_revision*/ 7,
-        )
-        .unwrap();
-        assert_eq!(
-            (
-                wire,
-                route.native_source(),
-                route.native_auth_index(),
-                route.auth_revision
-            ),
-            (
-                inventory[index].models[0].id.clone(),
+        for model in ["future-9.7", inventory[index].models[0].id.as_str()] {
+            let (wire, route) = resolve_route(
+                model,
                 Some(selected),
-                Some(inventory[index].name.as_str()),
-                7
+                inventory.clone(),
+                /*auth_revision*/ 7,
             )
-        );
+            .unwrap();
+            assert_eq!(
+                (
+                    wire,
+                    route.native_source(),
+                    route.native_auth_index(),
+                    route.auth_revision
+                ),
+                (
+                    inventory[index].models[0].id.clone(),
+                    Some(selected),
+                    Some(inventory[index].name.as_str()),
+                    7
+                )
+            );
+        }
     }
     assert!(
         resolve_route(

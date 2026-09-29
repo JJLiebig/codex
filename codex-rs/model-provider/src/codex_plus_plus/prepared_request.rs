@@ -87,7 +87,7 @@ pub(super) fn resolve_route(
                 .prefix
                 .as_ref()
                 .and_then(|prefix| member.id.strip_prefix(prefix)?.strip_prefix('/'));
-            if canonical.unwrap_or(&member.id) != model {
+            if canonical.unwrap_or(&member.id) != model && member.id != model {
                 continue;
             }
             let provider = credential
