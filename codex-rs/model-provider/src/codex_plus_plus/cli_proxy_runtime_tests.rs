@@ -1,6 +1,46 @@
 use super::*;
 use pretty_assertions::assert_eq;
 
+#[test]
+fn owned_launch_cannot_redirect_private_config_or_credentials() -> io::Result<()> {
+    let home = tempfile::tempdir()?;
+    fs::write(home.path().join("config.yaml"), b"synthetic-owned-auth-dir")?;
+    #[cfg(windows)]
+    let mut command = {
+        let script = home.path().join("fake.ps1");
+        fs::write(
+            &script,
+            "param([string]$config)\nforeach ($selector in @('PGSTORE_DSN','pgstore_dsn','GITSTORE_GIT_URL','gitstore_git_url','OBJECTSTORE_ENDPOINT','objectstore_endpoint','HOME_JWT','home_jwt')) { if ([Environment]::GetEnvironmentVariable($selector)) { exit 3 } }\n[Console]::Write((Get-Content -LiteralPath $config -Raw))\n",
+        )?;
+        let mut command = Command::new("powershell");
+        command
+            .args(["-NoProfile", "-NonInteractive", "-File"])
+            .arg(script);
+        command
+    };
+    #[cfg(not(windows))]
+    let mut command = {
+        let mut command = Command::new("sh");
+        command.args(["-c", "for key in PGSTORE_DSN pgstore_dsn GITSTORE_GIT_URL gitstore_git_url OBJECTSTORE_ENDPOINT objectstore_endpoint HOME_JWT home_jwt; do if printenv \"$key\" >/dev/null; then exit 3; fi; done; cat \"$1\""]);
+        command
+    };
+    for selector in [
+        "PGSTORE_DSN",
+        "GITSTORE_GIT_URL",
+        "OBJECTSTORE_ENDPOINT",
+        "HOME_JWT",
+    ] {
+        command
+            .env(selector, "synthetic-external-store")
+            .env(selector.to_ascii_lowercase(), "synthetic-external-store");
+    }
+    configure_owned_command(&mut command, home.path());
+    let output = command.output()?;
+    assert!(output.status.success());
+    assert_eq!(output.stdout, b"synthetic-owned-auth-dir");
+    Ok(())
+}
+
 #[cfg(windows)]
 #[tokio::test]
 async fn windows_managed_runtime_provisions_once_and_reuses_after_restart() -> io::Result<()> {
