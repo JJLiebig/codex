@@ -38,6 +38,7 @@ impl ChatWidget {
             return false;
         }
         Arc::make_mut(&mut self.model_catalog).models = presets;
+        self.dismiss_stale_owned_reasoning_choices();
         self.refresh_effective_service_tier();
         self.refresh_model_dependent_surfaces();
         true
