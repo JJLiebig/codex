@@ -188,6 +188,16 @@ async fn installed_and_managed_candidates_avoid_download() -> io::Result<()> {
         PathBuf::from(path)
     };
     let expected = installed.canonicalize()?;
+    let cwd = std::env::current_dir()?;
+    let path_entry = tempfile::tempdir_in(&cwd)?;
+    let candidate = path_entry.path().join("relative-path-candidate.exe");
+    fs::copy(&installed, &candidate)?;
+    let relative = candidate.strip_prefix(&cwd).map_err(io::Error::other)?;
+    assert_eq!(
+        installed_executable(/*explicit*/ None, [relative.to_path_buf()])?,
+        Some(candidate.canonicalize()?),
+    );
+    assert!(installed_executable(Some(relative), []).is_err());
     assert_eq!(
         installed_executable(Some(&installed), [])?,
         Some(expected.clone())

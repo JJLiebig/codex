@@ -153,7 +153,7 @@ pub(super) fn installed_executable(
         )));
     }
     for path in candidates {
-        if path.is_absolute() && compatible(&path) {
+        if compatible(&path) {
             return path.canonicalize().map(Some);
         }
     }
