@@ -4009,6 +4009,7 @@ dependencies = [
  "codex-utils-redacted-string",
  "http 1.4.0",
  "pretty_assertions",
+ "rand 0.9.3",
  "serde",
  "serde_json",
  "sha2 0.10.9",

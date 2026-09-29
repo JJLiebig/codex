@@ -1,0 +1,254 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use codex_api::Provider;
+use codex_api::SharedAuthProvider;
+use codex_http_client::HttpClientFactory;
+use codex_login::AuthManager;
+use codex_login::CodexAuth;
+use codex_model_provider_info::ModelProviderInfo;
+use codex_models_manager::cache::ModelsCache;
+use codex_models_manager::manager::ModelsEndpointClient;
+use codex_models_manager::manager::ModelsEndpointFuture;
+use codex_models_manager::manager::ModelsEndpointResponse;
+use codex_models_manager::manager::ModelsManager;
+use codex_models_manager::manager::OpenAiModelsManager;
+use codex_models_manager::manager::SharedModelsManager;
+use codex_models_manager::manager::StaticModelsManager;
+use codex_protocol::error::Result as CoreResult;
+use codex_protocol::openai_models::ModelsResponse;
+use sha2::Digest;
+use sha2::Sha256;
+
+use super::cli_proxy_runtime::CliProxyRuntime;
+use crate::BearerAuthProvider;
+use crate::auth::ProviderAuthScope;
+use crate::auth::ResolvedProviderAuth;
+use crate::models_endpoint::OpenAiModelsEndpoint;
+use crate::provider::ModelProvider;
+use crate::provider::ModelProviderFuture;
+use crate::provider::ProviderAccountResult;
+use crate::provider::ProviderCapabilities;
+use crate::provider::RemoteCompactionSupport;
+use crate::provider::SharedModelProvider;
+
+#[derive(Debug)]
+pub(crate) struct CliProxyModelProvider {
+    info: ModelProviderInfo,
+    native: SharedModelProvider,
+    runtime: Option<CliProxyRuntime>,
+}
+
+impl CliProxyModelProvider {
+    pub(crate) fn new(_info: ModelProviderInfo, auth_manager: Option<Arc<AuthManager>>) -> Self {
+        // The reserved name is the opt-in identity; caller URLs and auth never reach transport.
+        let info = ModelProviderInfo::create_cli_proxy_provider();
+        let native = crate::provider::create_model_provider(
+            ModelProviderInfo::create_openai_provider(/*base_url*/ None),
+            auth_manager.clone(),
+        );
+        let runtime = auth_manager.map(|manager| {
+            CliProxyRuntime::new(
+                manager.runtime_config().codex_home,
+                std::env::var_os("CODEX_CLI_PROXY_EXECUTABLE").map(PathBuf::from),
+            )
+        });
+        Self {
+            info,
+            native,
+            runtime,
+        }
+    }
+
+    fn runtime(&self) -> CoreResult<&CliProxyRuntime> {
+        self.runtime.as_ref().ok_or_else(|| {
+            codex_protocol::error::CodexErr::UnsupportedOperation(
+                "CLIProxyAPI needs an inference host with a CODEX_HOME auth runtime".into(),
+            )
+        })
+    }
+
+    fn models_endpoint(&self, home: Option<PathBuf>) -> Arc<dyn ModelsEndpointClient> {
+        let runtime = self.runtime.clone().or_else(|| {
+            home.map(|home| {
+                CliProxyRuntime::new(
+                    home,
+                    std::env::var_os("CODEX_CLI_PROXY_EXECUTABLE").map(PathBuf::from),
+                )
+            })
+        });
+        Arc::new(CliProxyModelsEndpoint::new(runtime))
+    }
+}
+
+impl ModelProvider for CliProxyModelProvider {
+    fn info(&self) -> &ModelProviderInfo {
+        &self.info
+    }
+
+    fn capabilities(&self) -> ProviderCapabilities {
+        ProviderCapabilities {
+            remote_compaction: RemoteCompactionSupport::V2,
+            ..ProviderCapabilities::default()
+        }
+    }
+
+    fn auth_manager(&self) -> Option<Arc<AuthManager>> {
+        self.native.auth_manager()
+    }
+
+    fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
+        self.native.auth()
+    }
+
+    fn account_state(&self) -> ProviderAccountResult {
+        self.native.account_state()
+    }
+
+    fn api_provider(&self) -> ModelProviderFuture<'_, CoreResult<Provider>> {
+        Box::pin(async move {
+            let endpoint = self.runtime()?.ensure().await?;
+            let mut provider = self.info.to_api_provider(/*auth_mode*/ None)?;
+            provider.base_url = endpoint.base_url;
+            Ok(provider)
+        })
+    }
+
+    fn runtime_base_url(&self) -> ModelProviderFuture<'_, CoreResult<Option<String>>> {
+        Box::pin(async move { Ok(Some(self.runtime()?.ensure().await?.base_url)) })
+    }
+
+    fn api_auth(&self) -> ModelProviderFuture<'_, CoreResult<SharedAuthProvider>> {
+        Box::pin(async move {
+            let endpoint = self.runtime()?.ensure().await?;
+            Ok(Arc::new(BearerAuthProvider::new(endpoint.inference_key)) as SharedAuthProvider)
+        })
+    }
+
+    fn api_auth_for_scope(
+        &self,
+        _scope: ProviderAuthScope,
+    ) -> ModelProviderFuture<'_, CoreResult<ResolvedProviderAuth>> {
+        Box::pin(async move { self.api_auth().await.map(ResolvedProviderAuth::new) })
+    }
+
+    fn models_manager(
+        &self,
+        codex_home: PathBuf,
+        config_model_catalog: Option<ModelsResponse>,
+    ) -> SharedModelsManager {
+        if let Some(catalog) = config_model_catalog {
+            return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
+        }
+        let manager = OpenAiModelsManager::new(
+            codex_home.clone(),
+            self.models_endpoint(Some(codex_home)),
+            self.auth_manager(),
+        );
+        manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
+        Arc::new(manager)
+    }
+
+    fn models_manager_without_cache(
+        &self,
+        config_model_catalog: Option<ModelsResponse>,
+    ) -> SharedModelsManager {
+        if let Some(catalog) = config_model_catalog {
+            return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
+        }
+        let endpoint = self.models_endpoint(None);
+        let manager = OpenAiModelsManager::new_without_cache(endpoint, self.auth_manager());
+        manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
+        Arc::new(manager)
+    }
+
+    fn models_manager_with_cache(
+        &self,
+        config_model_catalog: Option<ModelsResponse>,
+        cache: Arc<dyn ModelsCache>,
+    ) -> SharedModelsManager {
+        if let Some(catalog) = config_model_catalog {
+            return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
+        }
+        let endpoint = self.models_endpoint(None);
+        let manager = OpenAiModelsManager::new_with_cache(cache, endpoint, self.auth_manager());
+        manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
+        Arc::new(manager)
+    }
+}
+
+#[derive(Debug)]
+struct CliProxyModelsEndpoint {
+    runtime: Option<CliProxyRuntime>,
+    identity: Option<String>,
+}
+
+impl CliProxyModelsEndpoint {
+    fn new(runtime: Option<CliProxyRuntime>) -> Self {
+        let identity = runtime.as_ref().map(|runtime| {
+            let mut digest = Sha256::new();
+            digest.update(b"cli-proxy-models-v1");
+            digest.update(runtime.home().as_os_str().as_encoded_bytes());
+            format!("{:x}", digest.finalize())
+        });
+        Self { runtime, identity }
+    }
+}
+
+impl ModelsEndpointClient for CliProxyModelsEndpoint {
+    fn identity(&self) -> Option<String> {
+        self.identity.clone()
+    }
+
+    fn has_provider_api_key(&self) -> bool {
+        true
+    }
+
+    fn has_command_auth(&self) -> bool {
+        false
+    }
+
+    fn supports_api_key_models(&self) -> bool {
+        true
+    }
+
+    fn uses_codex_backend(&self) -> ModelsEndpointFuture<'_, bool> {
+        Box::pin(async { true })
+    }
+
+    fn list_models<'a>(
+        &'a self,
+        client_version: &'a str,
+        http_client_factory: HttpClientFactory,
+    ) -> ModelsEndpointFuture<'a, CoreResult<ModelsEndpointResponse>> {
+        Box::pin(async move {
+            let runtime = self.runtime.as_ref().ok_or_else(|| {
+                codex_protocol::error::CodexErr::UnsupportedOperation(
+                    "CLIProxyAPI needs an inference host with a CODEX_HOME auth runtime".into(),
+                )
+            })?;
+            let endpoint = runtime.ensure().await?;
+            let provider = ModelProviderInfo {
+                name: "CLIProxyAPI".into(),
+                base_url: Some(endpoint.base_url.clone()),
+                model_catalog_url: Some(format!("{}/models", endpoint.base_url).into()),
+                experimental_bearer_token: Some(endpoint.inference_key.into()),
+                ..ModelProviderInfo::default()
+            };
+            let client = OpenAiModelsEndpoint::new(provider, None, None);
+            let mut response = client
+                .list_models(client_version, http_client_factory)
+                .await?;
+            response.identity = self.identity.clone().ok_or_else(|| {
+                codex_protocol::error::CodexErr::UnsupportedOperation(
+                    "CLIProxyAPI model cache identity is unavailable".into(),
+                )
+            })?;
+            Ok(response)
+        })
+    }
+}
+
+#[cfg(test)]
+#[path = "cli_proxy_provider_tests.rs"]
+mod tests;

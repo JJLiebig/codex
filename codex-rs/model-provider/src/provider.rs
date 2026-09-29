@@ -370,6 +370,12 @@ pub fn create_model_provider(
     provider_info: ModelProviderInfo,
     auth_manager: Option<Arc<AuthManager>>,
 ) -> SharedModelProvider {
+    if provider_info.is_cli_proxy() {
+        return Arc::new(crate::codex_plus_plus::CliProxyModelProvider::new(
+            provider_info,
+            auth_manager,
+        ));
+    }
     if provider_info.is_amazon_bedrock() {
         return Arc::new(AmazonBedrockModelProvider::new(provider_info, auth_manager));
     }
