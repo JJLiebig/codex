@@ -34,6 +34,7 @@ pub(super) struct CliProxyRuntime {
 pub(super) struct RuntimeEndpoint {
     pub base_url: String,
     pub inference_key: String,
+    pub management_key: String,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -50,6 +51,7 @@ impl RuntimeState {
         RuntimeEndpoint {
             base_url: format!("https://127.0.0.1:{}/v1", self.port),
             inference_key: self.inference_key.clone(),
+            management_key: self.management_key.clone(),
         }
     }
 }
