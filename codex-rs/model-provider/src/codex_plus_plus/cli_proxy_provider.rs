@@ -276,14 +276,18 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
                     "CLIProxyAPI needs a CODEX_HOME auth runtime".into(),
                 )
             })?;
-            let (endpoint, inventory) = runtime
+            let (endpoint, inventory, generation) = runtime
                 .prepare_catalogue(manager, http_client_factory.clone())
                 .await?;
-            let identity = self.identity().ok_or_else(|| {
-                codex_protocol::error::CodexErr::UnsupportedOperation(
-                    "CLIProxyAPI model cache identity is unavailable".into(),
-                )
-            })?;
+            let identity = self
+                .identity
+                .as_ref()
+                .map(|identity| format!("{identity}:{generation}"))
+                .ok_or_else(|| {
+                    codex_protocol::error::CodexErr::UnsupportedOperation(
+                        "CLIProxyAPI model cache identity is unavailable".into(),
+                    )
+                })?;
             let mut provider = ModelProviderInfo::create_cli_proxy_provider()
                 .to_api_provider(/*auth_mode*/ None)?;
             provider.base_url = endpoint.base_url;

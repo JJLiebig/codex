@@ -40,7 +40,7 @@ impl CliProxyRuntime {
     ) -> io::Result<RuntimeEndpoint> {
         self.prepare_sources(manager, factory)
             .await
-            .map(|(endpoint, _)| endpoint)
+            .map(|(endpoint, ..)| endpoint)
     }
 
     pub(super) async fn prepare_catalogue(
@@ -50,22 +50,24 @@ impl CliProxyRuntime {
     ) -> io::Result<(
         RuntimeEndpoint,
         Vec<super::cli_proxy_inventory::CredentialModels>,
+        u64,
     )> {
-        let (endpoint, sources) = self.prepare_sources(manager, factory.clone()).await?;
+        let (endpoint, sources, generation) =
+            self.prepare_sources(manager, factory.clone()).await?;
         let inventory = super::cli_proxy_inventory::read_inventory(
             self.http_client(&factory)?,
             &endpoint,
             &sources,
         )
         .await?;
-        Ok((endpoint, inventory))
+        Ok((endpoint, inventory, generation))
     }
 
     async fn prepare_sources(
         &self,
         manager: &AuthManager,
         factory: HttpClientFactory,
-    ) -> io::Result<(RuntimeEndpoint, Vec<NativeCredentialSource>)> {
+    ) -> io::Result<(RuntimeEndpoint, Vec<NativeCredentialSource>, u64)> {
         // Runtime startup/probing must finish before taking the native topology guards.
         let endpoint = self.ensure(factory.clone()).await?;
         // Reload the selected native source, including a login written after this host started.
@@ -80,8 +82,9 @@ impl CliProxyRuntime {
             .map(|credential| credential.source.clone())
             .collect();
         // The snapshot serializes publishers and native mutations until all writes acknowledge.
+        let generation = *manager.auth_change_receiver().borrow();
         drop(snapshot);
-        Ok((endpoint, sources))
+        Ok((endpoint, sources, generation))
     }
 }
 

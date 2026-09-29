@@ -535,6 +535,68 @@ async fn publication_guards_block_native_mutation_and_stale_publishers_use_new_d
 }
 
 #[tokio::test]
+async fn catalogue_auth_change_during_inventory_does_not_publish_stale_generation() {
+    let fixture = Fixture::new(Duration::ZERO).await;
+    write_auth(fixture.home.path(), "old");
+    let auth = fixture.manager().await;
+    let provider = create_model_provider(
+        ModelProviderInfo::create_cli_proxy_provider(),
+        Some(auth.clone()),
+    );
+    let manager = provider.models_manager_without_cache(/*config_model_catalog*/ None);
+    let mut model = codex_models_manager::model_info::model_info_from_slug("initial-view");
+    model.used_fallback_model_metadata = false;
+    let catalogue = Arc::new(Mutex::new(vec![model.clone()]));
+    let response = catalogue.clone();
+    Mock::given(wiremock::matchers::path("/v1/models"))
+        .respond_with(move |_: &Request| {
+            ResponseTemplate::new(200).set_body_json(json!({"models": *response.lock().unwrap()}))
+        })
+        .with_priority(1)
+        .mount(&fixture.server)
+        .await;
+    let initial = manager
+        .raw_model_catalog(RefreshStrategy::Online, factory())
+        .await
+        .models;
+    assert_eq!(initial, vec![model.clone()]);
+    model.slug = "new-view".into();
+    *catalogue.lock().unwrap() = vec![model.clone()];
+    let entered = Arc::new(Notify::new());
+    let notification = entered.clone();
+    let inventory = Mock::given(wiremock::matchers::path("/v0/management/auth-files/models"))
+        .respond_with(move |_: &Request| {
+            notification.notify_one();
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"models": []}))
+                .set_delay(Duration::from_millis(500))
+        })
+        .with_priority(1)
+        .mount_as_scoped(&fixture.server)
+        .await;
+    let refreshing = tokio::spawn({
+        let manager = manager.clone();
+        async move {
+            manager
+                .raw_model_catalog(RefreshStrategy::Online, factory())
+                .await
+                .models
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(5), entered.notified())
+        .await
+        .unwrap();
+    let generation = *auth.auth_change_receiver().borrow();
+    write_auth(fixture.home.path(), "changed-during-inventory");
+    auth.reload().await;
+    assert!(*auth.auth_change_receiver().borrow() > generation);
+    assert_eq!(refreshing.await.unwrap(), initial);
+    drop(inventory);
+    manager.refresh_after_auth_change(factory()).await;
+    assert_eq!(manager.get_remote_models().await, vec![model]);
+}
+
+#[tokio::test]
 async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejects_setup() {
     let fixture = Fixture::new(Duration::ZERO).await;
     let claude = json!({"type": "claude", "access_token": "synthetic-claude"});
