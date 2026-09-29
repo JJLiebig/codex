@@ -19,12 +19,16 @@ impl OriginRestriction {
 }
 
 impl NetworkPolicy {
-    /// Narrows this policy to one scheme, host and effective port, allowing all paths and queries.
+    /// Narrows this policy to one HTTPS host and effective port, allowing all paths and queries.
     /// Existing managed/account and endpoint restrictions remain enforced. Repeated calls intersect.
-    /// URLs with opaque origins cannot authorize network destinations.
+    /// Non-HTTPS URLs cannot authorize network destinations.
+    /// Request and redirect enforcement requires a route-aware client, such as
+    /// [`crate::HttpClientBuilder::build_with_tls`]; raw transports do not acquire policy permits.
     pub fn restrict_to_origin(mut self, origin: Url) -> Self {
         let mut restriction = OriginRestriction {
-            origin: Url::parse(&origin.origin().ascii_serialization()).ok(),
+            origin: Url::parse(&origin.origin().ascii_serialization())
+                .ok()
+                .filter(|origin| origin.scheme() == "https"),
         };
         if self
             .origin

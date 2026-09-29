@@ -30,6 +30,19 @@ fn origin_restriction_matches_scheme_host_and_effective_port() {
         policy.acquire_for_unsupported_sdk().unwrap_err(),
         NetworkPolicyDenied::UnsupportedTransport
     );
+    let insecure = Url::parse("http://example.com/v1/responses").unwrap();
+    let denied = NetworkPolicy::unmanaged().restrict_to_origin(insecure.clone());
+    assert_eq!(
+        denied.acquire(&insecure).unwrap_err(),
+        NetworkPolicyDenied::Destination
+    );
+    assert_eq!(
+        denied
+            .restrict_to_origin(Url::parse("https://example.com").unwrap())
+            .acquire(&Url::parse("https://example.com/v1/responses").unwrap())
+            .unwrap_err(),
+        NetworkPolicyDenied::Destination
+    );
 }
 
 #[test]
