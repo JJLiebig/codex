@@ -13,11 +13,10 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::cache::ModelsCache;
+use codex_models_manager::manager::CliProxyModelsManager;
 use codex_models_manager::manager::ModelsEndpointClient;
 use codex_models_manager::manager::ModelsEndpointFuture;
 use codex_models_manager::manager::ModelsEndpointResponse;
-use codex_models_manager::manager::ModelsManager;
-use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::manager::StaticModelsManager;
 use codex_protocol::error::Result as CoreResult;
@@ -178,13 +177,10 @@ impl ModelProvider for CliProxyModelProvider {
         if let Some(catalog) = config_model_catalog {
             return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
         }
-        let manager = OpenAiModelsManager::new(
+        Arc::new(CliProxyModelsManager::new(
             codex_home.clone(),
             self.models_endpoint(Some(codex_home)),
-            self.auth_manager(),
-        );
-        manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
-        Arc::new(manager)
+        ))
     }
 
     fn models_manager_without_cache(
@@ -195,9 +191,9 @@ impl ModelProvider for CliProxyModelProvider {
             return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
         }
         let endpoint = self.models_endpoint(None);
-        let manager = OpenAiModelsManager::new_without_cache(endpoint, self.auth_manager());
-        manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
-        Arc::new(manager)
+        Arc::new(CliProxyModelsManager::new_with_cache(
+            /*cache*/ None, endpoint,
+        ))
     }
 
     fn models_manager_with_cache(
@@ -209,9 +205,7 @@ impl ModelProvider for CliProxyModelProvider {
             return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
         }
         let endpoint = self.models_endpoint(None);
-        let manager = OpenAiModelsManager::new_with_cache(cache, endpoint, self.auth_manager());
-        manager.set_api_key_model_discovery_enabled(/*enabled*/ true);
-        Arc::new(manager)
+        Arc::new(CliProxyModelsManager::new_with_cache(Some(cache), endpoint))
     }
 }
 
@@ -240,7 +234,14 @@ impl CliProxyModelsEndpoint {
 
 impl ModelsEndpointClient for CliProxyModelsEndpoint {
     fn identity(&self) -> Option<String> {
-        self.identity.clone()
+        self.identity.as_ref().map(|identity| {
+            let generation = self
+                .auth_manager
+                .as_ref()
+                .map(|manager| *manager.auth_change_receiver().borrow())
+                .unwrap_or_default();
+            format!("{identity}:{generation}")
+        })
     }
 
     fn has_provider_api_key(&self) -> bool {
@@ -275,9 +276,18 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
                     "CLIProxyAPI needs a CODEX_HOME auth runtime".into(),
                 )
             })?;
-            let (endpoint, inventory) = runtime
+            let (endpoint, inventory, generation) = runtime
                 .prepare_catalogue(manager, http_client_factory.clone())
                 .await?;
+            let identity = self
+                .identity
+                .as_ref()
+                .map(|identity| format!("{identity}:{generation}"))
+                .ok_or_else(|| {
+                    codex_protocol::error::CodexErr::UnsupportedOperation(
+                        "CLIProxyAPI model cache identity is unavailable".into(),
+                    )
+                })?;
             let mut provider = ModelProviderInfo::create_cli_proxy_provider()
                 .to_api_provider(/*auth_mode*/ None)?;
             provider.base_url = endpoint.base_url;
@@ -299,11 +309,6 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
             .await
             .map_err(|_| codex_protocol::error::CodexErr::RequestTimeout)?
             .map_err(map_api_error)?;
-            let identity = self.identity.clone().ok_or_else(|| {
-                codex_protocol::error::CodexErr::UnsupportedOperation(
-                    "CLIProxyAPI model cache identity is unavailable".into(),
-                )
-            })?;
             Ok(ModelsEndpointResponse {
                 models: super::cli_proxy_inventory::normalize_catalogue(models, &inventory),
                 etag,

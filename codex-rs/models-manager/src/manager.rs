@@ -28,6 +28,10 @@ use tracing::Instrument as _;
 use tracing::error;
 use tracing::info;
 
+#[path = "codex_plus_plus/cli_proxy_models.rs"]
+mod cli_proxy_models;
+pub use cli_proxy_models::CliProxyModelsManager;
+
 const MODEL_CACHE_FILE: &str = "models_cache.json";
 const DEFAULT_MODEL_CACHE_TTL: Duration = Duration::from_secs(300);
 
