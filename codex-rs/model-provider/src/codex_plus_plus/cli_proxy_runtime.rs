@@ -30,18 +30,9 @@ pub(super) struct CliProxyRuntime {
     executable: Option<PathBuf>,
 }
 
-#[derive(Clone)]
 pub(super) struct RuntimeEndpoint {
     pub base_url: String,
     pub inference_key: String,
-}
-
-impl std::fmt::Debug for RuntimeEndpoint {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RuntimeEndpoint")
-            .field("base_url", &self.base_url)
-            .finish_non_exhaustive()
-    }
 }
 
 #[derive(Deserialize, Serialize)]
