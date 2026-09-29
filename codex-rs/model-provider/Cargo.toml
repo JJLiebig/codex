@@ -27,11 +27,14 @@ codex-otel = { workspace = true }
 codex-protocol = { workspace = true }
 codex-response-debug-context = { workspace = true }
 codex-secrets = { workspace = true }
+codex-uds = { workspace = true }
 http = { workspace = true }
+rand = { workspace = true }
+rcgen = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
-tokio = { workspace = true, features = ["io-util", "process", "sync", "time"] }
+tokio = { workspace = true, features = ["io-util", "process", "rt", "sync", "time"] }
 tracing = { workspace = true, features = ["log"] }
 url = { workspace = true }
 
@@ -39,6 +42,9 @@ url = { workspace = true }
 base64 = { workspace = true }
 codex-utils-redacted-string = { workspace = true }
 pretty_assertions = { workspace = true }
+rustls = { workspace = true }
+rustls-pki-types = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true, features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "net", "rt"] }
+tokio-rustls = { workspace = true }
 wiremock = { workspace = true }

@@ -39,6 +39,8 @@ use crate::types::WindowsToml;
 use codex_features::FeaturesToml;
 use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
+use codex_model_provider_info::CLI_PROXY_PROVIDER_ID;
+use codex_model_provider_info::CLI_PROXY_PROVIDER_NAME;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
@@ -68,9 +70,10 @@ use serde::Serialize;
 use serde::de::Error as SerdeError;
 use serde_json::Value as JsonValue;
 
-const RESERVED_MODEL_PROVIDER_IDS: [&str; 5] = [
+const RESERVED_MODEL_PROVIDER_IDS: [&str; 6] = [
     AMAZON_BEDROCK_PROVIDER_ID,
     AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
+    CLI_PROXY_PROVIDER_ID,
     OPENAI_PROVIDER_ID,
     OLLAMA_OSS_PROVIDER_ID,
     LMSTUDIO_OSS_PROVIDER_ID,
@@ -997,6 +1000,11 @@ pub fn validate_model_providers(
                     "model_providers.{key}: provider name must not be empty"
                 ));
             }
+            if provider.name == CLI_PROXY_PROVIDER_NAME {
+                return Err(format!(
+                    "model_providers.{key}: `{CLI_PROXY_PROVIDER_NAME}` is reserved for the built-in `cli-proxy` provider"
+                ));
+            }
         }
         provider
             .validate()
@@ -1039,6 +1047,19 @@ pub fn validate_oss_provider(provider: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_provider_cannot_claim_owned_cli_proxy_identity() {
+        let providers = HashMap::from([(
+            "custom".to_string(),
+            ModelProviderInfo {
+                name: CLI_PROXY_PROVIDER_NAME.to_string(),
+                base_url: Some("http://127.0.0.1:9999/v1".to_string()),
+                ..ModelProviderInfo::default()
+            },
+        )]);
+        assert!(validate_model_providers(&providers).is_err());
+    }
 
     #[test]
     fn weekly_auto_start_defaults_enabled_and_accepts_override() {
