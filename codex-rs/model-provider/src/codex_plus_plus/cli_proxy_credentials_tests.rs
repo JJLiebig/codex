@@ -458,9 +458,14 @@ async fn setup_and_catalogue_reconcile_disk_without_resetting_unchanged_cooldown
     index["accounts"][0]["enabled"] = json!(false);
     std::fs::write(index_path, index.to_string()).unwrap();
     let models = provider.models_manager_without_cache(/*config_model_catalog*/ None);
-    models
-        .raw_model_catalog(RefreshStrategy::Online, factory())
-        .await;
+    models.set_api_key_model_discovery_enabled(/*enabled*/ false);
+    assert!(
+        models
+            .raw_model_catalog(RefreshStrategy::Online, factory())
+            .await
+            .models
+            .is_empty()
+    );
     assert_eq!(
         *fixture.files.lock().unwrap(),
         BTreeMap::from([

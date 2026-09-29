@@ -32,7 +32,7 @@ impl ChatWidget {
         let Ok(presets) = result else {
             return false;
         };
-        if presets.is_empty()
+        if self.ignore_empty_model_catalogue(&presets)
             || self.model_catalog.try_list_models().ok().as_ref() == Some(&presets)
         {
             return false;

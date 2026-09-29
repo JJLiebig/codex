@@ -127,14 +127,14 @@ impl ModelsCache for TestModelsCache {
 
 #[derive(Debug)]
 struct TestModelsEndpoint {
-    models: Vec<ModelInfo>,
+    models: Mutex<Vec<ModelInfo>>,
     fetch_count: AtomicUsize,
 }
 
 impl TestModelsEndpoint {
     fn new(models: Vec<ModelInfo>) -> Arc<Self> {
         Arc::new(Self {
-            models,
+            models: Mutex::new(models),
             fetch_count: AtomicUsize::new(0),
         })
     }
@@ -161,7 +161,7 @@ impl ModelsEndpointClient for TestModelsEndpoint {
         Box::pin(async move {
             self.fetch_count.fetch_add(1, Ordering::SeqCst);
             Ok(ModelsEndpointResponse {
-                models: self.models.clone(),
+                models: self.models.lock().unwrap().clone(),
                 etag: None,
                 identity: self.identity().expect("test endpoint identity"),
             })
@@ -293,6 +293,158 @@ async fn injected_cache_error_falls_back_for_agent_model_selection() -> Result<(
             .expect("stored entries lock should not be poisoned")
             .is_empty()
     );
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn owned_catalogue_refresh_agrees_for_parent_description_and_child_overrides() -> Result<()> {
+    use codex_features::Feature;
+    use codex_models_manager::manager::CliProxyModelsManager;
+    use codex_protocol::openai_models::ReasoningEffort;
+    use codex_protocol::openai_models::ReasoningEffortPreset;
+    use responses::ev_function_call_with_namespace;
+    use responses::mount_sse_once_match;
+    use responses::namespace_child_tool;
+    use serde_json::Value;
+    use serde_json::json;
+
+    let parent = remote_model("gpt-5.6-sol");
+    let removed = remote_model("removed-model");
+    let endpoint = TestModelsEndpoint::new(vec![parent.clone(), removed]);
+    let manager: SharedModelsManager = Arc::new(CliProxyModelsManager::new_with_cache(
+        /*cache*/ None,
+        endpoint.clone(),
+    ));
+    manager.set_api_key_model_discovery_enabled(/*enabled*/ false);
+    let factory = codex_core::test_support::default_http_client_factory();
+    manager
+        .list_models(RefreshStrategy::Online, factory.clone())
+        .await;
+    let server = responses::start_mock_server().await;
+    let test = test_codex()
+        .with_model("gpt-5.6-sol")
+        .with_models_manager(manager.clone())
+        .with_config(|config| {
+            config.features.enable(Feature::Collab).unwrap();
+            config.features.enable(Feature::MultiAgentV2).unwrap();
+            config.multi_agent_v2.hide_spawn_agent_metadata = false;
+            config.multi_agent_v2.expose_spawn_agent_model_overrides = true;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    assert!(Arc::ptr_eq(
+        &manager,
+        &test.thread_manager.get_models_manager()
+    ));
+    let mut future = remote_model("gpt-6.2-whatever");
+    future.context_window = Some(456_789);
+    future.effective_context_window_percent = 100;
+    future.default_reasoning_level = Some(ReasoningEffort::Low);
+    future.supported_reasoning_levels = vec![ReasoningEffortPreset {
+        effort: ReasoningEffort::Low,
+        description: "Provider low".into(),
+    }];
+    *endpoint.models.lock().unwrap() = vec![parent.clone(), future.clone()];
+    assert_eq!(
+        manager
+            .raw_model_catalog(RefreshStrategy::Online, factory)
+            .await
+            .models,
+        vec![parent, future.clone()]
+    );
+    assert_eq!(
+        manager
+            .get_model_info(
+                &future.slug,
+                &codex_models_manager::ModelsManagerConfig::default()
+            )
+            .await,
+        future
+    );
+
+    for (model, effort, expected_error) in [
+        ("removed-model", "low", Some("Unknown model")),
+        ("gpt-6.2-whatever", "high", Some("not supported")),
+        ("gpt-6.2-whatever", "low", None),
+    ] {
+        let call_id = format!("spawn-{model}-{effort}");
+        let first = mount_sse_once(
+            &server,
+            sse(vec![
+                ev_function_call_with_namespace(
+                    &call_id,
+                    "collaboration",
+                    "spawn_agent",
+                    &json!({
+                        "task_name": "fresh", "message": "complete", "fork_turns": "none",
+                        "model": model, "reasoning_effort": effort,
+                    })
+                    .to_string(),
+                ),
+                ev_completed("spawn-response"),
+            ]),
+        )
+        .await;
+        let followup_id = call_id.clone();
+        let followup = mount_sse_once_match(
+            &server,
+            move |request: &wiremock::Request| {
+                let body: Value = serde_json::from_slice(&request.body).unwrap();
+                body["model"] == "gpt-5.6-sol"
+                    && body["input"].as_array().unwrap().iter().any(|item| {
+                        item["type"] == "function_call_output" && item["call_id"] == followup_id
+                    })
+            },
+            sse(vec![ev_completed("parent-done")]),
+        )
+        .await;
+        let child = mount_sse_once_match(
+            &server,
+            |request: &wiremock::Request| {
+                serde_json::from_slice::<Value>(&request.body).unwrap()["model"]
+                    == "gpt-6.2-whatever"
+            },
+            sse(vec![ev_completed("child-done")]),
+        )
+        .await;
+        test.submit_turn("spawn a worker").await?;
+        let body = first.single_request().body_json();
+        let description = namespace_child_tool(&body, "collaboration", "spawn_agent")
+            .and_then(|tool| tool["description"].as_str())
+            .unwrap();
+        assert!(description.contains("gpt-6.2-whatever"));
+        assert!(description.contains("Reasoning efforts: low (default)."));
+        assert!(!description.contains("removed-model"));
+        let result = followup
+            .single_request()
+            .function_call_output_text(&call_id)
+            .unwrap();
+        if let Some(error) = expected_error {
+            assert!(result.contains(error), "{result}");
+            assert!(child.requests().is_empty());
+        } else {
+            let child_id = test
+                .thread_manager
+                .list_thread_ids()
+                .await
+                .into_iter()
+                .find(|id| *id != test.session_configured.thread_id)
+                .expect("spawned child");
+            let thread = test.thread_manager.get_thread(child_id).await?;
+            let started =
+                wait_for_event(&thread, |event| matches!(event, EventMsg::TurnStarted(_))).await;
+            let EventMsg::TurnStarted(started) = started else {
+                unreachable!()
+            };
+            assert_eq!(started.model_context_window, Some(456_789));
+            wait_for_event(&thread, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+            assert_eq!(
+                child.single_request().body_json()["reasoning"]["effort"],
+                "low"
+            );
+        }
+        server.reset().await;
+    }
     Ok(())
 }
 
