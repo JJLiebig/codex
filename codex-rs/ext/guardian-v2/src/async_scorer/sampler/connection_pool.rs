@@ -45,6 +45,9 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tokio::time::Instant;
 
+#[path = "codex_plus_plus/prepared_request.rs"]
+mod prepared_request;
+
 const CONNECT_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const MAX_WEBSOCKET_AGE: Duration = Duration::from_secs(55 * 60);
 const RESPONSES_WEBSOCKETS_BETA: &str = "responses_websockets=2026-02-06";
@@ -93,7 +96,10 @@ struct ClientSetup {
 
 enum Connection {
     Websocket(PooledConnection),
-    Http(ResponsesClient<ReqwestTransport>),
+    Http {
+        client: ResponsesClient<ReqwestTransport>,
+        prepared: Option<Box<codex_model_provider::PreparedModelRequest>>,
+    },
 }
 
 pub(super) struct ConnectionLease {
@@ -185,6 +191,15 @@ impl ConnectionPool {
             .acquire_owned()
             .await
             .map_err(|error| LunaSamplerError::Api(ApiError::Stream(error.to_string())))?;
+        if let Some(request) = self
+            .config
+            .provider
+            .prepare_request(super::MODEL)
+            .await
+            .map_err(LunaSamplerError::Provider)?
+        {
+            return prepared_request::lease(self, permit, request);
+        }
         let ClientSetup {
             mut provider,
             auth,
@@ -281,7 +296,10 @@ impl ConnectionPool {
                 };
                 let client = ResponsesClient::new(transport, provider, auth);
                 (
-                    Connection::Http(client),
+                    Connection::Http {
+                        client,
+                        prepared: None,
+                    },
                     ThreadId::new().to_string(),
                     request_kind,
                 )
@@ -487,12 +505,16 @@ impl ConnectionLease {
                     )
                     .await
             }
-            Connection::Http(client) => {
+            Connection::Http { client, prepared } => {
+                let mut request = request.clone();
+                if let Some(prepared) = prepared {
+                    request.model.clone_from(&prepared.model);
+                }
                 // The SSE idle timeout starts after headers arrive. Bound that wait too.
                 tokio::time::timeout(
                     self.pool.config.provider.info().stream_idle_timeout(),
                     client.stream_request(
-                        request.clone(),
+                        request,
                         ResponsesOptions {
                             session_id: Some(self.pool.config.session_id.clone()),
                             thread_id: Some(self.thread_id.clone()),

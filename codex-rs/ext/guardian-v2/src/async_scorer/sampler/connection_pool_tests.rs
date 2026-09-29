@@ -249,7 +249,7 @@ async fn cooldown_preserves_healthy_sockets_and_both_transports_share_capacity()
     assert!(matches!(leases[0].connection, Connection::Websocket(_)));
     for _ in 1..MAX_CONCURRENT_REQUESTS {
         let lease = sampler.connections.lease().await?;
-        assert!(matches!(lease.connection, Connection::Http(_)));
+        assert!(matches!(lease.connection, Connection::Http { .. }));
         leases.push(lease);
     }
     assert!(
@@ -260,7 +260,7 @@ async fn cooldown_preserves_healthy_sockets_and_both_transports_share_capacity()
     leases.pop();
     assert!(matches!(
         sampler.connections.lease().await?.connection,
-        Connection::Http(_)
+        Connection::Http { .. }
     ));
     assert_eq!(gateway.opens.load(Ordering::SeqCst), 2);
     Ok(())
@@ -442,7 +442,7 @@ async fn http_cache_preserves_no_constraint_redirect_policy_and_configured_heade
         let setup = pool.client_setup().await?;
         assert!(!setup.provider.headers.contains_key(ACCOUNT_ROUTING_HEADER));
         let lease = pool.lease().await?;
-        assert!(matches!(lease.connection, Connection::Http(_)));
+        assert!(matches!(lease.connection, Connection::Http { .. }));
         let cached = Arc::clone(pool.http_transport.lock().unwrap().as_ref().unwrap());
         assert_eq!(
             (cached.url.as_str(), cached.redirect_policy),
@@ -474,7 +474,7 @@ async fn http_cache_preserves_no_constraint_redirect_policy_and_configured_heade
         ClientRedirectPolicy::Default
     );
     let lease = pool.lease().await?;
-    assert!(matches!(lease.connection, Connection::Http(_)));
+    assert!(matches!(lease.connection, Connection::Http { .. }));
     assert_eq!(
         pool.http_transport
             .lock()

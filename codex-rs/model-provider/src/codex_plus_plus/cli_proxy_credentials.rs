@@ -9,6 +9,7 @@ use codex_http_client::HttpClientFactory;
 use codex_http_client::HttpResponse;
 use codex_login::AuthManager;
 use codex_login::NativeCredential;
+use codex_login::NativeCredentialSnapshot;
 use codex_login::NativeCredentialSource;
 use serde::Deserialize;
 use serde_json::Value;
@@ -32,6 +33,14 @@ pub(super) struct AuthFile {
     pub provider: String,
 }
 
+pub(super) struct PreparedInventory {
+    pub endpoint: RuntimeEndpoint,
+    pub client: HttpClient,
+    pub inventory: Vec<super::cli_proxy_inventory::CredentialModels>,
+    pub selected_source: Option<NativeCredentialSource>,
+    pub generation: u64,
+}
+
 impl CliProxyRuntime {
     pub(super) async fn prepare(
         &self,
@@ -52,22 +61,37 @@ impl CliProxyRuntime {
         Vec<super::cli_proxy_inventory::CredentialModels>,
         u64,
     )> {
-        let (endpoint, sources, generation) =
-            self.prepare_sources(manager, factory.clone()).await?;
-        let inventory = super::cli_proxy_inventory::read_inventory(
-            self.http_client(&factory)?,
-            &endpoint,
-            &sources,
-        )
-        .await?;
-        Ok((endpoint, inventory, generation))
+        let prepared = self.prepare_inventory(manager, factory).await?;
+        Ok((prepared.endpoint, prepared.inventory, prepared.generation))
     }
 
-    async fn prepare_sources(
+    pub(super) async fn prepare_inventory(
         &self,
         manager: &AuthManager,
         factory: HttpClientFactory,
-    ) -> io::Result<(RuntimeEndpoint, Vec<NativeCredentialSource>, u64)> {
+    ) -> io::Result<PreparedInventory> {
+        let (endpoint, client, snapshot) = self.prepare_sources(manager, factory).await?;
+        let sources: Vec<_> = snapshot
+            .credentials()
+            .iter()
+            .map(|credential| credential.source.clone())
+            .collect();
+        let inventory =
+            super::cli_proxy_inventory::read_inventory(client.clone(), &endpoint, &sources).await?;
+        Ok(PreparedInventory {
+            endpoint,
+            client,
+            inventory,
+            selected_source: snapshot.selected_source().cloned(),
+            generation: *manager.auth_change_receiver().borrow(),
+        })
+    }
+
+    async fn prepare_sources<'a>(
+        &self,
+        manager: &'a AuthManager,
+        factory: HttpClientFactory,
+    ) -> io::Result<(RuntimeEndpoint, HttpClient, NativeCredentialSnapshot<'a>)> {
         // Runtime startup/probing must finish before taking the native topology guards.
         let endpoint = self.ensure(factory.clone()).await?;
         // Reload the selected native source, including a login written after this host started.
@@ -76,15 +100,8 @@ impl CliProxyRuntime {
         let client = self.http_client(&factory)?;
         let snapshot = manager.export_native_credentials().await?;
         reconcile(&client, &endpoint, snapshot.credentials()).await?;
-        let sources = snapshot
-            .credentials()
-            .iter()
-            .map(|credential| credential.source.clone())
-            .collect();
-        // The snapshot serializes publishers and native mutations until all writes acknowledge.
-        let generation = *manager.auth_change_receiver().borrow();
-        drop(snapshot);
-        Ok((endpoint, sources, generation))
+        // Keep native mutations and publishers serialized through the caller's inventory read.
+        Ok((endpoint, client, snapshot))
     }
 }
 

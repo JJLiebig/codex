@@ -152,6 +152,16 @@ pub trait ModelProvider: fmt::Debug + Send + Sync {
         Ok(None)
     }
 
+    /// Captures provider-owned request routing before the caller encodes its typed model field.
+    /// `None` preserves the caller's existing native routing and session-auth resolution.
+    fn prepare_request<'a>(
+        &'a self,
+        _model: &'a str,
+    ) -> ModelProviderFuture<'a, codex_protocol::error::Result<Option<crate::PreparedModelRequest>>>
+    {
+        Box::pin(async { Ok(None) })
+    }
+
     /// Returns whether the resolved Responses provider may receive internal tool metadata.
     fn include_internal_metadata(&self, provider: &Provider) -> bool {
         self.info().include_internal_metadata
