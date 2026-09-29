@@ -548,6 +548,8 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
             false
         };
 
+    crate::codex_plus_plus::cleanup_after_logout(&config, &auth_manager).await;
+
     if logged_out || cleared_bedrock_config {
         eprintln!("Successfully logged out");
     } else {

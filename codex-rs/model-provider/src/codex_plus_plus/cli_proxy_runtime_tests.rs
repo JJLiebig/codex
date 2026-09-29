@@ -196,7 +196,14 @@ async fn windows_real_proxy_acknowledges_publication_rotation_and_named_removal(
         /*forced_chatgpt_workspace_id*/ None,
         /*chatgpt_base_url*/ None,
         AuthKeyringBackendKind::default(),
-        codex_login::AuthRouteConfig::from_http_client_factory(test_factory()),
+        codex_login::AuthRouteConfig::from_http_client_factory(
+            test_factory().with_network_policy(
+                test_factory()
+                    .network_policy()
+                    .clone()
+                    .restrict_to_origin(url::Url::parse(&url).unwrap()),
+            ),
+        ),
     )
     .await;
     runtime.prepare(&manager, test_factory()).await?;
@@ -252,8 +259,13 @@ async fn windows_real_proxy_acknowledges_publication_rotation_and_named_removal(
     assert_ne!(original["access_token"], rotated["access_token"]);
     assert_eq!(original["prefix"], rotated["prefix"]);
     assert!(rotated.get("id_token").is_none() && rotated.get("refresh_token").is_none());
-    fs::remove_file(home.path().join("auth.json"))?;
-    runtime.prepare(&manager, test_factory()).await?;
+    assert!(manager.logout_with_revoke().await?);
+    super::super::cli_proxy_logout::cleanup_cli_proxy_credentials(
+        home.path(),
+        &manager,
+        test_factory(),
+    )
+    .await?;
     let response = download().await.map_err(io::Error::other)?;
     assert_eq!(response.status(), http::StatusCode::NOT_FOUND);
     Ok(())

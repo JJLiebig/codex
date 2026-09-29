@@ -128,8 +128,15 @@ impl Fixture {
                         .set_delay(delay)
                 }
                 ("DELETE", "/v0/management/auth-files") => {
+                    notification.notify_one();
+                    if failure.load(Ordering::SeqCst) {
+                        return ResponseTemplate::new(200)
+                            .set_body_json(json!({"status": "failed"}));
+                    }
                     files.remove(&name.unwrap());
-                    ResponseTemplate::new(200).set_body_json(json!({"status": "ok"}))
+                    ResponseTemplate::new(200)
+                        .set_body_json(json!({"status": "ok"}))
+                        .set_delay(delay)
                 }
                 _ => ResponseTemplate::new(404),
             }
@@ -179,6 +186,120 @@ impl Fixture {
             .await,
         )
     }
+}
+
+#[tokio::test]
+async fn logout_cleanup_deletes_running_native_copies_and_serializes_relogin() {
+    use super::super::cli_proxy_logout::cleanup_cli_proxy_credentials;
+    let fixture = Fixture::new(Duration::from_millis(200)).await;
+    write_auth(fixture.home.path(), "old");
+    let manager = fixture.manager().await;
+    let snapshot = manager.export_native_credentials().await.unwrap();
+    let (name, record) = native_record(&snapshot.credentials()[0]);
+    drop(snapshot);
+    let claude = json!({"type": "claude", "access_token": "synthetic-claude"});
+    let unowned = json!({"type": "codex", "access_token": "unowned"});
+    fixture.files.lock().unwrap().extend([
+        (name.clone(), record),
+        ("claude.json".to_string(), claude.clone()),
+        ("codex.json".to_string(), unowned.clone()),
+        ("codex-native-root-foreign.json".to_string(), claude.clone()),
+    ]);
+    assert!(manager.logout_with_revoke().await.unwrap());
+    let cleanup = tokio::spawn({
+        let manager = manager.clone();
+        let home = fixture.home.path().to_path_buf();
+        async move { cleanup_cli_proxy_credentials(&home, &manager, factory()).await }
+    });
+    fixture.uploaded.notified().await;
+    let writer = tokio::task::spawn_blocking({
+        let home = fixture.home.path().to_path_buf();
+        move || write_auth(&home, "new-login")
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert!(!writer.is_finished());
+    cleanup.await.unwrap().unwrap();
+    writer.await.unwrap();
+    assert_eq!(
+        *fixture.files.lock().unwrap(),
+        BTreeMap::from([
+            ("claude.json".to_string(), claude.clone()),
+            ("codex.json".to_string(), unowned),
+            ("codex-native-root-foreign.json".to_string(), claude),
+        ])
+    );
+    // A relogin that wins before cleanup is authoritative, even for a stale manager cache.
+    let snapshot = manager.export_native_credentials().await.unwrap();
+    let record = native_record(&snapshot.credentials()[0]).1;
+    drop(snapshot);
+    fixture
+        .files
+        .lock()
+        .unwrap()
+        .insert(name.clone(), record.clone());
+    cleanup_cli_proxy_credentials(fixture.home.path(), &manager, factory())
+        .await
+        .unwrap();
+    assert_eq!(fixture.files.lock().unwrap().get(&name), Some(&record));
+    std::fs::remove_file(fixture.home.path().join("auth.json")).unwrap();
+    fixture.reject.store(true, Ordering::SeqCst);
+    assert!(
+        cleanup_cli_proxy_credentials(fixture.home.path(), &manager, factory())
+            .await
+            .is_err()
+    );
+    assert!(fixture.files.lock().unwrap().contains_key(&name));
+}
+
+#[tokio::test]
+async fn logout_cleanup_stopped_api_only_preserves_claude_and_fails_on_unreadable_native() {
+    use super::super::cli_proxy_logout::cleanup_cli_proxy_credentials;
+    use codex_protocol::config_types::ForcedLoginMethod;
+    let home = tempfile::tempdir().unwrap();
+    let manager = AuthManager::shared_from_auth_config(
+        codex_login::AuthConfig {
+            codex_home: home.path().to_path_buf(),
+            auth_credentials_store_mode: AuthCredentialsStoreMode::File,
+            keyring_backend_kind: AuthKeyringBackendKind::default(),
+            automatic_account_selection: Default::default(),
+            forced_login_method: Some(ForcedLoginMethod::Api),
+            chatgpt_base_url: None,
+            forced_chatgpt_workspace_id: None,
+            managed_auth_policy: Default::default(),
+            auth_route_config: AuthRouteConfig::from_http_client_factory(factory()),
+        },
+        /*enable_codex_api_key_env*/ false,
+    )
+    .await
+    .unwrap();
+    assert!(manager.export_native_credentials().await.is_err());
+    assert!(!manager.logout_with_revoke().await.unwrap());
+    let dir = home.path().join("cli-proxy/auth");
+    std::fs::create_dir_all(&dir).unwrap();
+    let native = dir.join("codex-native-root-old.json");
+    let claude = dir.join("claude.json");
+    let reserved_claude = dir.join("codex-native-root-claude.json");
+    std::fs::write(&native, json!({"type":"codex"}).to_string()).unwrap();
+    std::fs::write(&claude, json!({"type":"claude"}).to_string()).unwrap();
+    std::fs::write(&reserved_claude, json!({"type":"claude"}).to_string()).unwrap();
+    std::fs::write(home.path().join("auth.json"), "unreadable json").unwrap();
+    assert!(
+        cleanup_cli_proxy_credentials(home.path(), &manager, factory())
+            .await
+            .is_err()
+    );
+    assert!(native.exists());
+    std::fs::remove_file(home.path().join("auth.json")).unwrap();
+    // API-only remains prohibited for publication while cleanup is admitted.
+    write_auth(home.path(), "policy-prohibited");
+    cleanup_cli_proxy_credentials(home.path(), &manager, factory())
+        .await
+        .unwrap();
+    assert!(!native.exists());
+    assert!(claude.exists() && reserved_claude.exists());
+    assert!(!home.path().join("cli-proxy/runtime.json").exists());
+    assert!(!home.path().join("cli-proxy/config.yaml").exists());
+    assert!(!home.path().join("cli-proxy/certificate.pem").exists());
 }
 
 impl Drop for Fixture {

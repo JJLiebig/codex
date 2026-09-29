@@ -28,6 +28,7 @@ pub use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
 pub use codex_model_provider_info::CHATGPT_CODEX_BASE_URL;
 pub use codex_plus_plus::WeeklyWindowPingOutcome;
 pub use codex_plus_plus::WeeklyWindowPingRequest;
+pub use codex_plus_plus::cleanup_cli_proxy_credentials;
 pub use codex_plus_plus::ping_weekly_window;
 pub use codex_plus_plus::preflight_weekly_window_ping;
 pub use codex_protocol::account::ProviderAccount;

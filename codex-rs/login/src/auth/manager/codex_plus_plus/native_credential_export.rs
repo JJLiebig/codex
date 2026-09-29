@@ -60,6 +60,23 @@ impl AuthManager {
                 "native ChatGPT credential export is unavailable",
             ));
         }
+        self.native_credential_snapshot().await
+    }
+
+    /// Hold disk authority for deletion only, even when ChatGPT publication is prohibited.
+    /// Prohibited credentials are never eligible to retain a published proxy copy.
+    pub async fn native_credential_cleanup_snapshot(
+        &self,
+    ) -> std::io::Result<NativeCredentialSnapshot<'_>> {
+        let mut snapshot = self.native_credential_snapshot().await?;
+        if self.has_external_auth() || !self.is_login_method_allowed(ForcedLoginMethod::Chatgpt) {
+            snapshot.credentials.clear();
+            snapshot.selected_source = None;
+        }
+        Ok(snapshot)
+    }
+
+    async fn native_credential_snapshot(&self) -> std::io::Result<NativeCredentialSnapshot<'_>> {
         let current_source_guard = self
             .refresh_lock
             .acquire()
