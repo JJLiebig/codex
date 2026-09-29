@@ -176,6 +176,7 @@ pub(super) async fn record_initial_injections(
         .await;
     sess.set_previous_turn_settings(Some(PreviousTurnSettings {
         model: model_info.slug.clone(),
+        cyber_access_program: turn_context.cyber_access_program,
         comp_hash: model_info.comp_hash.clone(),
         realtime_active: Some(turn_context.realtime_active),
     }))

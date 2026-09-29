@@ -104,6 +104,7 @@ pub(crate) fn manual_selection_error(
         UsageLimitReachedError {
             plan_type: usage_limit.plan_type.clone(),
             resets_at: usage_limit.resets_at,
+            limit_window_minutes: usage_limit.limit_window_minutes,
             rate_limits: usage_limit.rate_limits.clone(),
             promo_message,
             rate_limit_reached_type: usage_limit.rate_limit_reached_type,

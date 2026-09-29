@@ -29,7 +29,6 @@ fn packaged_version_preserves_fork_update_comparisons() {
     let header = crate::history_cell::SessionHeaderHistoryCell::new(
         "test-model".to_string(),
         /*reasoning_effort*/ None,
-        /*show_fast_status*/ false,
         std::path::PathBuf::from("."),
         Box::leak(version.into_boxed_str()),
     );

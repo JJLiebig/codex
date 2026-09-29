@@ -24,6 +24,7 @@ pub enum ApiError {
     UsageLimitReached {
         plan_type: Option<String>,
         resets_at: Option<i64>,
+        limit_window_minutes: Option<u16>,
     },
     #[error("retryable error: {message}")]
     Retryable {

@@ -435,7 +435,7 @@ pub(crate) async fn run_turn(
     // Pending input is drained into history before building the next model request.
     // However, we defer that drain until after sampling in two cases:
     // 1. At the start of a turn, so the fresh turn input in `input` gets sampled first.
-    // 2. After auto-compact, when model/tool continuation needs to resume before any steer.
+    // 2. After auto-compact, while a model/tool continuation is pending.
 
     let mut next_step_context = Some(first_step_context);
     let mut guardian_budget_compacted = false;
@@ -691,7 +691,13 @@ pub(crate) async fn run_turn(
                         turn_state.stop();
                         return Ok(last_agent_message);
                     }
-                    can_drain_pending_input = !model_needs_follow_up;
+                    // After a signaled step, drain the steer even if compaction
+                    // leaves the estimated context above the token limit.
+                    can_drain_pending_input = !model_needs_follow_up
+                        || step_context
+                            .preempt
+                            .as_ref()
+                            .is_some_and(CancellationToken::is_cancelled);
                     continue;
                 }
 
@@ -1463,11 +1469,15 @@ async fn maybe_run_previous_model_inline_compact(
     if !should_compact_for_comp_hash_change && previous_model == turn_context.model_info().slug {
         return Ok(());
     }
-    let previous_model_turn_context = Arc::new(
-        turn_context
-            .with_model(previous_model.clone(), &sess.services.models_manager)
-            .await,
-    );
+    let mut previous_model_turn_context = turn_context
+        .with_model(previous_model.clone(), &sess.services.models_manager)
+        .await;
+    // `with_model` preserves the current turn's access program. Restore the previous
+    // turn's program so compaction uses the same model/cyber_access_program pair as that turn.
+    // Combining the previous model with the current turn's program can produce a pair
+    // that the server rejects.
+    previous_model_turn_context.cyber_access_program = previous_turn_settings.cyber_access_program;
+    let previous_model_turn_context = Arc::new(previous_model_turn_context);
 
     if should_compact_for_comp_hash_change {
         let step_context = sess
@@ -1705,6 +1715,14 @@ async fn run_sampling_request(
     cancellation_token: CancellationToken,
 ) -> CodexResult<(SamplingRequestResult, Vec<ResponseItem>)> {
     let turn_context = Arc::clone(&step_context.turn);
+    let preempt = step_context.preempt.clone().unwrap_or_default();
+    let _input_watch = if let Some(preempt) = &step_context.preempt {
+        sess.input_queue
+            .watch_user_input(&sess.active_turn, &turn_context.sub_id, preempt.clone())
+            .await
+    } else {
+        None
+    };
     let base_instructions = sess.get_prompt_base_instructions().await;
 
     let tool_runtime = ToolCallRuntime::new(
@@ -1810,11 +1828,9 @@ async fn run_sampling_request(
             },
         };
 
-        if original_input.is_none() {
-            original_input = Some(prompt.input);
-        }
+        let original_input = original_input.get_or_insert(prompt.input);
 
-        crate::codex_plus_plus::model_capacity_retry::handle_sampling_error(
+        let retry = crate::codex_plus_plus::model_capacity_retry::handle_sampling_error(
             &mut capacity_retries,
             &mut retry_state,
             max_retries,
@@ -1824,7 +1840,22 @@ async fn run_sampling_request(
             &turn_context,
             &cancellation_token,
         )
+        .or_cancel(&preempt)
+        .or_cancel(&cancellation_token)
         .await?;
+        if cancellation_token.is_cancelled() {
+            return Err(CodexErr::TurnAborted);
+        }
+        if preempt.is_cancelled() {
+            return Ok((
+                SamplingRequestResult {
+                    needs_follow_up: true,
+                    last_agent_message: None,
+                },
+                std::mem::take(original_input),
+            ));
+        }
+        retry??;
         turn_context.turn_timing_state.record_sampling_retry();
     }
 }
@@ -2645,17 +2676,17 @@ async fn try_run_sampling_request(
         .features
         .enabled(Feature::ConcurrentReasoningSummaries)
         && turn_context.provider.info().is_openai();
+    let mut preempt = step_context.preempt.clone().unwrap_or_default();
+    let effort = sess
+        .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
+        .await;
     client_session.begin_usage_limit_failover_tracking(usage_limit_account_attempts);
     let stream = client_session
         .stream(
             prompt,
             &step_context.settings.model_info,
             &step_context.session_telemetry,
-            sess.reasoning_effort_for_request(
-                &step_context.settings,
-                super::RequestEffortUsage::Sampling,
-            )
-            .await,
+            effort,
             step_context.settings.reasoning_summary,
             step_context.settings.service_tier.clone(),
             responses_metadata,
@@ -2672,6 +2703,9 @@ async fn try_run_sampling_request(
     )
     .await;
     let mut stream = stream?;
+    if cancellation_token.is_cancelled() {
+        return Err(CodexErr::TurnAborted);
+    }
     let mut in_flight: FuturesOrdered<InFlightFuture<'static>> = FuturesOrdered::new();
     let mut needs_follow_up = false;
     let mut last_agent_message: Option<String> = None;
@@ -2717,16 +2751,35 @@ async fn try_run_sampling_request(
             codex.usage.total_tokens = field::Empty,
         );
 
-        let event = match stream
+        let event = stream
             .next()
             .instrument(trace_span!(parent: &handle_responses, "receiving"))
+            .or_cancel(&preempt)
             .or_cancel(&cancellation_token)
-            .await
-        {
-            Ok(event) => event,
-            Err(codex_async_utils::CancelErr::Cancelled) => {
-                break Err(CodexErr::TurnAborted);
+            .await;
+        if cancellation_token.is_cancelled() {
+            break Err(CodexErr::TurnAborted);
+        }
+        let event = match event {
+            Ok(Ok(event)) => event,
+            Ok(Err(_)) => {
+                if let Some(interrupt) = stream.interrupt.take() {
+                    if step_context.settings.model_info.use_responses_lite {
+                        let _ = interrupt.send(());
+                    }
+                    // Drain the response normally before reusing its connection and history.
+                    preempt = CancellationToken::new();
+                    needs_follow_up = true;
+                    continue;
+                }
+                // TODO: Reconcile any response item already being presented to the client.
+                drop(stream);
+                break Ok(SamplingRequestResult {
+                    needs_follow_up: true,
+                    last_agent_message,
+                });
             }
+            Err(_) => break Err(CodexErr::TurnAborted),
         };
 
         let event = match event {
