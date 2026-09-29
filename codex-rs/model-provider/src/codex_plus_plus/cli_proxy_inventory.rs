@@ -200,7 +200,9 @@ pub(super) fn normalize_catalogue(
             .iter()
             .all(|(_, model, native)| *native && model == &copies[0].1)
         {
-            result.push(copies.into_iter().next().expect("nonempty model group").1);
+            if let Some((_, model, _)) = copies.into_iter().next() {
+                result.push(model);
+            }
         } else {
             result.extend(copies.into_iter().map(|(wire_slug, mut model, _)| {
                 model.slug = wire_slug;
