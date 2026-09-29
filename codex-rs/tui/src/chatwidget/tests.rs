@@ -4,6 +4,9 @@
 //! snapshot-based so that layout regressions and status/header changes show up as stable,
 //! reviewable diffs.
 
+#[path = "codex_plus_plus/model_catalogue_tests.rs"]
+mod cli_proxy_model_catalogue_tests;
+
 pub(super) use super::*;
 pub(super) use crate::app_command::AppCommand as Op;
 pub(super) use crate::app_event::AppEvent;
