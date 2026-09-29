@@ -1,10 +1,8 @@
 ---
 source: tui/src/codex_plus_plus/runtime_version_tests.rs
+assertion_line: 42
 expression: rendered
 ---
-╭──────────────────────────────────────────╮
-│ >_ OpenAI Codex (v0.153.3-fork.1)        │
-│                                          │
-│ model:     test-model   /model to change │
-│ directory: .                             │
-╰──────────────────────────────────────────╯
+
+  >_ OpenAI Codex (v0.153.3-fork.1)
+     .

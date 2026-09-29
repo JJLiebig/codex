@@ -55,11 +55,13 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
         ApiError::UsageLimitReached {
             plan_type,
             resets_at,
+            limit_window_minutes,
         } => CodexErr::new(CodexErrorDetails::UsageLimitReached(
             UsageLimitReachedError {
                 plan_type: plan_type.as_deref().map(PlanType::from_raw_value),
                 resets_at: resets_at
                     .and_then(|seconds| DateTime::<Utc>::from_timestamp(seconds, 0)),
+                limit_window_minutes,
                 rate_limits: None,
                 promo_message: None,
                 rate_limit_reached_type: None,
@@ -218,6 +220,12 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
                             return CodexErr::UsageLimitReached(UsageLimitReachedError {
                                 plan_type: err.error.plan_type,
                                 resets_at,
+                                limit_window_minutes: err
+                                    .error
+                                    .limit_window_minutes
+                                    .as_ref()
+                                    .and_then(Value::as_u64)
+                                    .and_then(|minutes| u16::try_from(minutes).ok()),
                                 rate_limits: rate_limits.map(Box::new),
                                 promo_message,
                                 rate_limit_reached_type,
@@ -354,4 +362,5 @@ struct UsageErrorBody {
     error_type: Option<String>,
     plan_type: Option<PlanType>,
     resets_at: Option<i64>,
+    limit_window_minutes: Option<Value>,
 }
