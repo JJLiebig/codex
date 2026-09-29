@@ -116,7 +116,7 @@ fn spawn_legacy_process(
                 StdinMode::Closed
             },
             StderrMode::Separate,
-            ChildConsoleMode::Inherit,
+            ChildConsoleMode::NoWindow,
             launch_desktop,
             logs_base_dir,
         )?;
