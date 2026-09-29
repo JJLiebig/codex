@@ -5,16 +5,35 @@ use pretty_assertions::assert_eq;
 fn foreign_listener_cannot_be_adopted() -> io::Result<()> {
     let listener = TcpListener::bind(("127.0.0.1", 0))?;
     let port = listener.local_addr()?.port();
-    let server = std::thread::spawn(move || -> io::Result<()> {
-        for _ in 0..2 {
-            let (mut stream, _) = listener.accept()?;
+    listener.set_nonblocking(true)?;
+    let server = std::thread::spawn(move || -> io::Result<Vec<Vec<u8>>> {
+        let mut requests = Vec::new();
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while std::time::Instant::now() < deadline {
+            let (mut stream, _) = match listener.accept() {
+                Ok(accepted) => accepted,
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
             let mut request = [0_u8; 512];
-            if stream.read(&mut request)? == 0 {
+            let length = stream.read(&mut request)?;
+            if length == 0 {
                 return Err(io::Error::other("empty synthetic request"));
             }
-            stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")?;
+            let valid = request[..length].windows(64).any(|window| {
+                window == b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            });
+            stream.write_all(if valid {
+                b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n"
+            } else {
+                b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n"
+            })?;
+            requests.push(request[..length].to_vec());
         }
-        Ok(())
+        Ok(requests)
     });
     let home = tempfile::tempdir()?;
     let dir = home.path().join("cli-proxy");
@@ -30,11 +49,17 @@ fn foreign_listener_cannot_be_adopted() -> io::Result<()> {
         },
     )?;
     let runtime = CliProxyRuntime::new(home.path().to_path_buf(), None);
-    let error = runtime
-        .ensure_blocking()
-        .expect_err("foreign port must be rejected");
-    assert!(error.to_string().contains("unauthenticated process"));
-    server.join().expect("server thread")?;
+    let result = runtime.ensure_blocking();
+    let requests = server.join().expect("server thread")?;
+    assert!(result.is_err(), "foreign port must be rejected");
+    assert!(
+        requests
+            .iter()
+            .all(|request| !request.windows(64).any(|window| {
+                window == b"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            })),
+        "foreign listener received the management secret"
+    );
     Ok(())
 }
 

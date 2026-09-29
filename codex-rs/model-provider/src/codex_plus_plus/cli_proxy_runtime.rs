@@ -238,7 +238,7 @@ fn write_config(path: &Path, auth_dir: &Path, state: &RuntimeState) -> io::Resul
         .ok_or_else(|| io::Error::other("CLIProxyAPI auth path is not valid Unicode"))?;
     let auth_dir = serde_json::to_string(auth_dir)?;
     let text = format!(
-        "host: \"127.0.0.1\"\nport: {}\nauth-dir: {}\napi-keys: [\"{}\"]\nremote-management:\n  allow-remote: false\n  secret-key: \"{}\"\n  disable-control-panel: true\nforce-model-prefix: true\ndisable-claude-cloak-mode: true\nrequest-retry: 0\nmax-retry-credentials: 2\nmax-retry-interval: 0\nrequest-log: false\nlogging-to-file: false\nrouting:\n  session-affinity: true\nstreaming:\n  keepalive-seconds: 0\n  bootstrap-retries: 0\ncodex:\n  optimize-multi-agent-v2: true\n  identity-confuse: false\n  disable-image-generation: \"passthrough\"\n",
+        "host: \"127.0.0.1\"\nport: {}\nauth-dir: {}\napi-keys: [\"{}\"]\nremote-management:\n  allow-remote: false\n  secret-key: \"{}\"\n  disable-control-panel: true\nforce-model-prefix: true\ndisable-claude-cloak-mode: true\ndisable-image-generation: \"passthrough\"\nrequest-retry: 0\nmax-retry-interval: 0\nrequest-log: false\nlogging-to-file: false\nrouting:\n  session-affinity: true\nstreaming:\n  keepalive-seconds: 0\n  bootstrap-retries: 0\ncodex:\n  optimize-multi-agent-v2: true\n  identity-confuse: false\n",
         state.port, auth_dir, state.inference_key, state.management_key
     );
     write_private(path, text.as_bytes())
