@@ -102,6 +102,9 @@ use codex_plus_plus::imported_account_refresh;
 pub use codex_plus_plus::imported_account_selection::ImportedAccountSwitchOutcome;
 use codex_plus_plus::imported_account_startup::chatgpt_auth_workspace_allowed;
 use codex_plus_plus::imported_account_startup::load_initial_imported_account_auth;
+pub use codex_plus_plus::native_credential_export::NativeCredential;
+pub use codex_plus_plus::native_credential_export::NativeCredentialSnapshot;
+pub use codex_plus_plus::native_credential_export::NativeCredentialSource;
 
 /// Authentication mechanism used by the current user.
 #[derive(Debug, Clone)]

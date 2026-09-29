@@ -15,6 +15,7 @@ use super::super::load_auth_dot_json_with_guard;
 use super::super::logout_all_stores_with_guard;
 use super::super::revoke_auth_tokens;
 use crate::account::AccountId;
+use crate::account::AccountProfile;
 use crate::account::AccountStore;
 use crate::account::account_id_for_auth;
 use crate::account::is_root_account_marker;
@@ -63,6 +64,27 @@ pub(in crate::auth::manager) struct ManagedAuthRefreshLocks {
 }
 
 impl ManagedAuthRefreshLocks {
+    pub(in crate::auth::manager) fn account_profiles(
+        &self,
+    ) -> std::io::Result<Vec<(AccountProfile, PathBuf)>> {
+        if !self.index_readable {
+            return Err(std::io::Error::other("account index is unreadable"));
+        }
+        self.account_store
+            .list()?
+            .into_iter()
+            .filter_map(|account| {
+                let home = self.account_store.account_home(&account.id);
+                match std::fs::metadata(home.join("auth.json")) {
+                    Ok(metadata) if metadata.is_file() => Some(Ok((account, home))),
+                    Ok(_) => None,
+                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(err) => Some(Err(err)),
+                }
+            })
+            .collect()
+    }
+
     pub(in crate::auth::manager) fn account_homes(&self) -> &[PathBuf] {
         &self.account_homes
     }
