@@ -3,6 +3,49 @@ use pretty_assertions::assert_eq;
 
 #[cfg(windows)]
 #[tokio::test]
+async fn windows_managed_runtime_provisions_once_and_reuses_after_restart() -> io::Result<()> {
+    if std::env::var_os("CODEX_TEST_CLI_PROXY_MANAGED").is_none() {
+        return Ok(());
+    }
+    let home = tempfile::tempdir()?;
+    let runtime = CliProxyRuntime::new(home.path().to_path_buf(), /*executable*/ None);
+    let (first, second) = tokio::join!(
+        runtime.ensure(test_factory()),
+        runtime.ensure(test_factory())
+    );
+    let first = first?;
+    let second = second?;
+    assert_eq!(
+        (&first.base_url, &first.inference_key),
+        (&second.base_url, &second.inference_key)
+    );
+    let state_path = home.path().join("cli-proxy/runtime.json");
+    let before = read_state(&state_path)?.expect("managed runtime state");
+    let managed = home
+        .path()
+        .join("cli-proxy/managed-7.3.14/cli-proxy-api.exe")
+        .canonicalize()?;
+    assert_eq!(before.executable, managed);
+    stop_test_proxy(before.pid)?;
+    let after = runtime.ensure(test_factory()).await?;
+    let restarted = read_state(&state_path)?.expect("managed restart state");
+    stop_test_proxy(restarted.pid)?;
+    assert_eq!(
+        (&first.base_url, &first.inference_key),
+        (&after.base_url, &after.inference_key)
+    );
+    assert_eq!(before.executable, restarted.executable);
+    assert_ne!(before.pid, restarted.pid);
+    assert_eq!(
+        fs::read_dir(managed.parent().expect("managed directory"))?.count(),
+        1
+    );
+    assert_eq!(fs::read_dir(home.path().join("cli-proxy/auth"))?.count(), 0);
+    Ok(())
+}
+
+#[cfg(windows)]
+#[tokio::test]
 async fn windows_owned_runtime_attaches_and_restarts() -> io::Result<()> {
     let Some(executable) = std::env::var_os("CODEX_TEST_CLI_PROXY_EXE") else {
         return Ok(());
@@ -22,7 +65,7 @@ async fn windows_owned_runtime_attaches_and_restarts() -> io::Result<()> {
     assert!(before.pid > 0);
     stop_test_proxy(before.pid)?;
     // A later host can reuse the saved executable without the first host's override.
-    let runtime = CliProxyRuntime::new(home.path().to_path_buf(), None);
+    let runtime = CliProxyRuntime::new(home.path().to_path_buf(), /*executable*/ None);
     let after = runtime.ensure(test_factory()).await?;
     let restarted = read_state(&state_path)?.expect("restarted state");
     assert_eq!(first.base_url, after.base_url);
@@ -94,11 +137,16 @@ async fn foreign_listener_cannot_be_adopted_or_reused_after_reconnect() -> io::R
         management_key: "b".repeat(64),
     };
     write_state(&dir.join("runtime.json"), &state)?;
-    let runtime = CliProxyRuntime::new(home.path().to_path_buf(), None);
+    let runtime = CliProxyRuntime::new(home.path().to_path_buf(), /*executable*/ None);
     let client = runtime.http_client(&test_factory())?;
     let url = format!("{}/responses", state.endpoint().base_url);
     // Initial foreign attach, real endpoint, foreign takeover using the retained client.
-    for (config, expected_owned) in [(foreign.clone(), false), (owned, true), (foreign, false)] {
+    for (config, expected_owned, version) in [
+        (foreign.clone(), false, "7.3.14"),
+        (owned.clone(), true, "7.3.12"),
+        (owned, true, "7.3.14"),
+        (foreign, false, "7.3.14"),
+    ] {
         let listener = tokio::net::TcpListener::bind(("127.0.0.1", port)).await?;
         let acceptor = tokio_rustls::TlsAcceptor::from(config);
         let server = tokio::spawn(async move {
@@ -112,16 +160,17 @@ async fn foreign_listener_cannot_be_adopted_or_reused_after_reconnect() -> io::R
                         continue;
                     }
                     received.extend_from_slice(&request[..len]);
-                    stream
-                        .write_all(
-                            b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
-                        )
-                        .await?;
+                    stream.write_all(format!(
+                        "HTTP/1.1 200 OK\r\nX-CPA-VERSION: {version}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    ).as_bytes()).await?;
                 }
             }
             Ok::<_, io::Error>(received)
         });
-        assert_eq!(runtime.ensure(test_factory()).await.is_ok(), expected_owned);
+        assert_eq!(
+            runtime.ensure(test_factory()).await.is_ok(),
+            expected_owned && version == "7.3.14"
+        );
         assert_eq!(
             client
                 .post(&url)
