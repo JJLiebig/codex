@@ -118,14 +118,13 @@ impl CliProxyRuntime {
                 let listener = TcpListener::bind(("127.0.0.1", 0))?;
                 let port = listener.local_addr()?.port();
                 drop(listener);
-                let state = RuntimeState {
+                RuntimeState {
                     port,
                     pid: 0,
                     executable: PathBuf::new(),
                     inference_key: random_key(),
                     management_key: random_key(),
-                };
-                state
+                }
             }
         };
         handle.block_on(codex_uds::prepare_private_socket_directory(
