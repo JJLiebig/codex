@@ -38,6 +38,9 @@ use crate::provider::ProviderCapabilities;
 use crate::provider::RemoteCompactionSupport;
 use crate::provider::SharedModelProvider;
 
+// Ten account copies of the current 392,476-byte rich catalogue fit with growth headroom.
+const OWNED_MODEL_CATALOG_BYTES: usize = 4 * 1024 * 1024;
+
 #[derive(Debug)]
 pub(crate) struct CliProxyModelProvider {
     info: ModelProviderInfo,
@@ -287,7 +290,11 @@ impl ModelsEndpointClient for CliProxyModelsEndpoint {
             let client = ModelsClient::new(transport, provider, auth);
             let (models, etag) = tokio::time::timeout(
                 Duration::from_secs(5),
-                client.list_models(request_url, HeaderMap::new(), Some(1024 * 1024)),
+                client.list_models(
+                    request_url,
+                    HeaderMap::new(),
+                    Some(OWNED_MODEL_CATALOG_BYTES),
+                ),
             )
             .await
             .map_err(|_| codex_protocol::error::CodexErr::RequestTimeout)?

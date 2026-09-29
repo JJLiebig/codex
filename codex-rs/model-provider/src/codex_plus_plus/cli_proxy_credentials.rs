@@ -52,12 +52,17 @@ impl CliProxyRuntime {
     }
 }
 
-pub(super) fn native_record(credential: &NativeCredential) -> (String, Value) {
-    let (source, account) = match &credential.source {
+pub(super) fn native_route(source: &NativeCredentialSource) -> (String, String) {
+    let (source, account) = match source {
         NativeCredentialSource::Root(account) => ("root", account),
         NativeCredentialSource::Imported(account) => ("imported", account),
     };
     let prefix = format!("{NATIVE_PREFIX}{source}-{account}");
+    (format!("{prefix}.json"), prefix)
+}
+
+pub(super) fn native_record(credential: &NativeCredential) -> (String, Value) {
+    let (name, prefix) = native_route(&credential.source);
     let mut record = json!({
         "type": "codex",
         "access_token": credential.access_token,
@@ -68,7 +73,7 @@ pub(super) fn native_record(credential: &NativeCredential) -> (String, Value) {
     if let Some(plan) = &credential.plan_type {
         record["plan_type"] = json!(plan);
     }
-    (format!("{prefix}.json"), record)
+    (name, record)
 }
 
 pub(super) fn owned_filename(name: &str) -> bool {
