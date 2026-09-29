@@ -25,15 +25,7 @@ async fn custom_conversation_provider_keeps_native_maintenance_eligible() {
     let request = native_account_maintenance::ping_request(&config, account_home.clone());
     assert_eq!(request.auth_config.codex_home, account_home);
     assert_eq!(request.model_provider_id, OPENAI_PROVIDER_ID);
-    assert_eq!(
-        preflight_weekly_window_ping(
-            &request.model_provider_id,
-            &request.model_provider,
-            &request.chatgpt_base_url,
-            &request.http_client_factory,
-        ),
-        Ok(())
-    );
+    assert_eq!(preflight_native_account_maintenance(&config), Ok(()));
 
     config.respect_system_proxy = true;
     let routed = native_account_maintenance::ping_request(&config, home.path().into());
@@ -42,25 +34,14 @@ async fn custom_conversation_provider_keeps_native_maintenance_eligible() {
         OutboundProxyPolicy::RespectSystemProxy
     );
     assert_eq!(
-        preflight_weekly_window_ping(
-            &routed.model_provider_id,
-            &routed.model_provider,
-            &routed.chatgpt_base_url,
-            &routed.http_client_factory,
-        ),
+        preflight_native_account_maintenance(&config),
         Err(WeeklyWindowPingOutcome::UnsupportedRouting)
     );
 
     config.respect_system_proxy = false;
     config.chatgpt_base_url = "https://other.example/backend-api".to_string();
-    let redirected = native_account_maintenance::ping_request(&config, home.path().into());
     assert_eq!(
-        preflight_weekly_window_ping(
-            &redirected.model_provider_id,
-            &redirected.model_provider,
-            &redirected.chatgpt_base_url,
-            &redirected.http_client_factory,
-        ),
+        preflight_native_account_maintenance(&config),
         Err(WeeklyWindowPingOutcome::UnsupportedConfiguration)
     );
 }

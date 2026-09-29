@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 
+use codex_model_provider::WeeklyWindowPingOutcome;
 use codex_model_provider::WeeklyWindowPingRequest;
+use codex_model_provider::preflight_weekly_window_ping;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_model_provider_info::OPENAI_PROVIDER_ID;
 
@@ -16,4 +18,14 @@ pub(super) fn ping_request(config: &Config, account_home: PathBuf) -> WeeklyWind
         chatgpt_base_url: config.chatgpt_base_url.clone(),
         http_client_factory: config.http_client_factory(),
     }
+}
+
+pub(crate) fn preflight(config: &Config) -> Result<(), WeeklyWindowPingOutcome> {
+    let request = ping_request(config, config.codex_home.to_path_buf());
+    preflight_weekly_window_ping(
+        &request.model_provider_id,
+        &request.model_provider,
+        &request.chatgpt_base_url,
+        &request.http_client_factory,
+    )
 }
