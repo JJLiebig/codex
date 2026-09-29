@@ -5,3 +5,4 @@ pub(super) mod file_auth;
 pub(super) mod imported_account_refresh;
 pub(super) mod imported_account_selection;
 pub(super) mod imported_account_startup;
+pub(super) mod native_credential_export;
