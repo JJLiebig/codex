@@ -19,6 +19,10 @@ use winapi::um::winbase::CREATE_NO_WINDOW;
 use crate::child::Child;
 use crate::child::ChildKind;
 
+#[cfg(windows)]
+#[path = "child_command/codex_plus_plus/parent_console.rs"]
+mod codex_plus_plus;
+
 /// Relationship between a child and its parent's session and process group.
 ///
 /// These settings apply only on Unix; other platforms use their default behavior.
