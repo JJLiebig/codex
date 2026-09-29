@@ -126,6 +126,9 @@ impl ConnectionPool {
 
     /// Never waits for another opener or sleeps through the cooldown.
     pub(super) fn replenish(self: &Arc<Self>) -> Option<JoinHandle<()>> {
+        if !self.config.provider.info().supports_websockets {
+            return None;
+        }
         let guard = Arc::clone(&self.replenishing).try_lock_owned().ok()?;
         if self
             .retry_after
@@ -228,45 +231,54 @@ impl ConnectionPool {
                 } else {
                     redirect_policy
                 };
-                let transport = {
-                    let mut cached = self
-                        .http_transport
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner);
-                    if let Some(transport) = cached.as_ref()
-                        && transport.url == url
-                        && transport.redirect_policy == redirect_policy
-                    {
-                        Arc::clone(transport)
-                    } else {
-                        let transport = Arc::new(HttpTransport {
-                            url: url.clone(),
-                            redirect_policy,
-                            transport: OnceCell::new(),
-                        });
-                        *cached = Some(Arc::clone(&transport));
-                        transport
-                    }
+                let transport = if let Some(client) =
+                    self.config.provider.api_http_client().map_err(|error| {
+                        LunaSamplerError::Api(ApiError::Transport(TransportError::Build(
+                            error.to_string(),
+                        )))
+                    })? {
+                    ReqwestTransport::from_http_client(client)
+                } else {
+                    let transport = {
+                        let mut cached = self
+                            .http_transport
+                            .lock()
+                            .unwrap_or_else(std::sync::PoisonError::into_inner);
+                        if let Some(transport) = cached.as_ref()
+                            && transport.url == url
+                            && transport.redirect_policy == redirect_policy
+                        {
+                            Arc::clone(transport)
+                        } else {
+                            let transport = Arc::new(HttpTransport {
+                                url: url.clone(),
+                                redirect_policy,
+                                transport: OnceCell::new(),
+                            });
+                            *cached = Some(Arc::clone(&transport));
+                            transport
+                        }
+                    };
+                    transport
+                        .transport
+                        .get_or_try_init(|| async {
+                            let client = create_client_for_route_async(
+                                self.config.http_client_factory.clone(),
+                                url,
+                                ClientRouteClass::Api,
+                                redirect_policy,
+                            )
+                            .await
+                            .map_err(|error| {
+                                LunaSamplerError::Api(ApiError::Transport(TransportError::Build(
+                                    error.to_string(),
+                                )))
+                            })?;
+                            Ok::<_, LunaSamplerError>(ReqwestTransport::from_http_client(client))
+                        })
+                        .await?
+                        .clone()
                 };
-                let transport = transport
-                    .transport
-                    .get_or_try_init(|| async {
-                        let client = create_client_for_route_async(
-                            self.config.http_client_factory.clone(),
-                            url,
-                            ClientRouteClass::Api,
-                            redirect_policy,
-                        )
-                        .await
-                        .map_err(|error| {
-                            LunaSamplerError::Api(ApiError::Transport(TransportError::Build(
-                                error.to_string(),
-                            )))
-                        })?;
-                        Ok::<_, LunaSamplerError>(ReqwestTransport::from_http_client(client))
-                    })
-                    .await?
-                    .clone();
                 let client = ResponsesClient::new(transport, provider, auth);
                 (
                     Connection::Http(client),

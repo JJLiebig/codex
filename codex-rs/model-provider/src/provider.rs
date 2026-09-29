@@ -9,6 +9,7 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_api::TransportError;
 use codex_api::is_azure_responses_provider;
+use codex_http_client::HttpClient;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::GatewayAuthManager;
@@ -141,6 +142,15 @@ pub const DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL: &str = "gpt-5.6-terra";
 pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// Returns the configured provider metadata.
     fn info(&self) -> &ModelProviderInfo;
+
+    /// Returns a provider-owned HTTP client for API requests, if required.
+    ///
+    /// The default keeps native providers on the route-aware client factory.
+    /// Implementations that override this must enforce their own destination,
+    /// proxy, and redirect policy for every request sent through the client.
+    fn api_http_client(&self) -> codex_protocol::error::Result<Option<HttpClient>> {
+        Ok(None)
+    }
 
     /// Returns whether the resolved Responses provider may receive internal tool metadata.
     fn include_internal_metadata(&self, provider: &Provider) -> bool {

@@ -1202,13 +1202,17 @@ impl ModelClient {
         } else {
             redirect_policy
         };
-        let client = create_client_for_route(
-            &self.http_client_factory,
-            &api_provider.url_for_path(endpoint),
-            ClientRouteClass::Api,
-            redirect_policy,
-        )
-        .map_err(std::io::Error::from)?;
+        let client = if let Some(client) = self.state.provider.api_http_client()? {
+            client
+        } else {
+            create_client_for_route(
+                &self.http_client_factory,
+                &api_provider.url_for_path(endpoint),
+                ClientRouteClass::Api,
+                redirect_policy,
+            )
+            .map_err(std::io::Error::from)?
+        };
         Ok(ReqwestTransport::from_http_client(client))
     }
 
