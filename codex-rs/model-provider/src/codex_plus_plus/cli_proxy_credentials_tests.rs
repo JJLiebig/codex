@@ -102,11 +102,11 @@ impl Fixture {
                 .find(|(key, _)| key == "name")
                 .map(|(_, value)| value.into_owned());
             match (request.method.as_str(), request.url.path()) {
-                ("GET", "/v0/management/auth-files") => ResponseTemplate::new(200).set_body_json(
-                    json!({"files": files.iter().map(|(name, record)| {
+                ("GET", "/v0/management/auth-files") => ResponseTemplate::new(200)
+                    .insert_header("X-CPA-VERSION", "7.3.14")
+                    .set_body_json(json!({"files": files.iter().map(|(name, record)| {
                             json!({"name": name, "type": record["type"], "extra": true})
-                        }).collect::<Vec<_>>(), "observed_at": "ignored"}),
-                ),
+                        }).collect::<Vec<_>>(), "observed_at": "ignored"})),
                 ("GET", "/v0/management/auth-files/download") => {
                     match files.get(name.as_deref().unwrap()) {
                         Some(record) => ResponseTemplate::new(200).set_body_json(record),
