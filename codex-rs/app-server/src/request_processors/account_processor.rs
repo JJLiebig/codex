@@ -982,10 +982,15 @@ impl AccountRequestProcessor {
             }
         }
 
+        let proxy_cleanup =
+            cli_proxy_logout::cleanup_after_logout(&config, &self.auth_manager).await;
         self.config_manager.clear_cloud_config_bundle_loader();
 
         if config.model_provider.is_amazon_bedrock() {
-            clear_user_model_provider_if_bedrock(&self.config_manager, &config).await?;
+            let bedrock_cleanup =
+                clear_user_model_provider_if_bedrock(&self.config_manager, &config).await;
+            proxy_cleanup.clone()?;
+            bedrock_cleanup?;
         }
 
         *self.workspace_routing.lock().await = None;
@@ -997,7 +1002,7 @@ impl AccountRequestProcessor {
         )
         .await;
 
-        cli_proxy_logout::cleanup_after_logout(&config, &self.auth_manager).await?;
+        proxy_cleanup?;
 
         // Reflect the current auth method after logout (likely None).
         Ok(self
