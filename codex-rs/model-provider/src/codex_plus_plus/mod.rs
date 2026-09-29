@@ -1,4 +1,5 @@
 mod cli_proxy_credentials;
+mod cli_proxy_executable;
 mod cli_proxy_provider;
 mod cli_proxy_runtime;
 mod weekly_window_ping;

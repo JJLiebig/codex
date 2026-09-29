@@ -20,7 +20,6 @@ use rand::RngCore;
 use serde::Deserialize;
 use serde::Serialize;
 
-const TESTED_VERSION: &str = "7.3.12";
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(10);
 // Windows can take over a second to report refusal on a stopped loopback listener.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
@@ -89,6 +88,9 @@ impl CliProxyRuntime {
             .write(true)
             .open(lock_path)?;
         lock.lock()?;
+        if let Some(executable) = &self.executable {
+            super::cli_proxy_executable::installed_executable(Some(executable), [])?;
+        }
 
         let cert_path = dir.join("certificate.pem");
         let key_path = dir.join("private-key.pem");
@@ -136,7 +138,12 @@ impl CliProxyRuntime {
             fs::remove_file(&config_path)?;
         }
         write_config(&config_path, &dir, &state)?;
-        let executable = self.compatible_executable(&state.executable)?;
+        let executable = handle.block_on(super::cli_proxy_executable::resolve(
+            &dir,
+            self.executable.as_deref(),
+            &state.executable,
+            factory,
+        ))?;
         if state.pid == 0 {
             // Persist the keys before launch so another host can attach after a crash.
             write_state(&state_path, &state)?;
@@ -206,46 +213,6 @@ impl CliProxyRuntime {
         HttpClientTlsConfig::default()
             .with_root_certificate_pem(&fs::read(dir.join("certificate.pem"))?)
             .map_err(io::Error::other)
-    }
-
-    fn compatible_executable(&self, saved_executable: &Path) -> io::Result<PathBuf> {
-        let explicit = self.executable.as_ref();
-        let candidates: Vec<PathBuf> = match explicit {
-            Some(path) if path.is_absolute() => vec![path.clone()],
-            Some(_) => {
-                return Err(io::Error::other(
-                    "CODEX_CLI_PROXY_EXECUTABLE must be an absolute path",
-                ));
-            }
-            None => std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-                .map(|dir| {
-                    dir.join(if cfg!(windows) {
-                        "cli-proxy-api.exe"
-                    } else {
-                        "cli-proxy-api"
-                    })
-                })
-                .filter(|path| path.is_file())
-                .chain(
-                    saved_executable
-                        .is_absolute()
-                        .then(|| saved_executable.to_path_buf()),
-                )
-                .collect(),
-        };
-        for path in candidates {
-            if let Ok(output) = Command::new(&path).arg("-help").output() {
-                let banner = String::from_utf8_lossy(&output.stdout);
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                let expected = format!("CLIProxyAPI Version: {TESTED_VERSION},");
-                if banner.starts_with(&expected) || stderr.starts_with(&expected) {
-                    return path.canonicalize();
-                }
-            }
-        }
-        Err(io::Error::other(format!(
-            "CLIProxyAPI {TESTED_VERSION} is required. Set CODEX_CLI_PROXY_EXECUTABLE to the absolute path of that release, or install it on PATH. The direct OpenAI backend remains available with model_provider = \"openai\"."
-        )))
     }
 }
 
@@ -348,7 +315,21 @@ async fn probe_owned(
         .send()
         .await;
     match response {
-        Ok(response) => Ok(Some(response.status().is_success())),
+        Ok(response) if response.status().is_success() => {
+            let version = response
+                .headers()
+                .get("x-cpa-version")
+                .and_then(|value| value.to_str().ok());
+            if version != Some(super::cli_proxy_executable::TESTED_VERSION) {
+                return Err(io::Error::other(format!(
+                    "The owned CLIProxyAPI process reports version {}; {} is required. Stop the owned proxy after its active sessions finish, then retry startup; Codex++ will not replace a running process",
+                    version.unwrap_or("unknown"),
+                    super::cli_proxy_executable::TESTED_VERSION
+                )));
+            }
+            Ok(Some(true))
+        }
+        Ok(_) => Ok(Some(false)),
         Err(error) => {
             // TLS/policy failures are occupied, untrusted endpoints. Only refusal permits restart.
             let mut source: Option<&(dyn std::error::Error + 'static)> = Some(&error);

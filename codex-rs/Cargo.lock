@@ -4008,6 +4008,7 @@ dependencies = [
  "codex-secrets",
  "codex-uds",
  "codex-utils-redacted-string",
+ "flate2",
  "http 1.4.0",
  "pretty_assertions",
  "rand 0.9.3",
@@ -4017,12 +4018,14 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.10.9",
+ "tar",
  "tempfile",
  "tokio",
  "tokio-rustls",
  "tracing",
  "url",
  "wiremock",
+ "zip",
 ]
 
 [[package]]
