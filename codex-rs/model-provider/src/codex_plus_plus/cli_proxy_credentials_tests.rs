@@ -15,6 +15,7 @@ use codex_login::AuthRouteConfig;
 use codex_login::save_auth;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::manager::RefreshStrategy;
+use codex_protocol::openai_models::ModelsResponse;
 use pretty_assertions::assert_eq;
 use tokio::sync::Notify;
 use wiremock::Mock;
@@ -112,6 +113,9 @@ impl Fixture {
                         Some(record) => ResponseTemplate::new(200).set_body_json(record),
                         None => ResponseTemplate::new(404),
                     }
+                }
+                ("GET", "/v0/management/auth-files/models") => {
+                    ResponseTemplate::new(200).set_body_json(json!({"models": []}))
                 }
                 ("POST", "/v0/management/auth-files") => {
                     notification.notify_one();
@@ -336,6 +340,65 @@ fn write_auth(home: &Path, label: &str) {
         AuthKeyringBackendKind::default(),
     )
     .unwrap();
+}
+
+#[tokio::test]
+async fn rich_catalogue_loads_three_accounts_losslessly_and_rejects_above_owned_limit() {
+    let fixture = Fixture::new(Duration::ZERO).await;
+    let manager = fixture.manager().await;
+    let provider = super::super::cli_proxy_provider::CliProxyModelProvider::new(
+        ModelProviderInfo::create_cli_proxy_provider(),
+        Some(manager),
+    );
+    let endpoint = provider.models_endpoint(None);
+    let bundled = codex_models_manager::bundled_models_response().unwrap();
+    let mut models = Vec::new();
+    for account in ["a", "b", "c"] {
+        for model in &bundled.models {
+            let mut model = model.clone();
+            model.slug = format!("foreign-{account}/{}", model.slug);
+            models.push(model);
+        }
+    }
+    let response = ModelsResponse {
+        models: models.clone(),
+    };
+    let body = serde_json::to_vec(&response).unwrap();
+    // Repeated real prompt/capability metadata, not artificial padding, breaks the old cap.
+    assert!(body.len() > 1024 * 1024);
+    Mock::given(wiremock::matchers::path("/v1/models"))
+        .and(header(
+            "authorization",
+            format!("Bearer {}", "a".repeat(64)),
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(body.clone()))
+        .with_priority(/*priority*/ 1)
+        .mount(&fixture.server)
+        .await;
+    let actual = endpoint.list_models("1.0.0", factory()).await.unwrap();
+    models.sort_by(|a, b| a.slug.cmp(&b.slug));
+    assert_eq!(actual.models, models);
+    fixture.server.reset().await;
+    Mock::given(wiremock::matchers::path("/v0/management/auth-files"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("X-CPA-VERSION", "7.3.14")
+                .set_body_json(json!({"files":[]})),
+        )
+        .mount(&fixture.server)
+        .await;
+    Mock::given(wiremock::matchers::path("/v1/models"))
+        .respond_with(ResponseTemplate::new(200).set_body_bytes(body.repeat(4)))
+        .mount(&fixture.server)
+        .await;
+    assert!(
+        endpoint
+            .list_models("1.0.0", factory())
+            .await
+            .unwrap_err()
+            .to_string()
+            .contains("limit")
+    );
 }
 
 #[tokio::test]

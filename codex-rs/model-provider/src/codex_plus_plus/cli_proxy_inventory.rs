@@ -8,6 +8,7 @@ use codex_http_client::HttpTransport;
 use codex_http_client::Request;
 use codex_http_client::ReqwestTransport;
 use codex_login::NativeCredentialSource;
+use codex_protocol::openai_models::ModelInfo;
 use http::Method;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
@@ -19,7 +20,7 @@ use super::cli_proxy_runtime::RuntimeEndpoint;
 const INVENTORY_BYTES: usize = 1024 * 1024;
 const INVENTORY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct CredentialModels {
     pub source: Option<NativeCredentialSource>,
     pub name: String,
@@ -30,7 +31,7 @@ pub(super) struct CredentialModels {
     pub models: Vec<RegisteredModel>,
 }
 
-#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
 pub(super) struct RegisteredModel {
     pub id: String,
     #[serde(rename = "type")]
@@ -91,7 +92,10 @@ pub(super) async fn read_inventory(
             };
             let identity = native.get(&file.name).filter(|_| {
                 provider.as_deref() == Some("codex")
-                    && file.auth_index.as_ref().is_some_and(|index| !index.is_empty())
+                    && file
+                        .auth_index
+                        .as_ref()
+                        .is_some_and(|index| !index.is_empty())
             });
             inventory.push(CredentialModels {
                 source: identity.map(|(source, _)| (*source).clone()),
@@ -120,15 +124,117 @@ async fn read_json<T: DeserializeOwned>(
         .parse::<http::HeaderValue>()
         .map_err(io::Error::other)?;
     authorization.set_sensitive(true);
-    request.headers.insert(http::header::AUTHORIZATION, authorization);
+    request
+        .headers
+        .insert(http::header::AUTHORIZATION, authorization);
     request.timeout = Some(INVENTORY_TIMEOUT);
     request.response_body_limit_bytes = Some(*remaining);
-    let response = transport.execute(request).await.map_err(io::Error::other)?;
+    let response = transport
+        .execute(request)
+        .await
+        .map_err(|error| match error {
+            codex_http_client::TransportError::Http { status, .. } => io::Error::other(format!(
+                "CLIProxyAPI inventory request failed with HTTP {status}"
+            )),
+            error => io::Error::other(error),
+        })?;
     *remaining -= response.body.len();
     serde_json::from_slice(&response.body).map_err(|error| {
         io::Error::other(format!(
             "CLIProxyAPI inventory could not be decoded at line {} column {}",
-            error.line(), error.column()
+            error.line(),
+            error.column()
         ))
     })
 }
+
+/// Only exact, unambiguous membership can turn a wire slug into a native model slug.
+pub(super) fn normalize_catalogue(
+    models: Vec<ModelInfo>,
+    inventory: &[CredentialModels],
+) -> Vec<ModelInfo> {
+    let mut membership: BTreeMap<&str, Vec<(&CredentialModels, &RegisteredModel)>> =
+        BTreeMap::new();
+    for credential in inventory {
+        for model in &credential.models {
+            membership
+                .entry(&model.id)
+                .or_default()
+                .push((credential, model));
+        }
+    }
+    let mut groups: BTreeMap<String, Vec<(String, ModelInfo, bool)>> = BTreeMap::new();
+    for original in models {
+        let wire_slug = original.slug.clone();
+        let mut normalized = original;
+        let mut native = false;
+        if let Some(entries) = membership.get(wire_slug.as_str())
+            && let [(credential, member)] = entries.as_slice()
+            && !credential.disabled
+            && credential.provider.as_deref() == Some("codex")
+            && member.provider.as_deref() == Some("openai")
+            && member.owned_by.as_deref() == Some("openai")
+        {
+            if credential.source.is_some()
+                && let Some(prefix) = &credential.prefix
+                && let Some(slug) = wire_slug.strip_prefix(&format!("{prefix}/"))
+                && !slug.is_empty()
+            {
+                normalized.slug = slug.into();
+                native = true;
+            }
+            if legacy_gpt(&normalized.slug) {
+                continue;
+            }
+        }
+        groups
+            .entry(normalized.slug.clone())
+            .or_default()
+            .push((wire_slug, normalized, native));
+    }
+    let mut result = Vec::new();
+    for copies in groups.into_values() {
+        // Different prompts/capabilities or a foreign collision keep the complete wire entries.
+        // Those entries have no canonical native route until the conflict is resolved.
+        if copies
+            .iter()
+            .all(|(_, model, native)| *native && model == &copies[0].1)
+        {
+            result.push(copies.into_iter().next().expect("nonempty model group").1);
+        } else {
+            result.extend(copies.into_iter().map(|(wire_slug, mut model, _)| {
+                model.slug = wire_slug;
+                model
+            }));
+        }
+    }
+    result
+}
+
+fn legacy_gpt(slug: &str) -> bool {
+    let Some(version) = slug
+        .strip_prefix("gpt-")
+        .and_then(|name| name.split('-').next())
+    else {
+        return false;
+    };
+    if version == "4o" {
+        return true;
+    }
+    let mut parts = version.split('.');
+    let Some(major) = parts.next().and_then(|part| part.parse::<u32>().ok()) else {
+        return false;
+    };
+    let minor = match parts.next() {
+        Some(part) => match part.parse::<u32>() {
+            Ok(minor) => minor,
+            Err(_) => return false,
+        },
+        None => 0,
+    };
+    parts.next().is_none() && (major < 5 || (major == 5 && minor <= 4))
+}
+
+#[cfg(test)]
+#[path = "cli_proxy_inventory_tests.rs"]
+mod tests;
