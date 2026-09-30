@@ -106,12 +106,20 @@ async fn interrupted_turn_restores_queued_messages_with_images_and_elements() {
 async fn entered_review_mode_uses_request_hint() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 
+    chat.config.model_provider =
+        codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
+    chat.thread_id = Some(ThreadId::new());
+    handle_turn_started(&mut chat, "review-child");
     handle_entered_review_mode(&mut chat, "feature branch");
 
     let cells = drain_insert_history(&mut rx);
     let banner = lines_to_single_string(cells.last().expect("review banner"));
     assert_eq!(banner, ">> Code review started: feature branch <<\n");
     assert!(chat.review.is_review_mode);
+    // Review forwards a delegate start, then completes the parent turn.
+    handle_exited_review_mode(&mut chat);
+    handle_turn_completed(&mut chat, "review-parent", /*duration_ms*/ None);
+    assert!(!chat.is_task_running_for_test());
 }
 
 /// Entering review mode renders the current changes banner when requested.
@@ -1257,6 +1265,7 @@ async fn interrupted_turn_after_goal_budget_limited_uses_budget_message_snapshot
             codex_app_server_protocol::TurnStartedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: codex_app_server_protocol::Turn {
+                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: Vec::new(),
@@ -1294,6 +1303,7 @@ async fn interrupted_turn_after_goal_budget_limited_uses_budget_message_snapshot
             codex_app_server_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: codex_app_server_protocol::Turn {
+                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: Vec::new(),

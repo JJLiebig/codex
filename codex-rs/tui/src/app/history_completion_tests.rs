@@ -6,6 +6,7 @@ use pretty_assertions::assert_eq;
 
 fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
     Turn {
+        inference_attribution: None,
         id: id.to_string(),
         items: item_ids
             .iter()

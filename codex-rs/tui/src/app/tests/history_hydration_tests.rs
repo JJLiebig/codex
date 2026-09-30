@@ -79,6 +79,7 @@ async fn history_fixture(
             }));
         }
         events.push(EventMsg::TurnComplete(TurnCompleteEvent {
+            inference_attribution: None,
             turn_id,
             last_agent_message: None,
             error: None,

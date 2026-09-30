@@ -847,6 +847,7 @@ fn session_event_to_analytics_notification(
 
 fn analytics_turn(turn_id: &str, status: TurnStatus) -> Turn {
     Turn {
+        inference_attribution: None,
         id: turn_id.to_string(),
         items: Vec::new(),
         items_view: TurnItemsView::NotLoaded,

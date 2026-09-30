@@ -759,7 +759,7 @@ impl ChatWidget {
                 .map(|used| format!("Context {used}% used")),
             StatusLineItem::FiveHourLimit => {
                 let (window, is_secondary) = self
-                    .rate_limit_snapshots_by_limit_id
+                    .inference_status_limits()
                     .get("codex")
                     .and_then(five_hour_status_window)?;
                 let label = limit_label_for_window(window.window_minutes, is_secondary);
@@ -767,7 +767,7 @@ impl ChatWidget {
             }
             StatusLineItem::WeeklyLimit => {
                 let (window, is_secondary) = self
-                    .rate_limit_snapshots_by_limit_id
+                    .inference_status_limits()
                     .get("codex")
                     .and_then(weekly_status_window)?;
                 let label = limit_label_for_window(window.window_minutes, is_secondary);

@@ -22,6 +22,7 @@ fn computer(id: &str) -> ThreadItem {
 
 fn turn(id: &str, items: Vec<ThreadItem>) -> Turn {
     Turn {
+        inference_attribution: None,
         id: id.to_string(),
         items,
         items_view: TurnItemsView::Full,

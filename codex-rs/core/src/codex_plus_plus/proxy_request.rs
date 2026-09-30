@@ -197,6 +197,12 @@ impl OwnedRequest {
 }
 
 impl ModelClientSession {
+    pub(crate) fn owned_inference_attribution(&self) -> Option<InferenceAttribution> {
+        self.owned_request
+            .as_ref()
+            .map(|request| request.failure_attribution())
+    }
+
     pub(crate) fn attribute_owned_error(&self, error: CodexErr) -> CodexErr {
         match &self.owned_request {
             Some(request) => error.with_inference_attribution(request.failure_attribution()),

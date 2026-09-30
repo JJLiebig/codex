@@ -598,6 +598,7 @@ async fn owned_details_escape_interrupts_work_without_starting_backtrack() -> Re
         ServerNotification::TurnStarted(codex_app_server_protocol::TurnStartedNotification {
             thread_id: thread_id.to_string(),
             turn: codex_app_server_protocol::Turn {
+                inference_attribution: None,
                 id: "active-turn".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),

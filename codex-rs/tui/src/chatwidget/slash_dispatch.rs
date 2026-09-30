@@ -509,7 +509,7 @@ impl ChatWidget {
             SlashCommand::Daemon => self.app_event_tx.send(AppEvent::OpenDaemonMenu),
             SlashCommand::Warnings => self.app_event_tx.send(AppEvent::OpenWarnings),
             SlashCommand::Status => {
-                if self.should_prefetch_rate_limits() {
+                if self.should_prefetch_rate_limits() && !self.has_inference_display() {
                     let request_id = self.next_status_refresh_request_id;
                     self.next_status_refresh_request_id =
                         self.next_status_refresh_request_id.wrapping_add(1);

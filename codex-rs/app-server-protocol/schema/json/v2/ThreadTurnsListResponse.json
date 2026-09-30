@@ -1958,6 +1958,17 @@
           "description": "Identifier for this turn. Codex-generated turn IDs are UUIDv7.",
           "type": "string"
         },
+        "inferenceAttribution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InferenceAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "items": {
           "description": "Thread items currently included in this turn payload.",
           "items": {

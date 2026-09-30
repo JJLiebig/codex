@@ -264,6 +264,7 @@ pub(super) fn sample_turn_start_request(thread_id: &str, request_id: i64) -> Cli
 pub(super) fn sample_turn_start_response(turn_id: &str) -> ClientResponsePayload {
     ClientResponsePayload::TurnStart(codex_app_server_protocol::TurnStartResponse {
         turn: Turn {
+            inference_attribution: None,
             id: turn_id.to_string(),
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![],
@@ -283,6 +284,7 @@ pub(super) fn sample_turn_started_notification(
     ServerNotification::TurnStarted(TurnStartedNotification {
         thread_id: thread_id.to_string(),
         turn: Turn {
+            inference_attribution: None,
             id: turn_id.to_string(),
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![],
@@ -320,6 +322,7 @@ pub(super) fn sample_turn_completed_notification(
     ServerNotification::TurnCompleted(TurnCompletedNotification {
         thread_id: thread_id.to_string(),
         turn: Turn {
+            inference_attribution: None,
             id: turn_id.to_string(),
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![],

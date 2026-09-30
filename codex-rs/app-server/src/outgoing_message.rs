@@ -1005,6 +1005,7 @@ mod tests {
     fn verify_account_rate_limits_notification_serialization() {
         let notification =
             ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {
+                inference: None,
                 rate_limits: RateLimitSnapshot {
                     limit_id: Some("codex".to_string()),
                     limit_name: None,

@@ -52,6 +52,7 @@ async fn inference_failure_survives_live_notification_and_completed_fallback() {
             thread,
             "turn".into(),
             TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn".into(),
                 last_agent_message: None,
                 error: Some(error),

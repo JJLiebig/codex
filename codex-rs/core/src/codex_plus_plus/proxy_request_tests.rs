@@ -130,6 +130,7 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
         /*parent_thread_id*/ None,
         TestCodexResponsesRequestKind::Turn,
     );
+    let (_, turn) = crate::session::tests::make_session_and_context().await;
     let oversized_trace = "x".repeat(129);
     for (model, trace) in [
         ("future-9.7", Some(NATIVE_TRACE)),
@@ -174,6 +175,38 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
         while let Some(event) = stream.next().await {
             event?;
         }
+        turn.begin_inference_request(&session).await;
+        let expected = Some(if model == "claude-new" {
+            InferenceAttribution::Claude
+        } else if trace == Some(NATIVE_TRACE) {
+            InferenceAttribution::ServedNative {
+                source: InferenceNativeSource::Root,
+                account_id: id.to_string(),
+                display_label: None,
+            }
+        } else {
+            InferenceAttribution::Unknown
+        });
+        let stale_rates =
+            serde_json::from_value::<codex_protocol::protocol::RateLimitSnapshot>(json!({}))?;
+        let mut token_event = codex_protocol::protocol::TokenCountEvent {
+            info: None,
+            rate_limits: Some(stale_rates.clone()),
+            inference_attribution: None,
+        };
+        turn.attribute_token_count(&mut token_event).await;
+        assert_eq!(
+            (
+                &token_event.info,
+                &token_event.rate_limits,
+                &token_event.inference_attribution
+            ),
+            (&None, &None, &expected)
+        );
+        assert_eq!(turn.inference_attribution().await, expected);
+        assert!(turn.record_inference_rate_limits(&stale_rates).await);
+        turn.attribute_token_count(&mut token_event).await;
+        assert_eq!(token_event.rate_limits, Some(stale_rates));
         let captured = session.owned_request.as_ref().unwrap();
         assert_eq!(
             captured.response_trace.get(),

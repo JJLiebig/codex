@@ -7046,6 +7046,7 @@ async fn resizing_empty_transcript_schedules_settled_size_recheck() {
 
 fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItem>) -> Turn {
     Turn {
+        inference_attribution: None,
         id: turn_id.to_string(),
         items_view: codex_app_server_protocol::TurnItemsView::Full,
         items,
@@ -7094,6 +7095,7 @@ fn token_usage_notification(
     model_context_window: Option<i64>,
 ) -> ServerNotification {
     ServerNotification::ThreadTokenUsageUpdated(ThreadTokenUsageUpdatedNotification {
+        inference_attribution: None,
         thread_id: thread_id.to_string(),
         turn_id: turn_id.to_string(),
         token_usage: ThreadTokenUsage {
@@ -8252,6 +8254,7 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place() -> Res
                 completed_at_ms: 0,
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: turn_id.to_string(),
                 last_agent_message: None,
                 error: None,
@@ -8637,6 +8640,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
             )),
             turns: vec![
                 Turn {
+                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: vec![ThreadItem::UserMessage {
@@ -8654,6 +8658,7 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     duration_ms: None,
                 },
                 Turn {
+                    inference_attribution: None,
                     id: "turn-2".to_string(),
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
                     items: vec![

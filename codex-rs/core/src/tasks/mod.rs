@@ -880,6 +880,7 @@ impl Session {
             self.emit_turn_stop_lifecycle(turn_context.extension_data.as_ref())
                 .await;
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: turn_context.inference_attribution().await,
                 turn_id: turn_context.sub_id.clone(),
                 last_agent_message,
                 error,

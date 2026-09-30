@@ -2708,6 +2708,7 @@ async fn try_run_sampling_request(
     )
     .await;
     let mut stream = stream?;
+    turn_context.begin_inference_request(client_session).await;
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted);
     }
@@ -3056,7 +3057,7 @@ async fn try_run_sampling_request(
             ResponseEvent::RateLimits(snapshot) => {
                 // Update internal state with latest rate limits, but defer sending until
                 // token usage is available to avoid duplicate TokenCount events.
-                sess.record_rate_limits_info(snapshot).await;
+                sess.record_rate_limits_info(&turn_context, snapshot).await;
                 should_emit_token_count = true;
             }
             ResponseEvent::ModelsEtag(etag) => {

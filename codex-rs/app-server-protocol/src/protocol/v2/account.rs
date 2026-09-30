@@ -655,6 +655,7 @@ pub struct GatewayOAuthCancelResponse {}
 /// or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and
 /// does not clear a previously observed value.
 pub struct AccountRateLimitsUpdatedNotification {
+    pub inference: Option<codex_protocol::inference_attribution::InferenceScope>,
     pub rate_limits: RateLimitSnapshot,
 }
 

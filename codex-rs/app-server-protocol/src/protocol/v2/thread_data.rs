@@ -384,6 +384,8 @@ impl<'de> Deserialize<'de> for Thread {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct Turn {
+    #[serde(default)]
+    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// Identifier for this turn. Codex-generated turn IDs are UUIDv7.
     pub id: String,
     /// Thread items currently included in this turn payload.

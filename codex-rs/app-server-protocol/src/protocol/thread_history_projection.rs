@@ -22,6 +22,7 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
     match &line.item {
         RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
+                inference_attribution: None,
                 turn_id: event.turn_id.clone(),
                 root_turn_id: event.root_turn_id.clone(),
                 status: TurnStatus::InProgress,
@@ -34,6 +35,7 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
         },
         RolloutItem::EventMsg(EventMsg::TurnComplete(event)) => ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
+                inference_attribution: event.inference_attribution.clone(),
                 turn_id: event.turn_id.clone(),
                 root_turn_id: None,
                 status: if event.error.is_some() {
@@ -60,6 +62,7 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             };
             ThreadHistoryChangeSet {
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    inference_attribution: None,
                     turn_id: turn_id.clone(),
                     root_turn_id: None,
                     status: TurnStatus::Interrupted,

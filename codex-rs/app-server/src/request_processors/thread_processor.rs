@@ -5889,6 +5889,7 @@ fn stored_turn_to_api_turn(
         .map(deserialize_stored_thread_item)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Turn {
+        inference_attribution: turn.inference_attribution,
         id: turn.turn_id,
         items,
         items_view,

@@ -226,6 +226,7 @@ async fn backend_banner_limit_error_refreshes_again_after_intervening_rolling_ha
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::AccountRateLimitsUpdated(
                 codex_app_server_protocol::AccountRateLimitsUpdatedNotification {
+                    inference: None,
                     rate_limits: rolling.clone(),
                 },
             ),
@@ -255,6 +256,7 @@ async fn backend_banner_limit_error_refreshes_again_after_intervening_rolling_ha
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::AccountRateLimitsUpdated(
                 codex_app_server_protocol::AccountRateLimitsUpdatedNotification {
+                    inference: None,
                     rate_limits: rolling,
                 },
             ),
@@ -313,6 +315,7 @@ async fn backend_banner_rolling_only_recovery_holds_new_input() -> Result<()> {
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::AccountRateLimitsUpdated(
                 codex_app_server_protocol::AccountRateLimitsUpdatedNotification {
+                    inference: None,
                     rate_limits: rolling,
                 },
             ),

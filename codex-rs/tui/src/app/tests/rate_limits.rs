@@ -62,6 +62,7 @@ async fn deliver_rolling_rate_limit_snapshot(
         app_server,
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {
+                inference: None,
                 rate_limits: snapshot,
             }),
         )),

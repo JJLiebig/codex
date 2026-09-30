@@ -296,6 +296,12 @@ async fn apply_change_set(
 ) -> ThreadStoreResult<()> {
     for turn in changes.changed_turns {
         let turn_id = turn.turn_id;
+        let inference_attribution_json = turn
+            .inference_attribution
+            .as_ref()
+            .map(serde_json::to_string)
+            .transpose()
+            .map_err(thread_history_error)?;
         let error_json = turn
             .error
             .as_ref()
@@ -322,15 +328,17 @@ INSERT INTO thread_turns (
     rollout_end_byte_offset,
     status,
     error_json,
+    inference_attribution_json,
     started_at,
     completed_at,
     duration_ms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(thread_id, turn_id) DO UPDATE SET
     rollout_end_ordinal = excluded.rollout_end_ordinal,
     rollout_end_byte_offset = excluded.rollout_end_byte_offset,
     status = excluded.status,
     error_json = excluded.error_json,
+    inference_attribution_json = excluded.inference_attribution_json,
     started_at = excluded.started_at,
     completed_at = excluded.completed_at,
     duration_ms = excluded.duration_ms
@@ -346,6 +354,7 @@ WHERE thread_turns.rollout_end_ordinal IS NULL
         .bind(terminal_byte_offset)
         .bind(turn_status(&turn.status))
         .bind(error_json)
+        .bind(inference_attribution_json)
         .bind(turn.started_at)
         .bind(turn.completed_at)
         .bind(turn.duration_ms)
