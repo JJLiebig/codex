@@ -377,9 +377,9 @@ async fn run_compact_task_inner_impl(
         get_last_assistant_message_from_turn(compaction_response.output.iter())
             .filter(|summary| !summary.trim().is_empty())
             .ok_or_else(|| {
-                CodexErr::Stream(
+                client_session.attribute_owned_error(CodexErr::Stream(
                     "Post-turn compaction completed without an assistant summary".to_string(),
-                )
+                ))
             })?
     } else {
         get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default()
@@ -815,9 +815,9 @@ async fn drain_to_completed(
     loop {
         let maybe_event = stream.next().await;
         let Some(event) = maybe_event else {
-            return Err(CodexErr::Stream(
+            return Err(client_session.attribute_owned_error(CodexErr::Stream(
                 "stream closed before response.completed".into(),
-            ));
+            )));
         };
         match event {
             Ok(ResponseEvent::OutputItemDone(item)) => {

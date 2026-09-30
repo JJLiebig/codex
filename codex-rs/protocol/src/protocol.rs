@@ -2081,6 +2081,8 @@ pub struct ErrorEvent {
     pub message: String,
     #[serde(default)]
     pub codex_error_info: Option<CodexErrorInfo>,
+    #[serde(default)]
+    pub inference_attribution: Option<crate::inference_attribution::InferenceAttribution>,
     /// Sensitive explanation and steering are delivered live but never enter rollout storage.
     #[serde(skip)]
     #[schemars(skip)]
@@ -2091,9 +2093,11 @@ pub struct ErrorEvent {
 impl ErrorEvent {
     /// Whether this error should mark the current turn as failed when replaying history.
     pub fn affects_turn_status(&self) -> bool {
-        self.codex_error_info
-            .as_ref()
-            .is_none_or(CodexErrorInfo::affects_turn_status)
+        self.inference_attribution.is_some()
+            || self
+                .codex_error_info
+                .as_ref()
+                .is_none_or(CodexErrorInfo::affects_turn_status)
     }
 }
 
@@ -5856,6 +5860,7 @@ mod tests {
     #[test]
     fn rollback_failed_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
+            inference_attribution: None,
             misalignment: None,
             message: "rollback failed".into(),
             codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
@@ -5866,6 +5871,7 @@ mod tests {
     #[test]
     fn active_turn_not_steerable_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
+            inference_attribution: None,
             misalignment: None,
             message: "cannot steer a review turn".into(),
             codex_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
@@ -5878,6 +5884,7 @@ mod tests {
     #[test]
     fn generic_error_affects_turn_status() {
         let event = ErrorEvent {
+            inference_attribution: None,
             misalignment: None,
             message: "generic".into(),
             codex_error_info: Some(CodexErrorInfo::Other),
@@ -5888,6 +5895,7 @@ mod tests {
     #[test]
     fn misalignment_explanation_and_steer_are_never_serialized_into_error_events() {
         let event = ErrorEvent {
+            inference_attribution: None,
             message: "This request violated the misalignment policy.".to_string(),
             codex_error_info: Some(CodexErrorInfo::MisalignmentPolicyViolation),
             misalignment: Some(MisalignmentErrorDetails {
@@ -5904,7 +5912,8 @@ mod tests {
             serialized,
             json!({
                 "message": "This request violated the misalignment policy.",
-                "codex_error_info": "misalignment_policy_violation"
+                "codex_error_info": "misalignment_policy_violation",
+                "inference_attribution": null
             })
         );
         let restored: ErrorEvent =

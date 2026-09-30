@@ -230,6 +230,7 @@ async fn completion_failed_and_interrupted_turns_do_not_report_success() {
             let mut turn = completed_turn(Some(125_000), Some(COMPLETED_AT));
             turn.status = status.clone();
             turn.error = (status == AppServerTurnStatus::Failed).then(|| AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "The task failed.".to_string(),
                 codex_error_info: None,

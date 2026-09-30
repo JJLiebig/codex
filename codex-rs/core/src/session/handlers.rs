@@ -275,6 +275,7 @@ pub async fn set_thread_memory_mode(sess: &Arc<Session>, sub_id: String, mode: T
         let event = Event {
             id: sub_id,
             msg: EventMsg::Error(ErrorEvent {
+                inference_attribution: None,
                 misalignment: None,
                 message: err.to_string(),
                 codex_error_info: Some(CodexErrorInfo::Other),
@@ -358,6 +359,7 @@ pub async fn shutdown(sess: &Arc<Session>, sub_id: String) -> bool {
         let event = Event {
             id: sub_id.clone(),
             msg: EventMsg::Error(ErrorEvent {
+                inference_attribution: None,
                 misalignment: None,
                 message: "Failed to shutdown thread persistence".to_string(),
                 codex_error_info: Some(CodexErrorInfo::Other),
@@ -407,6 +409,7 @@ pub async fn review(
             let event = Event {
                 id: sub_id,
                 msg: EventMsg::Error(ErrorEvent {
+                    inference_attribution: None,
                     misalignment: None,
                     message: err.to_string(),
                     codex_error_info: Some(CodexErrorInfo::Other),
@@ -455,6 +458,7 @@ pub(super) async fn submission_loop(
                         sess.send_event_raw(Event {
                             id: sub.id.clone(),
                             msg: EventMsg::Error(ErrorEvent {
+                                inference_attribution: None,
                                 misalignment: None,
                                 message: err.to_string(),
                                 codex_error_info: Some(CodexErrorInfo::Other),
@@ -542,6 +546,7 @@ pub(super) async fn submission_loop(
                                 sess.send_event_raw(Event {
                                     id: sub.id.clone(),
                                     msg: EventMsg::Error(ErrorEvent {
+                                        inference_attribution: None,
                                         misalignment: None,
                                         message,
                                         codex_error_info: Some(CodexErrorInfo::BadRequest),

@@ -32,6 +32,9 @@ use tokio::task::JoinError;
 
 pub type Result<T> = std::result::Result<T, CodexErr>;
 
+#[path = "codex_plus_plus/attributed_error.rs"]
+mod attributed_error;
+
 /// Limit UI error messages to a reasonable size while keeping useful context.
 const ERROR_MESSAGE_UI_MAX_BYTES: usize = 2 * 1024;
 
@@ -73,6 +76,7 @@ pub enum SandboxErr {
 pub struct CodexErr {
     details: CodexErrorDetails,
     retry_after: Option<RetryAfter>,
+    inference_attribution: Option<Box<crate::inference_attribution::InferenceAttribution>>,
 }
 
 /// The semantic category and diagnostic payload for a [`CodexErr`].
@@ -234,6 +238,7 @@ impl From<CodexErrorDetails> for CodexErr {
         Self {
             details,
             retry_after: None,
+            inference_attribution: None,
         }
     }
 }
@@ -298,6 +303,7 @@ macro_rules! codex_err_unit_constructors {
             pub const $variant: Self = Self {
                 details: CodexErrorDetails::$variant,
                 retry_after: None,
+                inference_attribution: None,
             };
         )*
     };
@@ -505,6 +511,7 @@ impl CodexErr {
         ErrorEvent {
             message,
             codex_error_info: Some(self.to_codex_protocol_error()),
+            inference_attribution: self.inference_attribution.as_deref().cloned(),
             misalignment: match &self.details {
                 CodexErrorDetails::MisalignmentPolicyViolation { misalignment, .. } => {
                     misalignment.clone()

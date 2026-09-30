@@ -2118,6 +2118,25 @@ class InAppBrowserRequirements(BaseModel):
     ] = None
 
 
+class ClaudeInferenceAttribution(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["claude"], Field(title="ClaudeInferenceAttributionType")]
+
+
+class UnknownInferenceAttribution(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["unknown"], Field(title="UnknownInferenceAttributionType")]
+
+
+class InferenceNativeSource(Enum):
+    root = "root"
+    imported = "imported"
+
+
 class InitializeCapabilities(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8466,6 +8485,50 @@ class HooksListResponse(BaseModel):
     data: list[HooksListEntry]
 
 
+class ServedNativeInferenceAttribution(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    display_label: Annotated[str | None, Field(alias="displayLabel")] = None
+    source: InferenceNativeSource
+    type: Annotated[Literal["servedNative"], Field(title="ServedNativeInferenceAttributionType")]
+
+
+class IntendedNativeInferenceAttribution(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    display_label: Annotated[str | None, Field(alias="displayLabel")] = None
+    source: InferenceNativeSource
+    type: Annotated[
+        Literal["intendedNative"], Field(title="IntendedNativeInferenceAttributionType")
+    ]
+
+
+class InferenceAttribution(
+    RootModel[
+        ServedNativeInferenceAttribution
+        | IntendedNativeInferenceAttribution
+        | ClaudeInferenceAttribution
+        | UnknownInferenceAttribution
+    ]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        ServedNativeInferenceAttribution
+        | IntendedNativeInferenceAttribution
+        | ClaudeInferenceAttribution
+        | UnknownInferenceAttribution,
+        Field(
+            description="Discovery or the current native login cannot establish which account served a request."
+        ),
+    ]
+
+
 class ListMcpServerStatusParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10315,6 +10378,9 @@ class TurnError(BaseModel):
     )
     additional_details: Annotated[str | None, Field(alias="additionalDetails")] = None
     codex_error_info: Annotated[CodexErrorInfo | None, Field(alias="codexErrorInfo")] = None
+    inference_attribution: Annotated[
+        InferenceAttribution | None, Field(alias="inferenceAttribution")
+    ] = None
     message: str
     misalignment: Annotated[
         MisalignmentErrorDetails | None,

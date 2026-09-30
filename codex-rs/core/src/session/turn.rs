@@ -849,6 +849,7 @@ pub(crate) async fn run_turn(
                 sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
                     .await;
                 let event = EventMsg::Error(ErrorEvent {
+                    inference_attribution: codex_error.inference_attribution().cloned(),
                     misalignment: None,
                     message: "Invalid image in your last message. Please remove it and try again."
                         .to_string(),
@@ -1821,6 +1822,7 @@ async fn run_sampling_request(
                             &turn_context,
                             e,
                         )
+                        .map(|replacement| replacement.with_inference_attribution_from(&err))
                         .unwrap_or(err),
                     );
                 }
@@ -2789,9 +2791,9 @@ async fn try_run_sampling_request(
             Some(Ok(event)) => event,
             Some(Err(err)) => break Err(err),
             None => {
-                break Err(CodexErr::Stream(
+                break Err(client_session.attribute_owned_error(CodexErr::Stream(
                     "stream closed before response.completed".into(),
-                ));
+                )));
             }
         };
 

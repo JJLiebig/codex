@@ -39,6 +39,7 @@ fn failed_turn_does_not_overwrite_output_last_message_file() {
                 items: Vec::new(),
                 status: TurnStatus::Failed,
                 error: Some(codex_app_server_protocol::TurnError {
+                    inference_attribution: None,
                     misalignment: None,
                     message: "turn failed".to_string(),
                     additional_details: None,

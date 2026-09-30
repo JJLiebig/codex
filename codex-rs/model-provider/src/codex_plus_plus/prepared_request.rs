@@ -30,12 +30,25 @@ mod tests;
 #[derive(Debug)]
 pub struct ProxyRequestRoute {
     pub auth_revision: u64,
+    pub native_display_label: Option<String>,
     pub(super) native_expectation: Option<codex_login::auth::NativeCredentialExpectation>,
     inventory: Arc<[CredentialModels]>,
     native_credential: Option<usize>,
 }
 
 impl ProxyRequestRoute {
+    /// Identify only the provider advertised for this exact frozen wire model, not its account.
+    pub fn is_claude_model(&self, wire_model: &str) -> bool {
+        self.inventory.iter().any(|credential| {
+            !credential.disabled
+                && credential.source.is_none()
+                && credential.provider.as_deref() == Some("claude")
+                && credential.models.iter().any(|member| {
+                    member.id == wire_model && member.provider.as_deref() == Some("claude")
+                })
+        })
+    }
+
     pub fn is_suspended_auth_error(error: &codex_api::TransportError) -> bool {
         let codex_api::TransportError::Http {
             status,
@@ -205,6 +218,7 @@ pub(super) fn resolve_route(
         wire_model.ok_or_else(unavailable)?,
         ProxyRequestRoute {
             auth_revision,
+            native_display_label: None,
             native_expectation: None,
             inventory: inventory.into(),
             native_credential,

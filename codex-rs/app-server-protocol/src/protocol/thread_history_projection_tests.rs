@@ -74,6 +74,9 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
 #[test]
 fn projects_failed_turn_completion_as_snapshot() {
     let error = ErrorEvent {
+        inference_attribution: Some(
+            codex_protocol::inference_attribution::InferenceAttribution::Claude,
+        ),
         misalignment: None,
         message: "request failed".to_string(),
         codex_error_info: None,
@@ -99,6 +102,9 @@ fn projects_failed_turn_completion_as_snapshot() {
                 root_turn_id: None,
                 status: TurnStatus::Failed,
                 error: Some(TurnError {
+                    inference_attribution: Some(
+                        codex_protocol::inference_attribution::InferenceAttribution::Claude
+                    ),
                     misalignment: None,
                     message: "request failed".to_string(),
                     codex_error_info: None,

@@ -220,6 +220,7 @@ impl ChatWidget {
                         self.handle_non_retry_error(
                             notification.error.message,
                             notification.error.codex_error_info,
+                            notification.error.inference_attribution,
                         );
                     }
                 }
@@ -510,7 +511,11 @@ impl ChatWidget {
                     {
                         self.last_non_retry_error = None;
                     } else {
-                        self.handle_non_retry_error(error.message, error.codex_error_info);
+                        self.handle_non_retry_error(
+                            error.message,
+                            error.codex_error_info,
+                            error.inference_attribution,
+                        );
                     }
                 } else {
                     self.last_non_retry_error = None;

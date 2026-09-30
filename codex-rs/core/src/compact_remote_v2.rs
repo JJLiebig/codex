@@ -442,7 +442,8 @@ async fn run_remote_compaction_request_v2(
         let result = match stream {
             Ok(stream) => collect_compaction_output(sess, turn_context, stream).await,
             Err(err) => Err(err),
-        };
+        }
+        .map_err(|error| client_session.attribute_owned_error(error));
 
         match result {
             Ok(compaction_output) => return Ok(compaction_output),

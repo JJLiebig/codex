@@ -426,6 +426,8 @@ pub struct TurnError {
     pub message: String,
     pub codex_error_info: Option<CodexErrorInfo>,
     #[serde(default)]
+    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
+    #[serde(default)]
     pub additional_details: Option<String>,
     /// Optional public explanation and continuation instruction for a misalignment block.
     #[serde(default)]

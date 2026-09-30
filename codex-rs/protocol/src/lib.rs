@@ -26,6 +26,8 @@ pub mod dynamic_tools;
 mod environment;
 pub mod error;
 pub mod exec_output;
+#[path = "codex_plus_plus/inference_attribution.rs"]
+pub mod inference_attribution;
 pub mod items;
 mod legacy_events;
 pub mod local_media;

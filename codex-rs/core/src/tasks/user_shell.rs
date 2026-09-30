@@ -384,6 +384,7 @@ async fn send_user_shell_error(session: &Session, turn_context: &TurnContext, me
         .send_event(
             turn_context,
             EventMsg::Error(ErrorEvent {
+                inference_attribution: None,
                 misalignment: None,
                 message: message.to_string(),
                 codex_error_info: None,

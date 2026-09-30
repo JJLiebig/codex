@@ -2,6 +2,8 @@
 use super::*;
 use codex_login::NativeCredentialSource;
 use codex_model_provider::ProxyRequestRoute;
+use codex_protocol::inference_attribution::InferenceAttribution;
+use codex_protocol::inference_attribution::InferenceNativeSource;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum NativeQuotaAttribution {
@@ -33,6 +35,49 @@ pub(super) fn observe_stream(
 }
 
 impl OwnedRequest {
+    fn failure_attribution(&self) -> InferenceAttribution {
+        let served = self.served_native_source.get().and_then(Option::as_ref);
+        let intended = (self.quota_attribution.get() == Some(&NativeQuotaAttribution::Intended))
+            .then(|| {
+                self.route
+                    .as_ref()
+                    .and_then(ProxyRequestRoute::native_source)
+            })
+            .flatten();
+        if let Some(native) = served.or(intended) {
+            let (source, id) = match native {
+                NativeCredentialSource::Root(id) => (InferenceNativeSource::Root, id),
+                NativeCredentialSource::Imported(id) => (InferenceNativeSource::Imported, id),
+            };
+            let account_id = id.to_string();
+            let display_label = self
+                .route
+                .as_ref()
+                .and_then(|route| route.native_display_label.clone());
+            if served.is_some() {
+                InferenceAttribution::ServedNative {
+                    source,
+                    account_id,
+                    display_label,
+                }
+            } else {
+                InferenceAttribution::IntendedNative {
+                    source,
+                    account_id,
+                    display_label,
+                }
+            }
+        } else if self
+            .route
+            .as_ref()
+            .is_some_and(|route| route.is_claude_model(&self.wire_model))
+        {
+            InferenceAttribution::Claude
+        } else {
+            InferenceAttribution::Unknown
+        }
+    }
+
     pub(super) fn set_trace(&self, trace: Option<&str>) {
         let trace = trace.filter(|trace| trace.len() <= 128);
         let source =
@@ -136,20 +181,29 @@ impl OwnedRequest {
         } else {
             mapped
         };
-        if self.accepted_output.load(Ordering::Relaxed) {
+        let mapped = if self.accepted_output.load(Ordering::Relaxed) {
             let reason = match mapped.details() {
                 CodexErrorDetails::UnsupportedOperation(reason) => reason.clone(),
                 _ => mapped.to_string(),
             };
-            return CodexErr::UnsupportedOperation(format!(
+            CodexErr::UnsupportedOperation(format!(
                 "Model response interrupted after output: {reason}"
-            ));
-        }
-        mapped
+            ))
+        } else {
+            mapped
+        };
+        mapped.with_inference_attribution(self.failure_attribution())
     }
 }
 
 impl ModelClientSession {
+    pub(crate) fn attribute_owned_error(&self, error: CodexErr) -> CodexErr {
+        match &self.owned_request {
+            Some(request) => error.with_inference_attribution(request.failure_attribution()),
+            None => error,
+        }
+    }
+
     pub(super) async fn recover_owned_auth(
         &self,
         error: &ApiError,
@@ -188,7 +242,9 @@ impl ModelClientSession {
         recovery
             .next_for_native_request(expected)
             .await
-            .map_err(|error| CodexErr::UnsupportedOperation(error.to_string()))?;
+            .map_err(|error| {
+                self.attribute_owned_error(CodexErr::UnsupportedOperation(error.to_string()))
+            })?;
         Ok(true)
     }
 

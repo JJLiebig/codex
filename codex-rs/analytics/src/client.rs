@@ -795,6 +795,7 @@ fn session_event_to_analytics_notification(
         }
         EventMsg::TurnComplete(completed) => {
             let error = completed.error.as_ref().map(|error| TurnError {
+                inference_attribution: None,
                 message: String::new(),
                 codex_error_info: error.codex_error_info.clone().map(Into::into),
                 additional_details: None,

@@ -712,6 +712,7 @@ async fn admission_revalidates_constraints_before_committing(kind: TurnStartKind
     assert_eq!(
         errors,
         vec![ErrorEvent {
+            inference_attribution: None,
             misalignment: None,
             message: expected_message,
             codex_error_info: Some(CodexErrorInfo::BadRequest),
