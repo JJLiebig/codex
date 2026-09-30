@@ -752,3 +752,6 @@ async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejec
         BTreeMap::from([("claude.json".into(), claude)])
     );
 }
+
+#[path = "cli_proxy_reset_tests.rs"]
+mod reset_tests;

@@ -505,6 +505,12 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
                 server.uri()
             ),
         )?;
+        Mock::given(method("GET"))
+            .and(path("/api/codex/usage"))
+            .respond_with(ResponseTemplate::new(503))
+            .expect(4)
+            .mount(&server)
+            .await;
         let failed = std::sync::atomic::AtomicBool::new(false);
         Mock::given(method("POST"))
             .and(path("/api/codex/rate-limit-reset-credits/consume"))
@@ -551,6 +557,7 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
                     completed_at: completion.completed_at,
                     manual: true,
                     source: Some(source),
+                    reconciliation: codex_login::ResetReconciliation::Pending,
                 }),
             }
         );
@@ -632,6 +639,7 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
                     completed_at: completion.completed_at,
                     manual: true,
                     source: Some(source),
+                    reconciliation: codex_login::ResetReconciliation::Pending,
                 }),
             }
         );
