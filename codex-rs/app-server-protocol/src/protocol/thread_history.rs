@@ -4872,9 +4872,7 @@ mod tests {
                 ),
                 misalignment: None,
                 message: "stream failure".into(),
-                codex_error_info: Some(CodexErrorInfo::ResponseStreamDisconnected {
-                    http_status_code: Some(502),
-                }),
+                codex_error_info: Some(CodexErrorInfo::BadRequest),
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
                 turn_id: "turn-a".into(),
@@ -4903,11 +4901,7 @@ mod tests {
                 ),
                 misalignment: None,
                 message: "stream failure".into(),
-                codex_error_info: Some(
-                    crate::protocol::v2::CodexErrorInfo::ResponseStreamDisconnected {
-                        http_status_code: Some(502),
-                    }
-                ),
+                codex_error_info: Some(crate::protocol::v2::CodexErrorInfo::BadRequest),
                 additional_details: None,
             })
         );

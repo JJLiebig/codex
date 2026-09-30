@@ -34,9 +34,10 @@ async fn inference_failure_survives_live_notification_and_completed_fallback() {
         let error = ErrorEvent {
             message: "Provider quota reached".into(),
             inference_attribution: Some(InferenceAttribution::Claude),
-            codex_error_info: Some(codex_protocol::protocol::CodexErrorInfo::UsageLimitExceeded),
+            codex_error_info: Some(codex_protocol::protocol::CodexErrorInfo::BadRequest),
             misalignment: None,
         };
+        assert!(error.affects_turn_status());
         if live {
             handle_error_notification(
                 thread,
@@ -84,9 +85,7 @@ async fn inference_failure_survives_live_notification_and_completed_fallback() {
                 TurnError {
                     message: "Provider quota reached".into(),
                     inference_attribution: Some(InferenceAttribution::Claude),
-                    codex_error_info: Some(
-                        codex_app_server_protocol::CodexErrorInfo::UsageLimitExceeded
-                    ),
+                    codex_error_info: Some(codex_app_server_protocol::CodexErrorInfo::BadRequest),
                     additional_details: None,
                     misalignment: None,
                 }

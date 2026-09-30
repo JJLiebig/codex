@@ -19,23 +19,32 @@ const QUOTA: &str = "data: {\"type\":\"response.failed\",\"response\":{\"error\"
 const PARTIAL: &str = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"accepted\"}\n\n";
 
 #[tokio::test]
-async fn owned_compaction_eof_preserves_source_in_terminal_event() -> anyhow::Result<()> {
-    for remote in [false, true] {
+async fn owned_compaction_failures_preserve_source_in_terminal_event() -> anyhow::Result<()> {
+    for (remote, model, body, trace) in [
+        (false, "future-9.7", PARTIAL, NATIVE_TRACE),
+        (true, "future-9.7", PARTIAL, NATIVE_TRACE),
+        (false, "claude-new", QUOTA, CLAUDE_TRACE),
+        (true, "claude-new", QUOTA, CLAUDE_TRACE),
+    ] {
         let fixture = OwnedFixture::new().await?;
         let source = fixture.manager.export_native_credentials().await?;
         let Some(NativeCredentialSource::Root(id)) = source.selected_source() else {
             panic!("synthetic root account");
         };
-        let expected = Some(InferenceAttribution::ServedNative {
-            source: InferenceNativeSource::Root,
-            account_id: id.to_string(),
+        let expected = Some(if model == "claude-new" {
+            InferenceAttribution::Claude
+        } else {
+            InferenceAttribution::ServedNative {
+                source: InferenceNativeSource::Root,
+                account_id: id.to_string(),
+            }
         });
         Mock::given(method("POST"))
             .and(path("/v1/responses"))
             .respond_with(
                 ResponseTemplate::new(200)
-                    .insert_header("x-cpa-trace-id", NATIVE_TRACE)
-                    .set_body_string(PARTIAL),
+                    .insert_header("x-cpa-trace-id", trace)
+                    .set_body_string(body),
             )
             .expect(1)
             .mount(&fixture.server)
@@ -44,7 +53,7 @@ async fn owned_compaction_eof_preserves_source_in_terminal_event() -> anyhow::Re
             crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
                 CodexAuth::from_api_key("synthetic"),
                 Vec::new(),
-                |config| config.model = Some("future-9.7".into()),
+                |config| config.model = Some(model.into()),
             )
             .await;
         let provider = create_model_provider(
@@ -73,6 +82,7 @@ async fn owned_compaction_eof_preserves_source_in_terminal_event() -> anyhow::Re
             .clone()
             .expect("terminal failure");
         assert_eq!(terminal.inference_attribution, expected);
+        assert!(terminal.affects_turn_status());
         let emitted = std::iter::from_fn(|| events.try_recv().ok())
             .find_map(|event| {
                 if let codex_protocol::protocol::EventMsg::Error(error) = event.msg {

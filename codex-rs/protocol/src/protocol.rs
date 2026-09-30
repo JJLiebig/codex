@@ -2093,9 +2093,11 @@ pub struct ErrorEvent {
 impl ErrorEvent {
     /// Whether this error should mark the current turn as failed when replaying history.
     pub fn affects_turn_status(&self) -> bool {
-        self.codex_error_info
-            .as_ref()
-            .is_none_or(CodexErrorInfo::affects_turn_status)
+        self.inference_attribution.is_some()
+            || self
+                .codex_error_info
+                .as_ref()
+                .is_none_or(CodexErrorInfo::affects_turn_status)
     }
 }
 
@@ -5910,7 +5912,8 @@ mod tests {
             serialized,
             json!({
                 "message": "This request violated the misalignment policy.",
-                "codex_error_info": "misalignment_policy_violation"
+                "codex_error_info": "misalignment_policy_violation",
+                "inference_attribution": null
             })
         );
         let restored: ErrorEvent =
