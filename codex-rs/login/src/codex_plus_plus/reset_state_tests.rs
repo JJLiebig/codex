@@ -234,11 +234,19 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
     );
     assert!(
         !lease
-            .confirm_redeemed("manual", 100, /*source*/ None)
+            .confirm_redeemed("manual", /*completed_at*/ 100, /*source*/ None)
             .unwrap()
     );
-    assert!(!lease.confirm_manual("different", 100).unwrap());
-    assert!(lease.confirm_manual("manual", 100).unwrap());
+    assert!(
+        !lease
+            .confirm_manual("different", /*completed_at*/ 100)
+            .unwrap()
+    );
+    assert!(
+        lease
+            .confirm_manual("manual", /*completed_at*/ 100)
+            .unwrap()
+    );
     let completed = ResetState {
         phase: None,
         completion: Some(ResetCompletion {
@@ -257,7 +265,11 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
             .unwrap(),
         ManualResetAttempt::Completed
     );
-    assert!(!lease.confirm_manual("manual", 200).unwrap());
+    assert!(
+        !lease
+            .confirm_manual("manual", /*completed_at*/ 200)
+            .unwrap()
+    );
     assert!(
         lease
             .begin_manual(
