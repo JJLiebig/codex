@@ -1828,6 +1828,9 @@ async fn run_sampling_request(
             },
         };
 
+        if client_session.owned_retry_forbidden(&err) {
+            return Err(err);
+        }
         let original_input = original_input.get_or_insert(prompt.input);
 
         let retry = crate::codex_plus_plus::model_capacity_retry::handle_sampling_error(

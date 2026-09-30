@@ -334,6 +334,9 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) => {
+                if client_session.owned_retry_forbidden(&e) {
+                    return Err(e);
+                }
                 if retries < max_retries {
                     retries += 1;
                     let delay = backoff(retries);
