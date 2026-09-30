@@ -109,6 +109,68 @@ pub(super) async fn process_account(
     }
 }
 
+// Reconcile confirmed completions even when new automatic redemptions are disabled.
+pub(super) async fn reconcile_pending(config: &Config, store: &AccountStore) -> Result<()> {
+    if !config.model_provider.is_cli_proxy() {
+        return Ok(());
+    }
+    for (account_id, completion) in store.pending_proxy_resets()? {
+        let result = tokio::time::timeout(std::time::Duration::from_secs(/*secs*/ 20), async {
+            let manager = codex_login::AuthManager::shared_from_auth_config(
+                config.auth_config(),
+                /*enable_codex_api_key_env*/ false,
+            )
+            .await?;
+            let client = {
+                let snapshot = manager.export_native_credentials().await?;
+                let source = match completion.source {
+                    Some(ResetCredentialSource::Root) => {
+                        codex_login::NativeCredentialSource::Root(account_id.clone())
+                    }
+                    Some(ResetCredentialSource::Imported) => {
+                        codex_login::NativeCredentialSource::Imported(account_id.clone())
+                    }
+                    None => return Ok(()),
+                };
+                let Some(credential) = snapshot
+                    .credentials()
+                    .iter()
+                    .find(|credential| credential.source == source)
+                else {
+                    return Ok(());
+                };
+                let auth = CodexAuth::from_external_chatgpt_tokens(
+                    &credential.access_token,
+                    &credential.upstream_account_id,
+                    credential.plan_type.as_deref(),
+                )?;
+                BackendClient::from_auth(
+                    &config.chatgpt_base_url,
+                    &auth,
+                    config.http_client_factory(),
+                )
+            }; // Release native topology/auth guards before acquiring the runtime lock.
+            let usage = client.get_rate_limits_with_reset_credits().await?;
+            codex_model_provider::reconcile_cli_proxy_reset(
+                &config.codex_home,
+                config.http_client_factory(),
+                &account_id,
+                &completion,
+                usage.account_id.as_deref(),
+                &usage.rate_limits,
+                usage.ordinary_usage_allowed,
+            )
+            .await?;
+            anyhow::Ok(())
+        })
+        .await;
+        if !matches!(result, Ok(Ok(()))) {
+            tracing::warn!(%account_id, "proxy reset reconciliation remains pending");
+        }
+    }
+    Ok(())
+}
+
 pub(super) async fn activate_weekly(
     config: &Config,
     store: &AccountStore,
@@ -404,7 +466,10 @@ impl CompletionNotices {
             }
             // Reconcile readiness on existing scheduler scans, even after a notice was shown.
             // Redemption can succeed while quota recovery is still pending.
-            if state.phase.is_none() && completion.completed_at >= self.started_at {
+            if state.phase.is_none()
+                && !completion.needs_proxy_reconciliation()
+                && completion.completed_at >= self.started_at
+            {
                 tx.send(AppEvent::UsageResetCompleted {
                     account_id: profile.id.clone(),
                     completed_at: completion.completed_at,

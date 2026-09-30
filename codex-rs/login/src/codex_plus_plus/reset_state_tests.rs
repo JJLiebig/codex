@@ -89,6 +89,7 @@ fn confirmed_redemption_recovers_weekly_activation_and_completion() {
             completed_at: 100,
             manual: false,
             source: None,
+            reconciliation: ResetReconciliation::Pending,
         }),
     };
     assert_eq!(lease.state().unwrap(), expected);
@@ -254,6 +255,7 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
             completed_at: 100,
             manual: true,
             source: Some(ResetCredentialSource::Root),
+            reconciliation: ResetReconciliation::Pending,
         }),
     };
     assert_eq!(lease.state().unwrap(), completed);
@@ -303,4 +305,79 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
     assert!(!lease.clear_redeeming("manual").unwrap());
     assert!(lease.clear_redeeming("new").unwrap());
     assert_eq!(lease.state().unwrap(), completed);
+}
+
+#[test]
+fn proxy_receipt_survives_reopen_and_cannot_replay_or_acknowledge_a_successor() {
+    let (_home, store, account_id) = test_store();
+    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
+    lease
+        .begin_manual(
+            "reset-a",
+            ResetCredentialSource::Root,
+            /*credit_id*/ None,
+        )
+        .unwrap();
+    lease.confirm_manual("reset-a", /*completed_at*/ 1).unwrap();
+    let pending = lease.state().unwrap().completion.unwrap();
+    drop(lease);
+    assert_eq!(
+        store.pending_proxy_resets().unwrap(),
+        vec![(account_id.clone(), pending.clone())]
+    );
+    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
+    assert!(
+        !lease
+            .reconcile_proxy(&pending, ResetReconciliation::Acknowledged)
+            .unwrap()
+    );
+    assert!(
+        lease
+            .reconcile_proxy(&pending, ResetReconciliation::DispatchedUnknown)
+            .unwrap()
+    );
+    drop(lease);
+    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
+    let unknown = lease.state().unwrap().completion.unwrap();
+    assert_eq!(
+        unknown.reconciliation,
+        ResetReconciliation::DispatchedUnknown
+    );
+    assert!(
+        !lease
+            .reconcile_proxy(&unknown, ResetReconciliation::Pending)
+            .unwrap()
+    );
+    assert!(
+        !lease
+            .reconcile_proxy(&pending, ResetReconciliation::DispatchedUnknown)
+            .unwrap()
+    );
+    lease
+        .begin_manual(
+            "reset-b",
+            ResetCredentialSource::Imported,
+            /*credit_id*/ None,
+        )
+        .unwrap();
+    // The prior completion cannot dispatch or acknowledge while another native reset is pending.
+    assert!(
+        !lease
+            .reconcile_proxy(&unknown, ResetReconciliation::ObservedClear)
+            .unwrap()
+    );
+    lease.confirm_manual("reset-b", /*completed_at*/ 2).unwrap();
+    let newer = lease.state().unwrap().completion.unwrap();
+    assert!(
+        !lease
+            .reconcile_proxy(&unknown, ResetReconciliation::Acknowledged)
+            .unwrap()
+    );
+    assert!(
+        lease
+            .reconcile_proxy(&newer, ResetReconciliation::ObservedClear)
+            .unwrap()
+    );
+    drop(lease);
+    assert_eq!(store.pending_proxy_resets().unwrap(), vec![]);
 }

@@ -30,6 +30,7 @@ pub use account::reset_state::ResetAttemptPhase;
 pub use account::reset_state::ResetCompletion;
 pub use account::reset_state::ResetCredentialSource;
 pub use account::reset_state::ResetMutationLease;
+pub use account::reset_state::ResetReconciliation;
 pub use account::reset_state::ResetState;
 pub use account::weekly_window_state::WeeklyWindowAttempt;
 pub use account::weekly_window_state::WeeklyWindowAttemptDecision;
