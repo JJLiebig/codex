@@ -334,6 +334,22 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) => {
+                if let CodexErrorDetails::UsageLimitReached(usage) = e.details()
+                    && client_session.owned_quota_attribution().is_some()
+                {
+                    let outcome = crate::codex_plus_plus::account_failover::switch_and_report(
+                        &mut client_session,
+                        usage_limit_account_attempts,
+                        &sess,
+                        turn_context.as_ref(),
+                        usage,
+                    )
+                    .await?;
+                    if matches!(outcome, crate::codex_plus_plus::account_failover::UsageLimitFailoverOutcome::Retried) {
+                        continue;
+                    }
+                    return Err(e);
+                }
                 if client_session.owned_retry_forbidden(&e) {
                     return Err(e);
                 }

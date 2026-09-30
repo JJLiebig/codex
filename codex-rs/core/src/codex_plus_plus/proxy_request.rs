@@ -1,10 +1,18 @@
-//! Captured owned HTTP routing with terminal recovery until source-bound failover is enabled.
+//! Captured owned HTTP routing and source-bound, pre-output native quota failover.
 use super::*;
 use codex_login::NativeCredentialSource;
 use codex_model_provider::ProxyRequestRoute;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) enum NativeQuotaAttribution {
+    Served,
+    Intended,
+}
+
 pub(super) struct OwnedRequest {
     route: Option<ProxyRequestRoute>,
+    wire_model: String,
+    pub(super) quota_attribution: OnceLock<NativeQuotaAttribution>,
     pub(super) response_trace: OnceLock<Option<String>>,
     pub(super) served_native_source: OnceLock<Option<NativeCredentialSource>>,
     accepted_output: AtomicBool,
@@ -63,8 +71,12 @@ impl OwnedRequest {
     }
 
     pub(super) fn map_error(&self, provider: &SharedModelProvider, error: ApiError) -> CodexErr {
+        let mut cooldown = None;
         let status = if let ApiError::Transport(TransportError::Http {
-            status, headers, ..
+            status,
+            headers,
+            body,
+            ..
         }) = &error
         {
             self.set_trace(
@@ -73,22 +85,64 @@ impl OwnedRequest {
                     .and_then(|headers| headers.get("x-cpa-trace-id"))
                     .and_then(|trace| trace.to_str().ok()),
             );
+            if *status == StatusCode::TOO_MANY_REQUESTS
+                && !headers
+                    .as_ref()
+                    .is_some_and(|headers| headers.contains_key("x-cpa-trace-id"))
+                && let Some(body) = body
+                && let Ok(value) = serde_json::from_str::<serde_json::Value>(body)
+                && let Some(error) = value.get("error")
+                && error.get("code").and_then(serde_json::Value::as_str) == Some("model_cooldown")
+                && error.get("model").and_then(serde_json::Value::as_str)
+                    == Some(self.wire_model.as_str())
+            {
+                // The proxy made no upstream attempt. Never infer identity from nested errors.
+                cooldown = Some(codex_api::map_api_error(ApiError::UsageLimitReached {
+                    plan_type: None,
+                    resets_at: error
+                        .get("reset_seconds")
+                        .and_then(serde_json::Value::as_i64)
+                        .filter(|seconds| *seconds >= 0)
+                        .and_then(|seconds| chrono::Utc::now().timestamp().checked_add(seconds)),
+                    limit_window_minutes: None,
+                }));
+            }
             Some(*status)
         } else {
             None
         };
-        let mapped = provider.map_api_error(error);
+        let intended = cooldown.is_some();
+        let mapped = cooldown.unwrap_or_else(|| provider.map_api_error(error));
+        if matches!(mapped.details(), CodexErrorDetails::UsageLimitReached(_))
+            && self
+                .route
+                .as_ref()
+                .and_then(ProxyRequestRoute::native_expectation)
+                .is_some()
+        {
+            let attribution = if intended {
+                Some(NativeQuotaAttribution::Intended)
+            } else {
+                self.served_native_source
+                    .get()
+                    .and_then(Option::as_ref)
+                    .map(|_| NativeQuotaAttribution::Served)
+            };
+            if let Some(attribution) = attribution {
+                let _ = self.quota_attribution.set(attribution);
+            }
+        }
         let mapped = if status == Some(StatusCode::UNAUTHORIZED) {
             CodexErr::UnsupportedOperation("The model provider rejected authentication.".into())
-        } else if status == Some(StatusCode::TOO_MANY_REQUESTS)
-            || matches!(
-                mapped.details(),
-                CodexErrorDetails::UsageLimitReached(_)
-                    | CodexErrorDetails::QuotaExceeded
-                    | CodexErrorDetails::UsageNotIncluded
-            )
+        } else if self.quota_attribution.get().is_none()
+            && (status == Some(StatusCode::TOO_MANY_REQUESTS)
+                || matches!(
+                    mapped.details(),
+                    CodexErrorDetails::UsageLimitReached(_)
+                        | CodexErrorDetails::QuotaExceeded
+                        | CodexErrorDetails::UsageNotIncluded
+                ))
         {
-            // Native recovery requires a guarded source expectation; never use the current login.
             CodexErr::UnsupportedOperation("The model provider reached its usage limit.".into())
         } else {
             mapped
@@ -122,6 +176,8 @@ impl ModelClientSession {
             let revision = prepared.route.as_ref().map(|route| route.auth_revision);
             self.owned_request = Some(Arc::new(OwnedRequest {
                 route: prepared.route,
+                wire_model: prepared.model.clone(),
+                quota_attribution: OnceLock::new(),
                 response_trace: OnceLock::new(),
                 served_native_source: OnceLock::new(),
                 accepted_output: AtomicBool::new(false),
@@ -150,6 +206,76 @@ impl ModelClientSession {
             setup.redirect_policy,
         )?;
         Ok((setup, transport, model.to_owned()))
+    }
+
+    pub(crate) fn owned_quota_attribution(&self) -> Option<NativeQuotaAttribution> {
+        self.owned_request
+            .as_ref()?
+            .quota_attribution
+            .get()
+            .copied()
+    }
+
+    pub(crate) async fn switch_owned_quota(
+        &mut self,
+        attempted: &mut HashSet<String>,
+        usage: &codex_protocol::error::UsageLimitReachedError,
+    ) -> Result<Option<ImportedAccountSwitchOutcome>> {
+        let Some(request) = self.owned_request.as_ref() else {
+            return Ok(None);
+        };
+        let changed = || {
+            CodexErr::UnsupportedOperation(
+                "The account changed while the request was running. Try again.".into(),
+            )
+        };
+        if request.accepted_output.load(Ordering::Relaxed)
+            || request.quota_attribution.get().is_none()
+        {
+            return Err(CodexErr::UnsupportedOperation(
+                "The model provider reached its usage limit.".into(),
+            ));
+        }
+        let expected = request
+            .route
+            .as_ref()
+            .and_then(ProxyRequestRoute::native_expectation)
+            .ok_or_else(changed)?;
+        let manager = self
+            .client
+            .state
+            .provider
+            .auth_manager()
+            .ok_or_else(changed)?;
+        let outcome = manager
+            .switch_after_native_usage_limit(
+                expected,
+                attempted,
+                usage.resets_at.map(|time| time.timestamp()),
+            )
+            .await
+            .map_err(|_| changed())?;
+        self.usage_limit_failover_tracking
+            .attempted_account_ids
+            .extend(attempted.iter().cloned());
+        match outcome {
+            ImportedAccountSwitchOutcome::RequestSourceChanged => return Err(changed()),
+            ImportedAccountSwitchOutcome::SelectedBlockedUntil { .. } => {
+                return Err(CodexErr::UnsupportedOperation(
+                    "The model provider reached its usage limit.".into(),
+                ));
+            }
+            ImportedAccountSwitchOutcome::ReadyToRetry => {
+                if let Some(id) = manager.active_account_id() {
+                    self.usage_limit_failover_tracking
+                        .selected_account_ids
+                        .push(id);
+                }
+                self.reset_websocket_session();
+            }
+            ImportedAccountSwitchOutcome::NoCandidate => {}
+        }
+        Ok(Some(outcome))
     }
 
     pub(crate) fn owned_retry_forbidden(&self, error: &CodexErr) -> bool {

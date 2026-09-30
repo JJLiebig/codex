@@ -137,12 +137,15 @@ impl ModelProvider for CliProxyModelProvider {
                 .runtime()?
                 .prepare_inventory(&manager, manager.http_client_factory())
                 .await?;
-            let (model, route) = super::prepared_request::resolve_route(
+            let (model, mut route) = super::prepared_request::resolve_route(
                 model,
                 prepared.selected_source.as_ref(),
                 prepared.inventory,
                 prepared.generation,
             )?;
+            route.native_expectation = prepared
+                .expectation
+                .filter(|expected| route.native_source() == Some(expected.source()));
             let mut provider = self.info.to_api_provider(/*auth_mode*/ None)?;
             provider.base_url = prepared.endpoint.base_url;
             Ok(Some(crate::PreparedModelRequest {

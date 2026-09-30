@@ -1864,6 +1864,15 @@ impl ModelClientSession {
                         /*output_items*/ &[],
                     );
                     if let CodexErrorDetails::UsageLimitReached(usage_limit) = err.details() {
+                        if let Some(outcome) = self
+                            .switch_owned_quota(&mut attempted_account_ids, usage_limit)
+                            .await?
+                        {
+                            if outcome == ImportedAccountSwitchOutcome::ReadyToRetry {
+                                continue;
+                            }
+                            return Err(err);
+                        }
                         if let Some(manager) = auth_manager.as_ref() {
                             if let Some(account_id) = request_account_id.as_ref() {
                                 if let Some(resets_at) = usage_limit.resets_at.as_ref()
@@ -1897,7 +1906,8 @@ impl ModelClientSession {
                                     continue;
                                 }
                                 ImportedAccountSwitchOutcome::SelectedBlockedUntil { .. }
-                                | ImportedAccountSwitchOutcome::NoCandidate => {}
+                                | ImportedAccountSwitchOutcome::NoCandidate
+                                | ImportedAccountSwitchOutcome::RequestSourceChanged => {}
                             }
                         }
                         return Err(err);

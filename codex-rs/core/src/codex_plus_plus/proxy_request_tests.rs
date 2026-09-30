@@ -1,7 +1,9 @@
 use super::*;
 use codex_login::NativeCredentialSource;
+use codex_login::auth::ImportedAccountSwitchOutcome;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
 use pretty_assertions::assert_eq;
+use std::collections::HashSet;
 
 #[path = "proxy_request_fixture.rs"]
 mod fixture;
@@ -217,14 +219,30 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                 }
                 Err(err) => error = Some(err),
             }
-            if !matches!(case, "truncated" | "pre_output_500" | "pre_output_overload") {
+            let native_quota =
+                model == "future-9.7" && matches!(case, "http_quota" | "stream_quota");
+            if native_quota {
+                let CodexErrorDetails::UsageLimitReached(usage) = error.as_ref().unwrap().details()
+                else {
+                    panic!("bound native quota");
+                };
+                assert_eq!(
+                    session
+                        .switch_owned_quota(&mut HashSet::new(), usage)
+                        .await?,
+                    Some(ImportedAccountSwitchOutcome::NoCandidate)
+                );
+            }
+            if !native_quota
+                && !matches!(case, "truncated" | "pre_output_500" | "pre_output_overload")
+            {
                 let error = error.as_ref().expect("provider rejection must surface");
                 assert!(
                     matches!(error.details(), CodexErrorDetails::UnsupportedOperation(_)),
                     "{model}/{case}: {error}"
                 );
                 assert!(session.owned_retry_forbidden(error));
-                if model == "future-9.7"
+                if model == "claude-new"
                     && matches!(case, "http_quota" | "local_401" | "partial_quota")
                 {
                     messages.push(error.to_string());
@@ -277,5 +295,209 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
     unsupported operation: The model provider rejected authentication.
     unsupported operation: Model response interrupted after output: The model provider reached its usage limit.
     "###);
+    Ok(())
+}
+
+#[tokio::test]
+async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<()> {
+    use super::super::proxy_request::NativeQuotaAttribution;
+    for case in [
+        "http",
+        "stream",
+        "cooldown",
+        "cooldown_pinned",
+        "missing",
+        "mismatch",
+        "wrong_model",
+        "claude",
+        "401",
+        "stale",
+        "partial",
+    ] {
+        let fixture = OwnedFixture::new().await?;
+        let ids = fixture.import_pair().await?;
+        let store = AccountStore::new(fixture.home.path().to_path_buf());
+        if case == "cooldown_pinned" {
+            store.set_automation_enabled(&ids[1], /*automation_enabled*/ false)?;
+        }
+        let mut client = test_model_client(SessionSource::Cli);
+        Arc::get_mut(&mut client.state).unwrap().provider = create_model_provider(
+            ModelProviderInfo::create_cli_proxy_provider(),
+            Some(fixture.manager.clone()),
+        );
+        let metadata = test_responses_metadata_for_client(
+            &client,
+            /*turn_id*/ None,
+            "stable-session".into(),
+            /*parent_thread_id*/ None,
+            TestCodexResponsesRequestKind::Turn,
+        );
+        let a_model = format!("codex-native-imported-{}/future-9.7", ids[0]);
+        let b_model = format!("codex-native-imported-{}/future-9.7", ids[1]);
+        let resets_at = chrono::Utc::now().timestamp() + 3600;
+        let auth_home = store
+            .enabled_file_accounts()?
+            .into_iter()
+            .find(|(id, _)| id == &ids[0])
+            .unwrap()
+            .1;
+        let expected_a = a_model.clone();
+        let switches = matches!(case, "http" | "stream" | "cooldown");
+        let _mock = Mock::given(method("POST")).and(path("/v1/responses"))
+            .respond_with(move |request: &wiremock::Request| {
+                let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+                if body["model"] != expected_a && case != "claude" {
+                    return ResponseTemplate::new(200).insert_header("x-cpa-trace-id", "20260930010000-0000000000000003-aabbccdd").set_body_string(COMPLETED);
+                }
+                if case == "stale" {
+                    let mut auth: codex_login::auth::AuthDotJson = serde_json::from_slice(&std::fs::read(auth_home.join("auth.json")).unwrap()).unwrap();
+                    let token = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(json!({"exp":chrono::Utc::now().timestamp()+7200}).to_string());
+                    auth.tokens.as_mut().unwrap().access_token = format!("e30.{token}.sig");
+                    codex_login::save_auth(&auth_home, &auth, AuthCredentialsStoreMode::File, AuthKeyringBackendKind::default()).unwrap();
+                }
+                let response = match case {
+                    "cooldown" | "cooldown_pinned" | "wrong_model" => ResponseTemplate::new(429).set_body_json(json!({"error":{
+                        "code":"model_cooldown", "model": if case == "wrong_model" { "other/model" } else { expected_a.as_str() },
+                        "reset_seconds":3600, "last_upstream_error":{"type":"usage_limit_reached"}
+                    }})),
+                    "401" => ResponseTemplate::new(401),
+                    "stream" => ResponseTemplate::new(200).set_body_string(QUOTA),
+                    "partial" => ResponseTemplate::new(200).set_body_string(format!("{PARTIAL}{QUOTA}")),
+                    _ => ResponseTemplate::new(429).set_body_json(json!({"error":{"type":"usage_limit_reached","resets_at":resets_at}})),
+                };
+                if matches!(case, "cooldown" | "cooldown_pinned" | "wrong_model" | "missing") { response } else {
+                    response.insert_header("x-cpa-trace-id", if matches!(case, "mismatch" | "claude") { CLAUDE_TRACE } else { NATIVE_TRACE })
+                }
+            }).expect(if switches { 2 } else { 1 }).mount_as_scoped(&fixture.server).await;
+        let mut model_info = test_model_info();
+        model_info.slug = if case == "claude" {
+            "claude-new"
+        } else {
+            "future-9.7"
+        }
+        .into();
+        let mut session = client.new_session();
+        let mut attempted = HashSet::new();
+        let mut error = None;
+        loop {
+            match session
+                .stream_responses_api(
+                    &Prompt::default(),
+                    &model_info,
+                    &test_session_telemetry(),
+                    /*effort*/ None,
+                    ReasoningSummaryConfig::None,
+                    /*service_tier*/ None,
+                    &metadata,
+                    &InferenceTraceContext::disabled(),
+                )
+                .await
+            {
+                Ok(mut stream) => {
+                    while let Some(event) = stream.next().await {
+                        if let Err(err) = event {
+                            error = Some(err);
+                        }
+                    }
+                }
+                Err(err) => error = Some(err),
+            }
+            if case == "stream"
+                && let Some(err) = error.take()
+            {
+                let CodexErrorDetails::UsageLimitReached(usage) = err.details() else {
+                    panic!("native stream quota: {err}");
+                };
+                assert_eq!(
+                    session.owned_quota_attribution(),
+                    Some(NativeQuotaAttribution::Served)
+                );
+                assert_eq!(
+                    session.switch_owned_quota(&mut attempted, usage).await?,
+                    Some(ImportedAccountSwitchOutcome::ReadyToRetry)
+                );
+                continue;
+            }
+            break;
+        }
+        if case == "cooldown_pinned" {
+            assert!(matches!(
+                error.as_ref().unwrap().details(),
+                CodexErrorDetails::UsageLimitReached(_)
+            ));
+            let request = session.owned_request.as_ref().unwrap();
+            assert_eq!(
+                session.owned_quota_attribution(),
+                Some(NativeQuotaAttribution::Intended)
+            );
+            assert_eq!(request.served_native_source.get(), Some(&None));
+            assert_eq!(
+                session
+                    .take_usage_limit_failover_tracking()
+                    .attempted_account_ids,
+                HashSet::from([ids[0].to_string()])
+            );
+        } else if !switches {
+            assert!(
+                matches!(
+                    error.as_ref().unwrap().details(),
+                    CodexErrorDetails::UnsupportedOperation(_)
+                ),
+                "{case}"
+            );
+        } else {
+            assert!(error.is_none());
+        }
+        if case == "stale" {
+            insta::assert_snapshot!(error.as_ref().unwrap().to_string(), @"unsupported operation: The account changed while the request was running. Try again.");
+        }
+        assert_eq!(
+            fixture.manager.active_account_id(),
+            Some(ids[usize::from(switches)].clone()),
+            "{case}"
+        );
+        let charged = matches!(case, "http" | "cooldown" | "cooldown_pinned");
+        let profiles = store.list()?;
+        assert_eq!(
+            profiles
+                .iter()
+                .map(|profile| profile.usage_limit_resets_at.is_some())
+                .collect::<Vec<_>>(),
+            vec![charged, false],
+            "{case}"
+        );
+        let requests: Vec<_> = fixture
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|request| request.url.path() == "/v1/responses")
+            .collect();
+        if switches {
+            let mut bodies: Vec<serde_json::Value> = requests
+                .iter()
+                .map(|request| serde_json::from_slice(&request.body).unwrap())
+                .collect();
+            assert_eq!(
+                (&bodies[0]["model"], &bodies[1]["model"]),
+                (&json!(a_model), &json!(b_model))
+            );
+            bodies[0]["model"] = bodies[1]["model"].clone();
+            assert_eq!(bodies[0], bodies[1]);
+            assert_eq!(
+                requests[0].headers.get("session-id"),
+                requests[1].headers.get("session-id")
+            );
+            let tracking = session.take_usage_limit_failover_tracking();
+            assert_eq!(
+                (
+                    tracking.attempted_account_ids,
+                    tracking.selected_account_ids
+                ),
+                (HashSet::from([ids[0].to_string()]), vec![ids[1].clone()])
+            );
+        }
+    }
     Ok(())
 }

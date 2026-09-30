@@ -38,6 +38,7 @@ pub(super) struct PreparedInventory {
     pub client: HttpClient,
     pub inventory: Vec<super::cli_proxy_inventory::CredentialModels>,
     pub selected_source: Option<NativeCredentialSource>,
+    pub expectation: Option<codex_login::auth::NativeCredentialExpectation>,
     pub generation: u64,
 }
 
@@ -83,6 +84,7 @@ impl CliProxyRuntime {
             client,
             inventory,
             selected_source: snapshot.selected_source().cloned(),
+            expectation: snapshot.selected_expectation(),
             generation: *manager.auth_change_receiver().borrow(),
         })
     }

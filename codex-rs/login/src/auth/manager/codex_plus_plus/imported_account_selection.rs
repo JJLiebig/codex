@@ -12,6 +12,8 @@ use super::super::AuthManager;
 use super::super::CodexAuth;
 use super::imported_account_startup::imported_account_blocked;
 use super::imported_account_startup::load_imported_account_auth;
+use super::native_credential_export::NativeCredentialExpectation;
+use super::native_credential_export::NativeCredentialSource;
 use crate::account::AccountCandidate;
 use crate::account::AccountId;
 use crate::account::AccountStore;
@@ -27,6 +29,8 @@ pub enum ImportedAccountSwitchOutcome {
     SelectedBlockedUntil { resets_at: i64 },
     /// No eligible alternative account could be selected.
     NoCandidate,
+    /// The owned request no longer identifies the selected native disk credentials.
+    RequestSourceChanged,
 }
 
 impl AuthManager {
@@ -142,13 +146,48 @@ impl AuthManager {
         let Ok(_refresh_guard) = self.refresh_lock.acquire().await else {
             return ImportedAccountSwitchOutcome::NoCandidate;
         };
-        self.switch_to_next_imported_account_unlocked(attempted_account_ids)
+        self.switch_to_next_imported_account_unlocked(
+            attempted_account_ids,
+            /*expectation*/ None,
+        )
+        .await
+    }
+
+    /// Mutate only the native source captured before an owned inference request.
+    pub async fn switch_after_native_usage_limit(
+        &self,
+        expected: &NativeCredentialExpectation,
+        attempted_account_ids: &mut HashSet<String>,
+        resets_at: Option<i64>,
+    ) -> std::io::Result<ImportedAccountSwitchOutcome> {
+        let _refresh_guard = self
+            .refresh_lock
+            .acquire()
             .await
+            .map_err(std::io::Error::other)?;
+        let Some(guard) = self.native_request_guard(expected).await? else {
+            return Ok(ImportedAccountSwitchOutcome::RequestSourceChanged);
+        };
+        if let NativeCredentialSource::Imported(id) = expected.source() {
+            if let Some(resets_at) = resets_at {
+                self.record_imported_account_usage_limit_resets_at(id, resets_at)?;
+            }
+            attempted_account_ids.insert(id.to_string());
+        }
+        // Candidate loading takes its own file guard; retaining A while loading B can deadlock.
+        drop(guard);
+        if self.automatic_account_selection == AutomaticAccountSelection::Disabled {
+            return Ok(ImportedAccountSwitchOutcome::NoCandidate);
+        }
+        Ok(self
+            .switch_to_next_imported_account_unlocked(attempted_account_ids, Some(expected))
+            .await)
     }
 
     pub(super) async fn switch_to_next_imported_account_unlocked(
         &self,
         attempted_account_ids: &HashSet<String>,
+        expectation: Option<&NativeCredentialExpectation>,
     ) -> ImportedAccountSwitchOutcome {
         if !self.is_login_method_allowed(ForcedLoginMethod::Chatgpt) {
             return ImportedAccountSwitchOutcome::NoCandidate;
@@ -214,10 +253,23 @@ impl AuthManager {
                 (true, None) => continue,
                 (false, _) => ImportedAccountSwitchOutcome::ReadyToRetry,
             };
+            let _source_guard = if let Some(expected) = expectation {
+                match self.native_request_guard(expected).await {
+                    Ok(Some(guard)) => Some(guard),
+                    Ok(None) | Err(_) => return ImportedAccountSwitchOutcome::RequestSourceChanged,
+                }
+            } else {
+                None
+            };
             self.set_active_imported_account(account.id.clone(), account_home.clone(), auth);
             return outcome;
         }
 
+        if let Some(expected) = expectation
+            && !matches!(self.native_request_guard(expected).await, Ok(Some(_)))
+        {
+            return ImportedAccountSwitchOutcome::RequestSourceChanged;
+        }
         ImportedAccountSwitchOutcome::NoCandidate
     }
 

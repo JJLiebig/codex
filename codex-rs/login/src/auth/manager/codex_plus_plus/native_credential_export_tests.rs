@@ -50,7 +50,7 @@ fn auth(account_id: &str, access_label: &str) -> AuthDotJson {
     }
 }
 
-async fn manager(home: &TempDir) -> AuthManager {
+async fn manager(home: &TempDir, selection: AutomaticAccountSelection) -> AuthManager {
     AuthManager::new_with_automatic_account_selection(
         home.path().to_path_buf(),
         /*enable_codex_api_key_env*/ false,
@@ -59,7 +59,7 @@ async fn manager(home: &TempDir) -> AuthManager {
         /*chatgpt_base_url*/ None,
         AuthKeyringBackendKind::default(),
         transport_default_auth_route_config(),
-        AutomaticAccountSelection::Disabled,
+        selection,
     )
     .await
 }
@@ -75,7 +75,7 @@ async fn export_reads_rotated_disk_token_instead_of_cached_auth() {
         AuthKeyringBackendKind::default(),
     )
     .unwrap();
-    let manager = manager(&home).await;
+    let manager = manager(&home, AutomaticAccountSelection::Disabled).await;
     let rotated = auth("upstream-a", "new");
     save_auth(
         home.path(),
@@ -121,7 +121,7 @@ async fn imported_marker_exports_once_and_manual_selection_survives() {
         )
         .unwrap();
     store.set_automation_enabled(&profile.id, false).unwrap();
-    let manager = manager(&home).await;
+    let manager = manager(&home, AutomaticAccountSelection::Disabled).await;
     manager
         .activate_imported_account(&profile.id)
         .await
@@ -181,7 +181,7 @@ async fn root_workspace_policy_and_invalid_selected_credentials_are_respected() 
         AuthKeyringBackendKind::default(),
     )
     .unwrap();
-    let manager = manager(&home).await;
+    let manager = manager(&home, AutomaticAccountSelection::Disabled).await;
     manager.set_forced_chatgpt_workspace_id(Some(vec!["other-workspace".to_string()]));
     let snapshot = manager.export_native_credentials().await.unwrap();
     assert!(snapshot.credentials().is_empty());
@@ -209,10 +209,169 @@ async fn unreadable_index_fails_instead_of_publishing_empty_inventory() {
     let home = TempDir::new().unwrap();
     std::fs::create_dir_all(home.path().join("accounts")).unwrap();
     std::fs::write(home.path().join("accounts/index.json"), "invalid json").unwrap();
-    let manager = manager(&home).await;
+    let manager = manager(&home, AutomaticAccountSelection::Disabled).await;
 
     assert!(manager.export_native_credentials().await.is_err());
     std::fs::remove_file(home.path().join("accounts/index.json")).unwrap();
     std::fs::write(home.path().join("auth.json"), "invalid json").unwrap();
     assert!(manager.export_native_credentials().await.is_err());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
+    use crate::auth::ImportedAccountSwitchOutcome::NoCandidate;
+    use crate::auth::ImportedAccountSwitchOutcome::ReadyToRetry;
+    use crate::auth::ImportedAccountSwitchOutcome::RequestSourceChanged;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+    fn save(home: &std::path::Path, auth: &AuthDotJson) {
+        save_auth(
+            home,
+            auth,
+            AuthCredentialsStoreMode::File,
+            AuthKeyringBackendKind::default(),
+        )
+        .unwrap();
+    }
+    for case in [
+        "switch",
+        "manual",
+        "stale",
+        "rotate_during_load",
+        "root",
+        "same_owner_source",
+        "selected_changed",
+    ] {
+        let home = TempDir::new().unwrap();
+        let store = AccountStore::new(home.path().to_path_buf());
+        let mut profiles = Vec::new();
+        for id in ["a", "b"] {
+            save(home.path(), &auth(id, "initial"));
+            profiles.push(
+                store
+                    .import_current(
+                        /*label*/ None,
+                        AuthCredentialsStoreMode::File,
+                        AuthKeyringBackendKind::default(),
+                    )
+                    .unwrap(),
+            );
+        }
+        let selection = if case == "manual" {
+            AutomaticAccountSelection::Disabled
+        } else {
+            AutomaticAccountSelection::Enabled
+        };
+        let manager = Arc::new(manager(&home, selection).await);
+        manager
+            .activate_imported_account(&profiles[0].id)
+            .await
+            .unwrap();
+        if case == "root" {
+            save(home.path(), &auth("root", "initial"));
+            manager.clear_active_imported_account();
+        }
+        if case == "same_owner_source" {
+            let auth = serde_json::from_slice(
+                &std::fs::read(store.account_home(&profiles[0].id).join("auth.json")).unwrap(),
+            )
+            .unwrap();
+            save(home.path(), &auth);
+            manager.clear_active_imported_account();
+        }
+        let expected = manager
+            .export_native_credentials()
+            .await
+            .unwrap()
+            .selected_expectation()
+            .unwrap();
+        let original_revision = *manager.auth_change_receiver().borrow();
+        if case == "same_owner_source" {
+            manager
+                .activate_imported_account(&profiles[0].id)
+                .await
+                .unwrap();
+            assert_eq!(*manager.auth_change_receiver().borrow(), original_revision);
+        }
+        if case == "selected_changed" {
+            manager
+                .activate_imported_account(&profiles[1].id)
+                .await
+                .unwrap();
+        }
+        if case == "stale" {
+            save(&store.account_home(&profiles[0].id), &auth("a", "rotated"));
+        }
+        let candidate_guard = (case == "rotate_during_load").then(|| {
+            crate::account_lease::AuthRefreshGuard::acquire(&store.account_home(&profiles[1].id))
+                .unwrap()
+        });
+        let resets_at = Utc::now().timestamp() + 3600;
+        let task = tokio::spawn({
+            let manager = manager.clone();
+            async move {
+                let mut attempted = HashSet::new();
+                let outcome = manager
+                    .switch_after_native_usage_limit(&expected, &mut attempted, Some(resets_at))
+                    .await
+                    .unwrap();
+                (outcome, attempted)
+            }
+        });
+        if candidate_guard.is_some() {
+            tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                while store.list().unwrap()[0].usage_limit_resets_at != Some(resets_at) {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            // This succeeds only after A's file guard was released before waiting on B.
+            save(&store.account_home(&profiles[0].id), &auth("a", "rotated"));
+            drop(candidate_guard);
+        }
+        let (outcome, attempted) = task.await.unwrap();
+        let switched = matches!(case, "switch" | "root");
+        assert_eq!(
+            outcome,
+            if switched {
+                ReadyToRetry
+            } else if case == "manual" {
+                NoCandidate
+            } else {
+                RequestSourceChanged
+            },
+            "{case}"
+        );
+        if case == "selected_changed" {
+            assert_eq!(manager.active_account_id(), Some(profiles[1].id.clone()));
+        } else if !switched {
+            assert_eq!(*manager.auth_change_receiver().borrow(), original_revision);
+            assert_eq!(manager.active_account_id(), Some(profiles[0].id.clone()));
+        } else if case == "switch" {
+            assert_eq!(manager.active_account_id(), Some(profiles[1].id.clone()));
+        }
+        let charged = !matches!(
+            case,
+            "stale" | "root" | "same_owner_source" | "selected_changed"
+        );
+        assert_eq!(
+            attempted,
+            if charged {
+                HashSet::from([profiles[0].id.to_string()])
+            } else {
+                HashSet::new()
+            }
+        );
+        assert_eq!(
+            store
+                .list()
+                .unwrap()
+                .iter()
+                .map(|profile| profile.usage_limit_resets_at)
+                .collect::<Vec<_>>(),
+            vec![charged.then_some(resets_at), None],
+            "{case}"
+        );
+    }
 }

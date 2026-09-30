@@ -4,6 +4,8 @@ use chrono::DateTime;
 use chrono::Utc;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
+use sha2::Digest;
+use sha2::Sha256;
 use tokio::sync::SemaphorePermit;
 
 use super::super::AuthDotJson;
@@ -31,12 +33,35 @@ pub struct NativeCredential {
     pub upstream_account_id: String,
     pub expires_at: DateTime<Utc>,
     pub plan_type: Option<String>,
+    identity: [u8; 32],
+}
+
+/// Opaque disk identity captured while publication holds the native source guards.
+#[derive(Clone)]
+pub struct NativeCredentialExpectation {
+    source: NativeCredentialSource,
+    revision: u64,
+    identity: [u8; 32],
+}
+
+impl NativeCredentialExpectation {
+    pub fn source(&self) -> &NativeCredentialSource {
+        &self.source
+    }
+}
+
+impl std::fmt::Debug for NativeCredentialExpectation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("NativeCredentialExpectation")
+            .finish_non_exhaustive()
+    }
 }
 
 /// Holds native refresh and topology guards until publication finishes. Drop before inference.
 pub struct NativeCredentialSnapshot<'a> {
     credentials: Vec<NativeCredential>,
     selected_source: Option<NativeCredentialSource>,
+    expectation: Option<NativeCredentialExpectation>,
     _locks: ManagedAuthRefreshLocks,
     _current_source_guard: SemaphorePermit<'a>,
 }
@@ -48,6 +73,10 @@ impl NativeCredentialSnapshot<'_> {
 
     pub fn selected_source(&self) -> Option<&NativeCredentialSource> {
         self.selected_source.as_ref()
+    }
+
+    pub fn selected_expectation(&self) -> Option<NativeCredentialExpectation> {
+        self.expectation.clone()
     }
 }
 
@@ -72,6 +101,7 @@ impl AuthManager {
         if self.has_external_auth() || !self.is_login_method_allowed(ForcedLoginMethod::Chatgpt) {
             snapshot.credentials.clear();
             snapshot.selected_source = None;
+            snapshot.expectation = None;
         }
         Ok(snapshot)
     }
@@ -136,12 +166,79 @@ impl AuthManager {
                 .map(|credential| credential.source.clone())
         };
 
+        let expectation = credentials
+            .iter()
+            .find(|credential| Some(&credential.source) == selected_source.as_ref())
+            .map(|credential| NativeCredentialExpectation {
+                source: credential.source.clone(),
+                revision: *self.auth_change_receiver().borrow(),
+                identity: credential.identity,
+            });
         Ok(NativeCredentialSnapshot {
             credentials,
             selected_source,
+            expectation,
             _locks: locks,
             _current_source_guard: current_source_guard,
         })
+    }
+
+    pub(super) async fn native_request_guard(
+        &self,
+        expected: &NativeCredentialExpectation,
+    ) -> std::io::Result<Option<crate::account_lease::AuthRefreshGuard>> {
+        let guard = self
+            .acquire_refresh_file_lock()
+            .await
+            .map_err(std::io::Error::other)?;
+        let Some(guard) = guard else {
+            return Ok(None);
+        };
+        // The caller holds the selector semaphore. Recheck after the asynchronous file lock.
+        if self.has_external_auth()
+            || !self.is_login_method_allowed(ForcedLoginMethod::Chatgpt)
+            || *self.auth_change_receiver().borrow() != expected.revision
+            || match &expected.source {
+                NativeCredentialSource::Root(_) => self.active_account_id().is_some(),
+                NativeCredentialSource::Imported(id) => {
+                    self.active_account_id().as_ref() != Some(id)
+                }
+            }
+        {
+            return Ok(None);
+        }
+        let imported_id = match &expected.source {
+            NativeCredentialSource::Root(_) => None,
+            NativeCredentialSource::Imported(id) => {
+                if !crate::account::AccountStore::new(self.codex_home.clone())
+                    .list()?
+                    .iter()
+                    .any(|account| &account.id == id && account.enabled && !account.login_required)
+                {
+                    return Ok(None);
+                }
+                Some(id)
+            }
+        };
+        let auth = load_auth_dot_json_with_guard(
+            &self.active_auth_home(),
+            self.active_auth_credentials_store_mode(),
+            self.active_keyring_backend_kind(),
+            &guard,
+        )?;
+        Ok(auth
+            .and_then(|auth| {
+                credential_from_auth(
+                    &auth,
+                    Utc::now(),
+                    imported_id,
+                    self.effective_chatgpt_workspaces().as_deref(),
+                )
+            })
+            .filter(|credential| {
+                credential.source == expected.source && credential.identity == expected.identity
+            })
+            .map(|_| guard))
     }
 }
 
@@ -177,6 +274,7 @@ fn credential_from_auth(
         upstream_account_id: upstream_account_id.to_string(),
         expires_at,
         plan_type: tokens.id_token.get_chatgpt_plan_type_raw(),
+        identity: Sha256::digest(serde_json::to_vec(auth).ok()?).into(),
     })
 }
 

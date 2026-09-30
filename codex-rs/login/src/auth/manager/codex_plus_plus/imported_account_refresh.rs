@@ -371,7 +371,10 @@ impl AuthManager {
         }
         let attempted_account_ids = HashSet::from([active_account_id.to_string()]);
         if self
-            .switch_to_next_imported_account_unlocked(&attempted_account_ids)
+            .switch_to_next_imported_account_unlocked(
+                &attempted_account_ids,
+                /*expectation*/ None,
+            )
             .await
             != super::imported_account_selection::ImportedAccountSwitchOutcome::NoCandidate
         {
