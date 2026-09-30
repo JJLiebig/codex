@@ -48,6 +48,67 @@ impl ProxyRequestRoute {
         })
     }
 
+    pub fn is_suspended_auth_error(error: &codex_api::TransportError) -> bool {
+        let codex_api::TransportError::Http {
+            status,
+            body: Some(body),
+            ..
+        } = error
+        else {
+            return false;
+        };
+        *status == http::StatusCode::SERVICE_UNAVAILABLE
+            && serde_json::from_str::<serde_json::Value>(body).is_ok_and(|body| {
+                body["error"]["type"] == "authentication_error"
+                    && body["error"]["code"] == "upstream_authentication_required"
+            })
+    }
+
+    /// Join only the bounded native trace shape emitted by the pinned owned executor.
+    pub fn served_native_source(&self, trace: &str) -> Option<&NativeCredentialSource> {
+        if trace.len() > 128 {
+            return None;
+        }
+        let parts: Vec<_> = trace.split('-').collect();
+        (parts.len() == 3
+            && parts[0].len() == 14
+            && parts[0].bytes().all(|byte| byte.is_ascii_digit())
+            && parts[1].len() == 16
+            && parts[1].bytes().all(|byte| byte.is_ascii_hexdigit())
+            && parts[2].len() == 8
+            && parts[2].bytes().all(|byte| byte.is_ascii_hexdigit())
+            && self.native_auth_index() == Some(parts[1]))
+        .then(|| self.native_source())
+        .flatten()
+    }
+
+    /// Proved upstream 401 for an owned Codex executor without a proxy refresh owner.
+    pub fn native_auth_failure(
+        &self,
+        error: &codex_api::TransportError,
+    ) -> Option<&codex_login::auth::NativeCredentialExpectation> {
+        let codex_api::TransportError::Http {
+            status,
+            headers,
+            body,
+            ..
+        } = error
+        else {
+            return None;
+        };
+        if *status != http::StatusCode::UNAUTHORIZED {
+            return None;
+        }
+        let trace = headers.as_ref()?.get("x-cpa-trace-id")?.to_str().ok()?;
+        self.served_native_source(trace)?;
+        let body: serde_json::Value = serde_json::from_str(body.as_deref()?).ok()?;
+        let error = body.get("error")?;
+        (error.get("type").and_then(serde_json::Value::as_str) == Some("authentication_error")
+            && error.get("code").and_then(serde_json::Value::as_str) == Some("auth_unavailable"))
+        .then(|| self.native_expectation())
+        .flatten()
+    }
+
     pub fn native_expectation(&self) -> Option<&codex_login::auth::NativeCredentialExpectation> {
         self.native_expectation.as_ref()
     }

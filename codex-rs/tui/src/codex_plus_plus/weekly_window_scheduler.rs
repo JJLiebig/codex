@@ -139,6 +139,9 @@ async fn scan(
     app_event_tx: AppEventSender,
 ) {
     let store = AccountStore::new(config.codex_home.to_path_buf());
+    if let Err(error) = auto_redeem_resets::reconcile_pending(&config, &store).await {
+        tracing::warn!(%error, "could not scan confirmed proxy resets");
+    }
     poll_notices(&notices, &store, &app_event_tx);
     let mut settings = *control.borrow();
     if !settings.enabled() {
@@ -195,6 +198,9 @@ async fn scan(
                     tracing::warn!(%account_id, "automatic usage-reset redemption timed out");
                 }
             }
+        }
+        if let Err(error) = auto_redeem_resets::reconcile_pending(&config, &store).await {
+            tracing::warn!(%error, "could not reconcile confirmed automatic resets");
         }
     }
     if !settings.weekly {

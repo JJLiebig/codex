@@ -3439,8 +3439,13 @@ impl AuthManager {
                 let result = self
                     .refresh_token_from_authority_impl(Some(&file_guard))
                     .await;
-                self.recover_terminal_imported_refresh(result, attempted_account_id, file_guard)
-                    .await
+                self.recover_terminal_imported_refresh(
+                    result,
+                    attempted_account_id,
+                    file_guard,
+                    /*expected*/ None,
+                )
+                .await
             }
             ReloadOutcome::Skipped => {
                 Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(

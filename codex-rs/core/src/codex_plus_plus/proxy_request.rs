@@ -68,20 +68,8 @@ impl OwnedRequest {
 
     pub(super) fn set_trace(&self, trace: Option<&str>) {
         let trace = trace.filter(|trace| trace.len() <= 128);
-        let source = trace.and_then(|trace| {
-            let parts: Vec<_> = trace.split('-').collect();
-            let route = self.route.as_ref()?;
-            (parts.len() == 3
-                && parts[0].len() == 14
-                && parts[0].bytes().all(|byte| byte.is_ascii_digit())
-                && parts[1].len() == 16
-                && parts[1].bytes().all(|byte| byte.is_ascii_hexdigit())
-                && parts[2].len() == 8
-                && parts[2].bytes().all(|byte| byte.is_ascii_hexdigit())
-                && route.native_auth_index() == Some(parts[1]))
-            .then(|| route.native_source().cloned())
-            .flatten()
-        });
+        let source =
+            trace.and_then(|trace| self.route.as_ref()?.served_native_source(trace).cloned());
         let _ = self.response_trace.set(trace.map(str::to_owned));
         let _ = self.served_native_source.set(source);
     }
@@ -104,6 +92,7 @@ impl OwnedRequest {
     }
 
     pub(super) fn map_error(&self, provider: &SharedModelProvider, error: ApiError) -> CodexErr {
+        let suspended_auth = matches!(&error, ApiError::Transport(error) if ProxyRequestRoute::is_suspended_auth_error(error));
         let mut cooldown = None;
         let status = if let ApiError::Transport(TransportError::Http {
             status,
@@ -165,7 +154,7 @@ impl OwnedRequest {
                 let _ = self.quota_attribution.set(attribution);
             }
         }
-        let mapped = if status == Some(StatusCode::UNAUTHORIZED) {
+        let mapped = if status == Some(StatusCode::UNAUTHORIZED) || suspended_auth {
             CodexErr::UnsupportedOperation("The model provider rejected authentication.".into())
         } else if self.quota_attribution.get().is_none()
             && (status == Some(StatusCode::TOO_MANY_REQUESTS)
@@ -201,6 +190,50 @@ impl ModelClientSession {
             Some(request) => error.with_inference_attribution(request.failure_attribution()),
             None => error,
         }
+    }
+
+    pub(super) async fn recover_owned_auth(
+        &self,
+        error: &ApiError,
+        recovery: &mut Option<UnauthorizedRecovery>,
+    ) -> Result<bool> {
+        let Some(request) = self.owned_request.as_ref() else {
+            return Ok(false);
+        };
+        let ApiError::Transport(error) = error else {
+            return Ok(false);
+        };
+        let Some(expected) = request
+            .route
+            .as_ref()
+            .and_then(|route| route.native_auth_failure(error))
+        else {
+            return Ok(false);
+        };
+        if let TransportError::Http {
+            headers: Some(headers),
+            ..
+        } = error
+        {
+            request.set_trace(
+                headers
+                    .get("x-cpa-trace-id")
+                    .and_then(|trace| trace.to_str().ok()),
+            );
+        }
+        if request.accepted_output.load(Ordering::Relaxed) {
+            return Ok(false);
+        }
+        let Some(recovery) = recovery.as_mut().filter(|recovery| recovery.has_next()) else {
+            return Ok(false);
+        };
+        recovery
+            .next_for_native_request(expected)
+            .await
+            .map_err(|error| {
+                self.attribute_owned_error(CodexErr::UnsupportedOperation(error.to_string()))
+            })?;
+        Ok(true)
     }
 
     pub(super) async fn response_request_setup(

@@ -47,7 +47,16 @@ impl SamplingExecution {
         error: &LunaSamplerError,
         auth_recovery: &mut Option<UnauthorizedRecovery>,
         retries: &mut usize,
+        lease: Option<&super::connection_pool::ConnectionLease>,
     ) -> bool {
+        if let Some(lease) = lease
+            && let Some(retry) = lease.retry_owned_auth(error, auth_recovery).await
+        {
+            if retry {
+                self.connections.clear();
+            }
+            return retry;
+        }
         let retryable = match error {
             LunaSamplerError::ConnectionTimeout
             | LunaSamplerError::Api(
@@ -165,7 +174,12 @@ impl SamplingExecution {
                 Ok(lease) => lease,
                 Err(error) => {
                     if self
-                        .retry_after_failure(&error, &mut auth_recovery, &mut retries)
+                        .retry_after_failure(
+                            &error,
+                            &mut auth_recovery,
+                            &mut retries,
+                            /*lease*/ None,
+                        )
                         .await
                     {
                         continue;
@@ -220,7 +234,7 @@ impl SamplingExecution {
                 Err(error) => {
                     let error = LunaSamplerError::Api(error);
                     if self
-                        .retry_after_failure(&error, &mut auth_recovery, &mut retries)
+                        .retry_after_failure(&error, &mut auth_recovery, &mut retries, Some(&lease))
                         .await
                     {
                         continue;
@@ -230,6 +244,7 @@ impl SamplingExecution {
             };
 
             let mut output = String::new();
+            let mut accepted_output = false;
             while let Some(event) = tokio::select! {
                 biased;
                 _ = &mut owner_changed => return Err(account_changed_error()),
@@ -247,15 +262,22 @@ impl SamplingExecution {
                     Ok(event) => event,
                     Err(error) => {
                         let error = LunaSamplerError::Api(error);
-                        if self
-                            .retry_after_failure(&error, &mut auth_recovery, &mut retries)
-                            .await
+                        if !accepted_output
+                            && self
+                                .retry_after_failure(
+                                    &error,
+                                    &mut auth_recovery,
+                                    &mut retries,
+                                    Some(&lease),
+                                )
+                                .await
                         {
                             continue 'retry;
                         }
                         return Err(error);
                     }
                 };
+                accepted_output |= lease.accepts_owned_output(&event);
                 match event {
                     ResponseEvent::OutputTextDelta(delta) => {
                         if delta.is_empty() {

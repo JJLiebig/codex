@@ -12,6 +12,10 @@ pub(super) struct OwnedFixture {
 
 impl OwnedFixture {
     pub async fn new() -> anyhow::Result<Self> {
+        Self::with_refresh_endpoint(/*refresh_endpoint*/ None).await
+    }
+
+    pub async fn with_refresh_endpoint(refresh_endpoint: Option<&str>) -> anyhow::Result<Self> {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         let home = tempfile::tempdir()?;
         let dir = home.path().join("cli-proxy");
@@ -114,6 +118,24 @@ impl OwnedFixture {
             AuthKeyringBackendKind::default(),
         )?;
         let factory = HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault);
+        let mut auth_route = codex_login::AuthRouteConfig::from_http_client_factory(
+            factory.clone().with_network_policy(
+                factory
+                    .network_policy()
+                    .clone()
+                    .restrict_to_origin(url::Url::parse(&format!("https://127.0.0.1:{port}"))?),
+            ),
+        );
+        if let Some(endpoint) = refresh_endpoint {
+            auth_route = auth_route.with_local_bootstrap_factory(
+                factory.clone().with_network_policy(
+                    factory
+                        .network_policy()
+                        .clone()
+                        .restrict_to_endpoints([url::Url::parse(endpoint)?].into()),
+                ),
+            );
+        }
         let manager = Arc::new(
             AuthManager::new(
                 home.path().to_path_buf(),
@@ -122,16 +144,7 @@ impl OwnedFixture {
                 /*forced_chatgpt_workspace_id*/ None,
                 /*chatgpt_base_url*/ None,
                 AuthKeyringBackendKind::default(),
-                codex_login::AuthRouteConfig::from_http_client_factory(
-                    factory.clone().with_network_policy(
-                        factory
-                            .network_policy()
-                            .clone()
-                            .restrict_to_origin(url::Url::parse(&format!(
-                                "https://127.0.0.1:{port}"
-                            ))?),
-                    ),
-                ),
+                auth_route,
             )
             .await,
         );

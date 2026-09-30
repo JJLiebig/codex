@@ -11,6 +11,9 @@ use std::collections::HashSet;
 mod fixture;
 use fixture::OwnedFixture;
 
+#[path = "proxy_auth_recovery_tests.rs"]
+mod auth_recovery;
+
 const NATIVE_TRACE: &str = "20260930010000-0000000000000001-aabbccdd";
 const CLAUDE_TRACE: &str = "20260930010000-0000000000000002-aabbccdd";
 const COMPLETED: &str =

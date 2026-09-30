@@ -1854,6 +1854,18 @@ impl ModelClientSession {
                 Err(err) => {
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
+                    match self.recover_owned_auth(&err, &mut auth_recovery).await {
+                        Ok(false) => {}
+                        recovery => {
+                            inference_trace_attempt.record_failed(
+                                &err,
+                                response_debug_context.request_id.as_deref(),
+                                /*output_items*/ &[],
+                            );
+                            recovery?;
+                            continue;
+                        }
+                    }
                     let err = match self.owned_request.as_ref() {
                         Some(request) => request.map_error(&self.client.state.provider, err),
                         None => self.client.state.provider.map_api_error(err),

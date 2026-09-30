@@ -351,6 +351,7 @@ async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
                 completed_at: completed.completion.as_ref().unwrap().completed_at,
                 manual: false,
                 source: Some(ResetCredentialSource::Imported),
+                reconciliation: codex_login::ResetReconciliation::Pending,
             }),
         }
     );
@@ -389,7 +390,7 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
         .confirm_redeemed(
             &redeem_request_id,
             Utc::now().timestamp_nanos_opt().unwrap(),
-            /*source*/ None,
+            Some(ResetCredentialSource::Imported),
         )
         .unwrap();
     drop(lease);
@@ -406,6 +407,17 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
         .unwrap()
         .finish_weekly_activation()
         .unwrap();
+    notices.poll(&store, &tx);
+    assert!(
+        events.try_recv().is_err(),
+        "native activation alone cannot acknowledge the proxy"
+    );
+    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
+    let completion = lease.state().unwrap().completion.unwrap();
+    lease
+        .reconcile_proxy(&completion, codex_login::ResetReconciliation::ObservedClear)
+        .unwrap();
+    drop(lease);
     for _ in 0..2 {
         notices.poll(&store, &tx);
         assert!(

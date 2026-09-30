@@ -68,10 +68,7 @@ pub(super) async fn consume(
                 })
             })
             .ok_or_else(|| invalid_request("reset account changed; retry the request"))?;
-        Some(match selected {
-            NativeCredentialSource::Root(_) => ResetCredentialSource::Root,
-            NativeCredentialSource::Imported(_) => ResetCredentialSource::Imported,
-        })
+        Some(selected.clone())
     } else {
         None
     };
@@ -99,7 +96,10 @@ pub(super) async fn consume(
             lease
                 .begin_manual(
                     &params.idempotency_key,
-                    *source,
+                    match source {
+                        NativeCredentialSource::Root(_) => ResetCredentialSource::Root,
+                        NativeCredentialSource::Imported(_) => ResetCredentialSource::Imported,
+                    },
                     params.credit_id.as_deref(),
                 )
                 .map_err(|error| internal_error(error.to_string()))?,
@@ -146,6 +146,43 @@ pub(super) async fn consume(
             lease.clear_redeeming(request_id)
         };
         result.map_err(|error| internal_error(error.to_string()))?;
+    }
+    let completion = if source.is_some() {
+        lease
+            .as_ref()
+            .map(codex_login::ResetMutationLease::state)
+            .transpose()
+            .map_err(|error| internal_error(error.to_string()))?
+            .and_then(|state| state.completion)
+            .filter(|completion| {
+                completion.id == request_id && completion.needs_proxy_reconciliation()
+            })
+    } else {
+        None
+    };
+    drop(lease); // Runtime attachment must precede reacquiring the native reset lease.
+    if let (Some(completion), Some(source)) = (completion, &source) {
+        let (NativeCredentialSource::Root(account_id)
+        | NativeCredentialSource::Imported(account_id)) = source;
+        let reconciliation =
+            tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), async {
+                let usage = client.get_rate_limits_with_reset_credits().await?;
+                codex_model_provider::reconcile_cli_proxy_reset(
+                    &processor.config.codex_home,
+                    processor.config.http_client_factory(),
+                    account_id,
+                    &completion,
+                    usage.account_id.as_deref(),
+                    &usage.rate_limits,
+                    usage.ordinary_usage_allowed,
+                )
+                .await?;
+                anyhow::Ok(())
+            })
+            .await;
+        if !matches!(reconciliation, Ok(Ok(()))) {
+            tracing::warn!("usage reset confirmed; proxy cooldown reconciliation remains pending");
+        }
     }
     if request_id != params.idempotency_key || credit_id != params.credit_id.as_deref() {
         return Err(invalid_request(
