@@ -30,6 +30,7 @@ mod tests;
 #[derive(Debug)]
 pub struct ProxyRequestRoute {
     pub auth_revision: u64,
+    pub native_display_label: Option<String>,
     pub(super) native_expectation: Option<codex_login::auth::NativeCredentialExpectation>,
     inventory: Arc<[CredentialModels]>,
     native_credential: Option<usize>,
@@ -217,6 +218,7 @@ pub(super) fn resolve_route(
         wire_model.ok_or_else(unavailable)?,
         ProxyRequestRoute {
             auth_revision,
+            native_display_label: None,
             native_expectation: None,
             inventory: inventory.into(),
             native_credential,

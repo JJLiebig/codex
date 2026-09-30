@@ -657,6 +657,12 @@
             "accountId": {
               "type": "string"
             },
+            "displayLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "source": {
               "$ref": "#/definitions/InferenceNativeSource"
             },
@@ -681,6 +687,12 @@
           "properties": {
             "accountId": {
               "type": "string"
+            },
+            "displayLabel": {
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "source": {
               "$ref": "#/definitions/InferenceNativeSource"

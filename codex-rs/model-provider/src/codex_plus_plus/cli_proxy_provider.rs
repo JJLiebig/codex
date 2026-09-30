@@ -11,6 +11,7 @@ use codex_http_client::HttpClient;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
+use codex_login::NativeCredentialSource;
 use codex_model_provider_info::ModelProviderInfo;
 use codex_models_manager::cache::ModelsCache;
 use codex_models_manager::manager::CliProxyModelsManager;
@@ -143,6 +144,15 @@ impl ModelProvider for CliProxyModelProvider {
                 prepared.inventory,
                 prepared.generation,
             )?;
+            route.native_display_label = match route.native_source() {
+                Some(NativeCredentialSource::Imported(id)) => manager
+                    .account_candidates()
+                    .ok()
+                    .and_then(|accounts| accounts.into_iter().find(|account| &account.id == id))
+                    .map(|account| account.display_label)
+                    .filter(|label| !label.trim().is_empty() && label != id.as_str()),
+                _ => None,
+            };
             route.native_expectation = prepared
                 .expectation
                 .filter(|expected| route.native_source() == Some(expected.source()));

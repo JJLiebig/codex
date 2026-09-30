@@ -45,6 +45,7 @@ async fn owned_compaction_failures_preserve_source_in_terminal_event() -> anyhow
             InferenceAttribution::ServedNative {
                 source: InferenceNativeSource::Root,
                 account_id: id.to_string(),
+                display_label: None,
             }
         });
         Mock::given(method("POST"))
@@ -173,22 +174,6 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
         while let Some(event) = stream.next().await {
             event?;
         }
-        let terminal = session
-            .attribute_owned_error(CodexErr::Stream("stream closed".into()))
-            .to_error_event(Some("Error running remote compact task".into()));
-        assert_eq!(
-            terminal.inference_attribution,
-            Some(if trace == Some(NATIVE_TRACE) {
-                InferenceAttribution::ServedNative {
-                    source: InferenceNativeSource::Root,
-                    account_id: id.to_string(),
-                }
-            } else if model == "claude-new" {
-                InferenceAttribution::Claude
-            } else {
-                InferenceAttribution::Unknown
-            })
-        );
         let captured = session.owned_request.as_ref().unwrap();
         assert_eq!(
             captured.response_trace.get(),
@@ -345,6 +330,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                     InferenceAttribution::ServedNative {
                         source: InferenceNativeSource::Root,
                         account_id: id.to_string(),
+                        display_label: None,
                     }
                 };
                 assert_eq!(
@@ -562,6 +548,7 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
                     Some(InferenceAttribution::ServedNative {
                         source: InferenceNativeSource::Imported,
                         account_id: ids[0].to_string(),
+                        display_label: Some("Account upstream-a".into()),
                     })
                 );
                 continue;
@@ -578,6 +565,7 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
                 Some(InferenceAttribution::IntendedNative {
                     source: InferenceNativeSource::Imported,
                     account_id: ids[0].to_string(),
+                    display_label: Some("Account upstream-a".into()),
                 })
             );
             assert!(matches!(

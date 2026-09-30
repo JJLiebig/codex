@@ -4,8 +4,8 @@ assertion_line: 269
 expression: "displayed.join(\"\\n\")"
 ---
 ■ OpenAI root account: Usage exhausted
-■ Imported OpenAI account: Usage exhausted
-■ Imported OpenAI account (request not sent): Usage exhausted
+■ Imported OpenAI account (Work account): Usage exhausted
+■ Imported OpenAI account (request not sent) (Work account): Usage exhausted
 ■ Claude: Usage exhausted
 ■ Model provider (account unknown): Usage exhausted
 ■ Model provider (account unknown): Usage exhausted

@@ -8490,6 +8490,7 @@ class ServedNativeInferenceAttribution(BaseModel):
         populate_by_name=True,
     )
     account_id: Annotated[str, Field(alias="accountId")]
+    display_label: Annotated[str | None, Field(alias="displayLabel")] = None
     source: InferenceNativeSource
     type: Annotated[Literal["servedNative"], Field(title="ServedNativeInferenceAttributionType")]
 
@@ -8499,6 +8500,7 @@ class IntendedNativeInferenceAttribution(BaseModel):
         populate_by_name=True,
     )
     account_id: Annotated[str, Field(alias="accountId")]
+    display_label: Annotated[str | None, Field(alias="displayLabel")] = None
     source: InferenceNativeSource
     type: Annotated[
         Literal["intendedNative"], Field(title="IntendedNativeInferenceAttributionType")

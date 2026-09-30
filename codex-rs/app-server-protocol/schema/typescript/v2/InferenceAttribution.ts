@@ -6,4 +6,4 @@ import type { InferenceNativeSource } from "./InferenceNativeSource";
 /**
  * Discovery or the current native login cannot establish which account served a request.
  */
-export type InferenceAttribution = { "type": "servedNative", source: InferenceNativeSource, accountId: string, } | { "type": "intendedNative", source: InferenceNativeSource, accountId: string, } | { "type": "claude" } | { "type": "unknown" };
+export type InferenceAttribution = { "type": "servedNative", source: InferenceNativeSource, accountId: string, displayLabel: string | null, } | { "type": "intendedNative", source: InferenceNativeSource, accountId: string, displayLabel: string | null, } | { "type": "claude" } | { "type": "unknown" };

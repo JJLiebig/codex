@@ -50,10 +50,22 @@ impl OwnedRequest {
                 NativeCredentialSource::Imported(id) => (InferenceNativeSource::Imported, id),
             };
             let account_id = id.to_string();
+            let display_label = self
+                .route
+                .as_ref()
+                .and_then(|route| route.native_display_label.clone());
             if served.is_some() {
-                InferenceAttribution::ServedNative { source, account_id }
+                InferenceAttribution::ServedNative {
+                    source,
+                    account_id,
+                    display_label,
+                }
             } else {
-                InferenceAttribution::IntendedNative { source, account_id }
+                InferenceAttribution::IntendedNative {
+                    source,
+                    account_id,
+                    display_label,
+                }
             }
         } else if self
             .route

@@ -172,7 +172,7 @@ impl OwnedFixture {
             ids.push(
                 store
                     .import_current(
-                        None,
+                        Some(format!("Account {id}")),
                         AuthCredentialsStoreMode::File,
                         AuthKeyringBackendKind::default(),
                     )?

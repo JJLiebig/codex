@@ -160,14 +160,17 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
         Some(InferenceAttribution::ServedNative {
             source: InferenceNativeSource::Root,
             account_id: account().to_string(),
+            display_label: None,
         }),
         Some(InferenceAttribution::ServedNative {
             source: InferenceNativeSource::Imported,
             account_id: account().to_string(),
+            display_label: Some("Work account".into()),
         }),
         Some(InferenceAttribution::IntendedNative {
             source: InferenceNativeSource::Imported,
             account_id: account().to_string(),
+            display_label: Some("Work account".into()),
         }),
         Some(InferenceAttribution::Claude),
         Some(InferenceAttribution::Unknown),

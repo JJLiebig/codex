@@ -23,6 +23,9 @@ pub enum InferenceAttribution {
         #[serde(rename = "accountId")]
         #[ts(rename = "accountId")]
         account_id: String,
+        #[serde(rename = "displayLabel")]
+        #[ts(rename = "displayLabel")]
+        display_label: Option<String>,
     },
     /// A matching local cooldown prevented an upstream attempt.
     IntendedNative {
@@ -30,6 +33,9 @@ pub enum InferenceAttribution {
         #[serde(rename = "accountId")]
         #[ts(rename = "accountId")]
         account_id: String,
+        #[serde(rename = "displayLabel")]
+        #[ts(rename = "displayLabel")]
+        display_label: Option<String>,
     },
     /// The frozen inventory proves the provider, without asserting a Claude account identity.
     Claude,

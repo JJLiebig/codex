@@ -19,7 +19,14 @@ impl ChatWidget {
         };
         // Inference identity never replaces the login used by native account maintenance.
         self.invalidate_ordinary_usage_recovery();
-        let label = match attribution {
+        let display_label = match &attribution {
+            InferenceAttribution::ServedNative { display_label, .. }
+            | InferenceAttribution::IntendedNative { display_label, .. } => {
+                display_label.as_deref()
+            }
+            InferenceAttribution::Claude | InferenceAttribution::Unknown => None,
+        };
+        let label = match &attribution {
             InferenceAttribution::ServedNative { source, .. } => match source {
                 InferenceNativeSource::Root => "OpenAI root account",
                 InferenceNativeSource::Imported => "Imported OpenAI account",
@@ -31,7 +38,10 @@ impl ChatWidget {
             InferenceAttribution::Claude => "Claude",
             InferenceAttribution::Unknown => "Model provider (account unknown)",
         };
-        self.on_error(format!("{label}: {message}"));
+        self.on_error(match display_label {
+            Some(name) => format!("{label} ({name}): {message}"),
+            None => format!("{label}: {message}"),
+        });
         true
     }
 }
