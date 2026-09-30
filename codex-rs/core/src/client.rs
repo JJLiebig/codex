@@ -38,6 +38,8 @@ mod tool_metadata;
 
 #[path = "codex_plus_plus/prepared_memory_request.rs"]
 mod prepared_memory_request;
+#[path = "codex_plus_plus/proxy_request.rs"]
+mod proxy_request;
 
 use crate::CodexResponsesHeaders;
 use crate::tools::ExecutedToolCalls;
@@ -295,6 +297,7 @@ pub struct ModelClient {
 /// the previous turn's sticky-routing token into the next turn, which violates the client/server
 /// contract and can cause routing bugs.
 pub struct ModelClientSession {
+    owned_request: Option<Arc<proxy_request::OwnedRequest>>,
     client: ModelClient,
     websocket_session: WebsocketSession,
     request_account_id: Option<AccountId>,
@@ -622,6 +625,7 @@ impl ModelClient {
             client: self.clone(),
             websocket_session,
             request_account_id: None,
+            owned_request: None,
             usage_limit_failover_tracking: Default::default(),
             turn_state: Arc::new(OnceLock::new()),
         }
@@ -1705,10 +1709,8 @@ impl ModelClientSession {
             .attempted_account_ids
             .clone();
         loop {
-            let client_setup = self
-                .client
-                .current_client_setup(ClientRouting::Workspace)
-                .await?;
+            let (client_setup, transport, wire_model) =
+                self.response_request_setup(&model_info.slug).await?;
             let request_account_id = auth_manager
                 .as_ref()
                 .and_then(|manager| manager.active_account_id());
@@ -1722,11 +1724,6 @@ impl ModelClientSession {
                 .client
                 .responses_headers(client_setup.auth.as_ref(), &model_info.slug);
             tracing::Span::current().record("api.path", "/responses");
-            let transport = self.client.build_api_transport(
-                &client_setup.api_provider,
-                "/responses",
-                client_setup.redirect_policy,
-            )?;
             let request_auth_context = AuthRequestTelemetryContext::new(
                 client_setup.auth.as_ref().map(CodexAuth::auth_mode),
                 client_setup.api_auth.as_ref(),
@@ -1757,6 +1754,7 @@ impl ModelClientSession {
                 responses_metadata,
                 include_internal,
             )?;
+            request.model = wire_model;
             self.client.set_guardian_metadata(
                 &mut request.client_metadata,
                 responses_metadata.parent_response_id.as_deref(),
@@ -1820,15 +1818,17 @@ impl ModelClientSession {
                         inference_trace_attempt,
                         Arc::clone(&self.client.state.provider),
                         interceptors,
+                        self.owned_request.clone(),
                     );
                     return Ok(stream);
                 }
                 Err(ApiError::Transport(unauthorized_transport))
-                    if self
-                        .client
-                        .state
-                        .provider
-                        .is_recoverable_auth_error(&unauthorized_transport) =>
+                    if self.owned_request.is_none()
+                        && self
+                            .client
+                            .state
+                            .provider
+                            .is_recoverable_auth_error(&unauthorized_transport) =>
                 {
                     let response_debug_context =
                         extract_response_debug_context(&unauthorized_transport);
@@ -1854,7 +1854,10 @@ impl ModelClientSession {
                 Err(err) => {
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
-                    let err = self.client.state.provider.map_api_error(err);
+                    let err = match self.owned_request.as_ref() {
+                        Some(request) => request.map_error(&self.client.state.provider, err),
+                        None => self.client.state.provider.map_api_error(err),
+                    };
                     inference_trace_attempt.record_failed(
                         &err,
                         response_debug_context.request_id.as_deref(),
@@ -2188,6 +2191,7 @@ impl ModelClientSession {
                 inference_trace_attempt,
                 Arc::clone(&self.client.state.provider),
                 interceptors,
+                /*owned_request*/ None,
             );
             self.websocket_session.last_response_rx = Some(last_request_rx);
             return Ok(WebsocketStreamOutcome::Stream(stream));
@@ -2440,15 +2444,20 @@ fn map_response_stream(
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
     interceptors: Vec<Box<dyn codex_extension_api::ModelResponseInterceptor>>,
+    owned_request: Option<Arc<proxy_request::OwnedRequest>>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>) {
     let upstream_request_id = api_stream.upstream_request_id.take();
     let interrupt = api_stream.interrupt.take();
     let (mut stream, last_response) = map_response_events(
         upstream_request_id,
-        crate::model_request::intercept_stream(Box::pin(api_stream), interceptors),
+        crate::model_request::intercept_stream(
+            proxy_request::observe_stream(api_stream, owned_request.clone()),
+            interceptors,
+        ),
         session_telemetry,
         inference_trace_attempt,
         provider,
+        owned_request,
     );
     stream.interrupt = interrupt;
     (stream, last_response)
@@ -2460,6 +2469,7 @@ fn map_response_events<S>(
     session_telemetry: SessionTelemetry,
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
+    owned_request: Option<Arc<proxy_request::OwnedRequest>>,
 ) -> (ResponseStream, oneshot::Receiver<LastResponse>)
 where
     S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
@@ -2572,7 +2582,10 @@ where
                     if let Some(upstream_request_id) = upstream_request_id {
                         feedback_tags!(last_model_request_id = upstream_request_id);
                     }
-                    let mapped = provider.map_api_error(err);
+                    let mapped = match &owned_request {
+                        Some(request) => request.map_error(&provider, err),
+                        None => provider.map_api_error(err),
+                    };
                     inference_trace_attempt.record_failed(
                         &mapped,
                         upstream_request_id,

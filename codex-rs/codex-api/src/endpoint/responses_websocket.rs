@@ -341,6 +341,7 @@ impl ResponsesWebsocketConnection {
         );
 
         Ok(ResponseStream {
+            proxy_trace_id: None,
             rx_event,
             upstream_request_id: None,
             interrupt: Some(tx_interrupt),

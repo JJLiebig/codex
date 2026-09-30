@@ -446,6 +446,7 @@ async fn run_remote_compaction_request_v2(
 
         match result {
             Ok(compaction_output) => return Ok(compaction_output),
+            Err(err) if client_session.owned_retry_forbidden(&err) => return Err(err),
             Err(err) if matches!(err.details(), CodexErrorDetails::UsageLimitReached(_)) => {
                 let CodexErrorDetails::UsageLimitReached(usage_limit) = err.details() else {
                     unreachable!();

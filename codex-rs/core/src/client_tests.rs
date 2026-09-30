@@ -1769,6 +1769,7 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
         test_session_telemetry(),
         attempt,
         test_model_provider(),
+        /*owned_request*/ None,
     );
 
     let observed = stream
@@ -1820,6 +1821,7 @@ async fn response_stream_records_last_model_feedback_ids() {
         test_session_telemetry(),
         InferenceTraceAttempt::disabled(),
         test_model_provider(),
+        /*owned_request*/ None,
     );
 
     while stream.next().await.is_some() {}
@@ -2043,6 +2045,7 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
         test_session_telemetry(),
         attempt,
         test_model_provider(),
+        /*owned_request*/ None,
     );
 
     // Fill the mapper channel with non-terminal events, then yield one output
@@ -2332,6 +2335,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
     drop(tx_event);
     let (mut stream, last_response) = super::map_response_stream(
         codex_api::ResponseStream {
+            proxy_trace_id: None,
             rx_event,
             upstream_request_id: None,
             interrupt: None,
@@ -2340,6 +2344,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         attempt,
         test_model_provider(),
         vec![Box::new(ReplaceOutput)],
+        /*owned_request*/ None,
     );
     let mut delivered = Vec::new();
     while let Some(event) = stream.next().await {
@@ -2360,3 +2365,6 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
     assert_eq!(recorded["output_items"], serde_json::to_value(&delivered)?);
     Ok(())
 }
+
+#[path = "codex_plus_plus/proxy_request_tests.rs"]
+mod proxy_request_tests;
