@@ -193,17 +193,3 @@ async fn exact_reset_dispatches_once_and_unknown_requires_positive_current_readb
         vec!["root-after-restart", "imported"]
     );
 }
-
-#[tokio::test]
-async fn reset_without_owned_runtime_remains_pending_without_starting_it() {
-    let home = tempfile::tempdir().unwrap();
-    let (id, pending) = completion(home.path(), ResetCredentialSource::Root, "pending");
-    reconcile(home.path(), &id, &pending).await.unwrap();
-    assert!(!home.path().join("cli-proxy").exists());
-    assert_eq!(
-        AccountStore::new(home.path().into())
-            .pending_proxy_resets()
-            .unwrap(),
-        vec![(id, pending)]
-    );
-}

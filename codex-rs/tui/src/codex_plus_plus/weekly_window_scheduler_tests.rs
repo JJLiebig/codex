@@ -167,84 +167,113 @@ fn ping_outcomes_preserve_safe_failure_evidence() {
 }
 
 #[tokio::test]
-async fn disabled_scan_reconciles_a_root_manual_completion_from_before_startup_without_redemption()
-{
+async fn scans_reconcile_old_manual_and_same_pass_automatic_completions_without_starting_proxy() {
     use base64::Engine;
     use codex_login::ResetCredentialSource;
+    use codex_login::ResetReconciliation;
     use sha2::Digest;
     use wiremock::Mock;
     use wiremock::MockServer;
     use wiremock::ResponseTemplate;
     use wiremock::matchers::method;
     use wiremock::matchers::path;
-    let home = tempfile::tempdir().unwrap();
-    let server = MockServer::start().await;
-    let mut config = crate::legacy_core::config::ConfigBuilder::default()
-        .codex_home(home.path().into())
-        .build()
-        .await
-        .unwrap();
-    config.chatgpt_base_url = server.uri();
-    config.cli_auth_credentials_store_mode = codex_login::AuthCredentialsStoreMode::File;
-    config.model_provider = ModelProviderInfo::create_cli_proxy_provider();
-    let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
-        serde_json::json!({"exp": 4102444800_u64, "https://api.openai.com/auth": {"chatgpt_account_id": "workspace-a"}}).to_string()
-    );
-    let token = format!("e30.{claims}.c2ln");
-    std::fs::write(home.path().join("auth.json"), serde_json::json!({
-        "tokens": {"id_token": token, "access_token": token, "refresh_token": "synthetic-refresh", "account_id": "workspace-a"},
-        "last_refresh": Utc::now()
-    }).to_string()).unwrap();
-    Mock::given(method("GET")).and(path("/api/codex/usage"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "account_id": "workspace-a", "plan_type": "pro", "rate_limit": {
-                "allowed": true, "limit_reached": false, "primary_window": null,
-                "secondary_window": {"used_percent": 1, "limit_window_seconds": 604800, "reset_after_seconds": 3600, "reset_at": 4102444800_u64}
-            }
-        }))).expect(1).mount(&server).await;
-    let digest = sha2::Sha256::digest(b"account:workspace-a");
-    let id: AccountId =
-        serde_json::from_value(serde_json::json!(format!("acct_{digest:.16x}"))).unwrap();
-    let store = AccountStore::new(home.path().into());
-    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
-    lease
-        .begin_manual(
-            "confirmed",
-            ResetCredentialSource::Root,
-            /*credit_id*/ None,
+    for source in [ResetCredentialSource::Root, ResetCredentialSource::Imported] {
+        let imported = source == ResetCredentialSource::Imported;
+        let home = tempfile::tempdir().unwrap();
+        let server = MockServer::start().await;
+        let mut config = crate::legacy_core::config::ConfigBuilder::default()
+            .codex_home(home.path().into())
+            .build()
+            .await
+            .unwrap();
+        config.chatgpt_base_url = server.uri();
+        config.cli_auth_credentials_store_mode = codex_login::AuthCredentialsStoreMode::File;
+        config.model_provider = ModelProviderInfo::create_cli_proxy_provider();
+        let claims = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
+            serde_json::json!({"exp": 4102444800_u64, "https://api.openai.com/auth": {"chatgpt_account_id": "workspace-a"}}).to_string()
+        );
+        let token = format!("e30.{claims}.c2ln");
+        std::fs::write(home.path().join("auth.json"), serde_json::json!({
+            "tokens": {"id_token": token, "access_token": token, "refresh_token": "synthetic-refresh", "account_id": "workspace-a"},
+            "last_refresh": Utc::now()
+        }).to_string()).unwrap();
+        Mock::given(method("GET")).and(path("/api/codex/usage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "account_id": "workspace-a", "plan_type": "pro", "rate_limit": {
+                    "allowed": true, "limit_reached": false, "primary_window": null,
+                    "secondary_window": {"used_percent": 1, "limit_window_seconds": 604800, "reset_after_seconds": 3600, "reset_at": 2000000000}
+                }
+            }))).expect(if imported { 2 } else { 1 }).mount(&server).await;
+        Mock::given(method("POST"))
+            .and(path("/api/codex/rate-limit-reset-credits/consume"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"code": "reset", "windows_reset": 2})),
+            )
+            .expect(u64::from(imported))
+            .mount(&server)
+            .await;
+        let digest = sha2::Sha256::digest(b"account:workspace-a");
+        let id: AccountId =
+            serde_json::from_value(serde_json::json!(format!("acct_{digest:.16x}"))).unwrap();
+        let store = AccountStore::new(home.path().into());
+        if imported {
+            store
+                .import_current(
+                    /*label*/ None,
+                    codex_login::AuthCredentialsStoreMode::File,
+                    codex_login::AuthKeyringBackendKind::default(),
+                )
+                .unwrap();
+            codex_login::auth::login_with_chatgpt_auth_tokens(
+                &home.path().join("accounts").join(id.as_str()),
+                &token,
+                "workspace-a",
+                /*chatgpt_plan_type*/ None,
+            )
+            .unwrap();
+        }
+        let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
+        if imported {
+            lease.load_or_begin("credit").unwrap();
+        } else {
+            lease
+                .begin_manual("confirmed", source, /*credit_id*/ None)
+                .unwrap();
+            lease
+                .confirm_manual("confirmed", /*completed_at*/ 1)
+                .unwrap();
+        }
+        drop(lease);
+        let (_settings, control) = watch::channel(SchedulerSettings {
+            weekly: false,
+            auto_redeem: imported.then_some(AutoRedeemResets::default()),
+        });
+        let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+        scan(
+            config,
+            control,
+            Arc::default(),
+            Arc::new(Mutex::new(auto_redeem_resets::CompletionNotices::new())),
+            AppEventSender::new(tx),
         )
-        .unwrap();
-    lease
-        .confirm_manual("confirmed", /*completed_at*/ 1)
-        .unwrap();
-    let before = lease.state().unwrap();
-    drop(lease);
-    let (_settings, control) = watch::channel(SchedulerSettings::default());
-    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
-    scan(
-        config,
-        control,
-        Arc::default(),
-        Arc::new(Mutex::new(auto_redeem_resets::CompletionNotices::new())),
-        AppEventSender::new(tx),
-    )
-    .await;
-    assert_eq!(
-        store
+        .await;
+        let state = store
             .acquire_reset_mutation_lease(&id)
             .unwrap()
             .state()
-            .unwrap(),
-        before
-    );
-    assert!(!home.path().join("cli-proxy").exists());
-    assert!(events.try_recv().is_err());
-    assert!(
-        server
-            .received_requests()
-            .await
-            .unwrap()
-            .iter()
-            .all(|request| request.method == "GET")
-    );
+            .unwrap();
+        assert_eq!(state.phase, None);
+        assert_eq!(
+            state.completion.unwrap().reconciliation,
+            ResetReconciliation::Pending
+        );
+        assert!(!home.path().join("cli-proxy").exists());
+        while let Ok(event) = events.try_recv() {
+            assert!(!matches!(
+                event,
+                crate::app_event::AppEvent::UsageResetCompleted { .. }
+            ));
+        }
+    }
 }

@@ -199,6 +199,9 @@ async fn scan(
                 }
             }
         }
+        if let Err(error) = auto_redeem_resets::reconcile_pending(&config, &store).await {
+            tracing::warn!(%error, "could not reconcile confirmed automatic resets");
+        }
     }
     if !settings.weekly {
         poll_notices(&notices, &store, &app_event_tx);
