@@ -318,7 +318,8 @@ async fn consume_timeout_releases_account_auth_queue() -> Result<()> {
 
 #[tokio::test]
 async fn reset_lease_contention_times_out_without_blocking_server() -> Result<()> {
-    let (codex_home, _server) = chatgpt_test_context().await?;
+    let (codex_home, server) = chatgpt_test_context().await?;
+    app_test_support::mount_workspace_routing(&server).await;
     let store = AccountStore::new(codex_home.path().to_path_buf());
     let account = store.import_current(
         /*label*/ None,
