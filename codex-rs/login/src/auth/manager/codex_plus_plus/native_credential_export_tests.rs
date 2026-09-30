@@ -218,7 +218,7 @@ async fn unreadable_index_fails_instead_of_publishing_empty_inventory() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
+async fn bound_native_recovery_rechecks_disk_before_mutation_and_after_candidate_load() {
     use crate::auth::ImportedAccountSwitchOutcome::NoCandidate;
     use crate::auth::ImportedAccountSwitchOutcome::ReadyToRetry;
     use crate::auth::ImportedAccountSwitchOutcome::RequestSourceChanged;
@@ -233,7 +233,7 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
         )
         .unwrap();
     }
-    for case in [
+    for (case, operation) in [
         "switch",
         "manual",
         "stale",
@@ -241,7 +241,10 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
         "root",
         "same_owner_source",
         "selected_changed",
-    ] {
+    ]
+    .into_iter()
+    .flat_map(|case| ["quota", "auth"].map(move |operation| (case, operation)))
+    {
         let home = TempDir::new().unwrap();
         let store = AccountStore::new(home.path().to_path_buf());
         let mut profiles = Vec::new();
@@ -270,6 +273,7 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
         if case == "root" {
             save(home.path(), &auth("root", "initial"));
             manager.clear_active_imported_account();
+            manager.reload().await;
         }
         if case == "same_owner_source" {
             let auth = serde_json::from_slice(
@@ -285,6 +289,15 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
             .unwrap()
             .selected_expectation()
             .unwrap();
+        if operation == "auth" {
+            manager.record_permanent_refresh_failure_if_unchanged(
+                &manager.auth_cached().unwrap(),
+                &codex_protocol::auth::RefreshTokenFailedError::new(
+                    codex_protocol::auth::RefreshTokenFailedReason::Expired,
+                    "synthetic expired refresh",
+                ),
+            );
+        }
         let original_revision = *manager.auth_change_receiver().borrow();
         if case == "same_owner_source" {
             manager
@@ -311,16 +324,38 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
             let manager = manager.clone();
             async move {
                 let mut attempted = HashSet::new();
-                let outcome = manager
-                    .switch_after_native_usage_limit(&expected, &mut attempted, Some(resets_at))
-                    .await
-                    .unwrap();
+                let outcome = if operation == "auth" {
+                    let mut recovery = manager.unauthorized_recovery();
+                    let result = recovery.next_for_native_request(&expected).await;
+                    assert_eq!(result.is_ok(), case == "switch", "{case}");
+                    assert!(!recovery.has_next());
+                    if result.is_ok() {
+                        ReadyToRetry
+                    } else if matches!(case, "manual" | "root") {
+                        NoCandidate
+                    } else {
+                        RequestSourceChanged
+                    }
+                } else {
+                    manager
+                        .switch_after_native_usage_limit(&expected, &mut attempted, Some(resets_at))
+                        .await
+                        .unwrap()
+                };
                 (outcome, attempted)
             }
         });
         if candidate_guard.is_some() {
             tokio::time::timeout(std::time::Duration::from_secs(5), async {
-                while store.list().unwrap()[0].usage_limit_resets_at != Some(resets_at) {
+                while {
+                    let _index_guard = store.acquire_index_lock().unwrap();
+                    let profile = &store.list().unwrap()[0];
+                    if operation == "auth" {
+                        !profile.login_required
+                    } else {
+                        profile.usage_limit_resets_at != Some(resets_at)
+                    }
+                } {
                     tokio::task::yield_now().await;
                 }
             })
@@ -331,12 +366,12 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
             drop(candidate_guard);
         }
         let (outcome, attempted) = task.await.unwrap();
-        let switched = matches!(case, "switch" | "root");
+        let switched = case == "switch" || (case == "root" && operation == "quota");
         assert_eq!(
             outcome,
             if switched {
                 ReadyToRetry
-            } else if case == "manual" {
+            } else if case == "manual" || (case == "root" && operation == "auth") {
                 NoCandidate
             } else {
                 RequestSourceChanged
@@ -345,6 +380,8 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
         );
         if case == "selected_changed" {
             assert_eq!(manager.active_account_id(), Some(profiles[1].id.clone()));
+        } else if case == "root" && !switched {
+            assert_eq!(manager.active_account_id(), None);
         } else if !switched {
             assert_eq!(*manager.auth_change_receiver().borrow(), original_revision);
             assert_eq!(manager.active_account_id(), Some(profiles[0].id.clone()));
@@ -357,7 +394,7 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
         );
         assert_eq!(
             attempted,
-            if charged {
+            if charged && operation == "quota" {
                 HashSet::from([profiles[0].id.to_string()])
             } else {
                 HashSet::new()
@@ -370,7 +407,17 @@ async fn bound_quota_rechecks_disk_before_cooldown_and_after_candidate_load() {
                 .iter()
                 .map(|profile| profile.usage_limit_resets_at)
                 .collect::<Vec<_>>(),
-            vec![charged.then_some(resets_at), None],
+            vec![(charged && operation == "quota").then_some(resets_at), None],
+            "{case}"
+        );
+        assert_eq!(
+            store
+                .list()
+                .unwrap()
+                .iter()
+                .map(|profile| profile.login_required)
+                .collect::<Vec<_>>(),
+            vec![charged && operation == "auth", false],
             "{case}"
         );
     }

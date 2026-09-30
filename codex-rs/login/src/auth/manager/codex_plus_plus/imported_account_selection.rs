@@ -14,6 +14,7 @@ use super::imported_account_startup::imported_account_blocked;
 use super::imported_account_startup::load_imported_account_auth;
 use super::native_credential_export::NativeCredentialExpectation;
 use super::native_credential_export::NativeCredentialSource;
+use super::native_credential_export::NativeRequestAdmission;
 use crate::account::AccountCandidate;
 use crate::account::AccountId;
 use crate::account::AccountStore;
@@ -165,7 +166,10 @@ impl AuthManager {
             .acquire()
             .await
             .map_err(std::io::Error::other)?;
-        let Some(guard) = self.native_request_guard(expected).await? else {
+        let Some(guard) = self
+            .native_request_guard(expected, NativeRequestAdmission::Eligible)
+            .await?
+        else {
             return Ok(ImportedAccountSwitchOutcome::RequestSourceChanged);
         };
         if let NativeCredentialSource::Imported(id) = expected.source() {
@@ -180,14 +184,17 @@ impl AuthManager {
             return Ok(ImportedAccountSwitchOutcome::NoCandidate);
         }
         Ok(self
-            .switch_to_next_imported_account_unlocked(attempted_account_ids, Some(expected))
+            .switch_to_next_imported_account_unlocked(
+                attempted_account_ids,
+                Some((expected, NativeRequestAdmission::Eligible)),
+            )
             .await)
     }
 
     pub(super) async fn switch_to_next_imported_account_unlocked(
         &self,
         attempted_account_ids: &HashSet<String>,
-        expectation: Option<&NativeCredentialExpectation>,
+        expectation: Option<(&NativeCredentialExpectation, NativeRequestAdmission)>,
     ) -> ImportedAccountSwitchOutcome {
         if !self.is_login_method_allowed(ForcedLoginMethod::Chatgpt) {
             return ImportedAccountSwitchOutcome::NoCandidate;
@@ -253,8 +260,8 @@ impl AuthManager {
                 (true, None) => continue,
                 (false, _) => ImportedAccountSwitchOutcome::ReadyToRetry,
             };
-            let _source_guard = if let Some(expected) = expectation {
-                match self.native_request_guard(expected).await {
+            let _source_guard = if let Some((expected, admission)) = expectation {
+                match self.native_request_guard(expected, admission).await {
                     Ok(Some(guard)) => Some(guard),
                     Ok(None) | Err(_) => return ImportedAccountSwitchOutcome::RequestSourceChanged,
                 }
@@ -265,8 +272,11 @@ impl AuthManager {
             return outcome;
         }
 
-        if let Some(expected) = expectation
-            && !matches!(self.native_request_guard(expected).await, Ok(Some(_)))
+        if let Some((expected, admission)) = expectation
+            && !matches!(
+                self.native_request_guard(expected, admission).await,
+                Ok(Some(_))
+            )
         {
             return ImportedAccountSwitchOutcome::RequestSourceChanged;
         }
