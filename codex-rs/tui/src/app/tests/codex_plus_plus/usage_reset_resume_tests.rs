@@ -86,6 +86,7 @@ async fn automatic_usage_reset_reads_current_account_and_submits_one_continuatio
         &mut tui,
         &mut server,
         AppEvent::UsageResetCompleted {
+            completion: None,
             account_id,
             completed_at: chrono::Utc::now().timestamp_nanos_opt().unwrap(),
         },
@@ -207,7 +208,64 @@ async fn automatic_usage_reset_reads_current_account_and_submits_one_continuatio
         source: target.source,
         account_id: target.account_id.clone(),
         completed_at: target.failed_at,
+        completed_at_ns: (target.failed_at * 1_000_000_000).to_string(),
     });
+    // Both completion producers request exact admission now, without waiting for a poll.
+    let completion = owned.reset_admission.clone().unwrap();
+    for trigger in ["automatic", "manual", "reopened"] {
+        let event = if trigger != "automatic" {
+            let request_id = app.chat_widget.show_rate_limit_reset_consuming_popup();
+            AppEvent::RateLimitResetCreditConsumed {
+                request_id,
+                idempotency_key: completion.id.clone(),
+                credit_id: None,
+                result: if trigger == "reopened" {
+                    Err("Previous reset attempt resolved. No new reset was used.".into())
+                } else {
+                    Ok(codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse {
+                        outcome: codex_app_server_protocol::ConsumeAccountRateLimitResetCreditOutcome::Reset,
+                        reset_completion: Some(completion.clone()),
+                    })
+                },
+            }
+        } else {
+            AppEvent::UsageResetCompleted {
+                account_id: account_id.clone(),
+                completed_at: completion.completed_at_ns.parse()?,
+                completion: Some(completion.clone()),
+            }
+        };
+        app.handle_event(&mut tui, &mut server, event).await?;
+        loop {
+            let loaded = next_usage_event(&mut events).await?;
+            if let AppEvent::UsageResetAdmissionLoaded {
+                target: immediate,
+                periodic_request_id,
+                ..
+            } = &loaded
+            {
+                let mut expected = target.clone();
+                expected.completion_id = (trigger != "reopened").then(|| completion.id.clone());
+                assert_eq!((immediate, periodic_request_id), (&expected, &None));
+                app.handle_event(&mut tui, &mut server, loaded).await?;
+                break;
+            }
+            app.handle_event(&mut tui, &mut server, loaded).await?;
+        }
+        assert!(
+            !std::iter::from_fn(|| ops.try_recv().ok()).any(|op| matches!(op, Op::UserTurn { .. }))
+        );
+    }
+    assert!(
+        !backend
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .any(|request| request.method == "POST"
+                && request.url.path() == "/api/codex/rate-limit-reset-credits/consume")
+    );
+    let hard_stop_generation = app.rate_limit_hard_stop_generation;
     for (generation, expected_count) in [
         (hard_stop_generation.wrapping_add(1), 0),
         (hard_stop_generation, 1),

@@ -76,6 +76,7 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
 #[test]
 fn projects_failed_turn_completion_as_snapshot() {
     let error = ErrorEvent {
+        usage_limit_observed_at_ns: Some("19000000001".into()),
         inference_attribution: Some(
             codex_protocol::inference_attribution::InferenceAttribution::Claude,
         ),
@@ -106,6 +107,7 @@ fn projects_failed_turn_completion_as_snapshot() {
                 root_turn_id: None,
                 status: TurnStatus::Failed,
                 error: Some(TurnError {
+                    usage_limit_observed_at_ns: Some("19000000001".into()),
                     inference_attribution: Some(
                         codex_protocol::inference_attribution::InferenceAttribution::Claude
                     ),

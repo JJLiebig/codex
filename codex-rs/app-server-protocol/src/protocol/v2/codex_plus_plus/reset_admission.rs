@@ -16,6 +16,9 @@ pub struct UsageResetTargetParams {
     /// Earliest eligible completion, in Unix seconds on the inference host.
     #[ts(type = "number")]
     pub failed_at: i64,
+    /// Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.
+    #[ts(optional = nullable)]
+    pub failed_at_ns: Option<String>,
     /// When supplied, admission requires this exact durable completion.
     #[ts(optional = nullable)]
     pub completion_id: Option<String>,
@@ -31,4 +34,6 @@ pub struct UsageResetCompletion {
     /// Unix seconds; does not prove present quota or proxy readiness.
     #[ts(type = "number")]
     pub completed_at: i64,
+    /// Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.
+    pub completed_at_ns: String,
 }

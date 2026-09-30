@@ -290,6 +290,7 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
                     source: target.source,
                     account_id: target.account_id.clone(),
                     completed_at: target.failed_at,
+                    completed_at_ns: (target.failed_at * 1_000_000_000).to_string(),
                 };
                 target.completion_id = Some(completion.id.clone());
                 for invalid in ["source", "account", "completion", "permission", "old"] {
@@ -305,7 +306,10 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
                         "account" => wrong.account_id = "other".into(),
                         "completion" => wrong.id = "other-reset".into(),
                         // This reset is newer than the lagging client clock, but predates failure.
-                        "old" => wrong.completed_at = host_completed_at - 30,
+                        "old" => {
+                            wrong.completed_at_ns =
+                                ((host_completed_at - 30) * 1_000_000_000).to_string()
+                        }
                         _ => {}
                     }
                     response.ordinary_usage_allowed = (invalid != "permission").then_some(true);
@@ -356,4 +360,87 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
         }
     }
     insta::assert_snapshot!("owned_inference_failures", displayed.join("\n"));
+}
+
+#[tokio::test]
+async fn owned_reset_orders_same_millisecond_using_host_observation() {
+    // The local clock is unrelated; delivery/completion can be much later than the quota error.
+    const FAILURE: i64 = 1_900_000_000_123_456_789;
+    for value in [
+        Some(FAILURE.to_string()),
+        None,
+        Some("overflow99999999999999999999".into()),
+    ] {
+        let (mut chat, _events, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.config.model_provider =
+            codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
+        chat.thread_id = Some(ThreadId::new());
+        handle_turn_started(&mut chat, "failed-turn");
+        let ServerNotification::Error(mut event) = failure(&chat) else {
+            unreachable!()
+        };
+        event.error.inference_attribution = Some(InferenceAttribution::ServedNative {
+            source: InferenceNativeSource::Imported,
+            account_id: account().to_string(),
+            display_label: None,
+        });
+        event.error.usage_limit_observed_at_ns = value.clone();
+        for _ in 0..2 {
+            chat.handle_server_notification(
+                ServerNotification::Error(event.clone()),
+                /*replay_kind*/ None,
+            );
+        }
+        let mut turn = crate::chatwidget::tests::app_server_turn(
+            "failed-turn",
+            TurnStatus::Failed,
+            /*duration_ms*/ None,
+            Some(event.error),
+        );
+        turn.completed_at = Some(FAILURE / 1_000_000_000 + 60);
+        let completed = ServerNotification::TurnCompleted(
+            codex_app_server_protocol::TurnCompletedNotification {
+                thread_id: event.thread_id,
+                turn,
+            },
+        );
+        for _ in 0..2 {
+            chat.handle_server_notification(completed.clone(), /*replay_kind*/ None);
+        }
+        let target = chat.owned_reset_target(/*completion*/ None).unwrap();
+        let precise = value
+            .as_ref()
+            .is_some_and(|value| value == &FAILURE.to_string());
+        assert_eq!(
+            target.failed_at_ns,
+            Some(
+                if precise {
+                    FAILURE
+                } else {
+                    (FAILURE / 1_000_000_000 + 61) * 1_000_000_000
+                }
+                .to_string()
+            )
+        );
+        let mut response = quota();
+        response.ordinary_usage_allowed = Some(true);
+        for reset_at in [FAILURE - 1, FAILURE + 1] {
+            response.reset_admission = Some(UsageResetCompletion {
+                id: "actual-reset".into(),
+                source: target.source,
+                account_id: target.account_id.clone(),
+                completed_at: reset_at / 1_000_000_000,
+                completed_at_ns: reset_at.to_string(),
+            });
+            chat.resume_after_owned_reset(&target, &response);
+            chat.resume_after_owned_reset(&target, &response);
+            if precise && reset_at > FAILURE {
+                assert!(matches!(
+                    next_submit_op(&mut ops),
+                    AppCommand::UserTurn { .. }
+                ));
+            }
+            assert_no_submit_op(&mut ops);
+        }
+    }
 }

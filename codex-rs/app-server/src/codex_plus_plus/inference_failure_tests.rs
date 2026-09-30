@@ -33,6 +33,7 @@ async fn inference_failure_survives_live_notification_and_completed_fallback() {
         );
         let error = ErrorEvent {
             message: "Provider quota reached".into(),
+            usage_limit_observed_at_ns: Some("19000000001".into()),
             inference_attribution: Some(InferenceAttribution::Claude),
             codex_error_info: Some(codex_protocol::protocol::CodexErrorInfo::BadRequest),
             misalignment: None,
@@ -85,6 +86,7 @@ async fn inference_failure_survives_live_notification_and_completed_fallback() {
                 error,
                 TurnError {
                     message: "Provider quota reached".into(),
+                    usage_limit_observed_at_ns: Some("19000000001".into()),
                     inference_attribution: Some(InferenceAttribution::Claude),
                     codex_error_info: Some(codex_app_server_protocol::CodexErrorInfo::BadRequest),
                     additional_details: None,

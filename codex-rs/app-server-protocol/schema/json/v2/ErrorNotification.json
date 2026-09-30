@@ -341,6 +341,14 @@
           ],
           "default": null,
           "description": "Optional public explanation and continuation instruction for a misalignment block."
+        },
+        "usageLimitObservedAtNs": {
+          "default": null,
+          "description": "Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

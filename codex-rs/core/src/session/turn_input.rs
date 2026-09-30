@@ -594,6 +594,7 @@ impl Session {
                 self.send_event_raw(Event {
                     id: submission_id,
                     msg: EventMsg::Error(ErrorEvent {
+                        usage_limit_observed_at_ns: None,
                         inference_attribution: None,
                         misalignment: None,
                         message: format!("failed to submit turn input: {reason:?}"),

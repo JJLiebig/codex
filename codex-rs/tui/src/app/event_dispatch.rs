@@ -839,8 +839,8 @@ impl App {
             AppEvent::UsageResetAdmissionLoaded { target, periodic_request_id, hard_stop_generation, response } => {
                 self.finish_owned_reset(&target, periodic_request_id, hard_stop_generation, response);
             }
-            AppEvent::UsageResetCompleted { account_id, completed_at } => {
-                self.refresh_after_usage_reset(app_server, account_id, completed_at);
+            AppEvent::UsageResetCompleted { account_id, completed_at, completion } => {
+                self.refresh_after_usage_reset(app_server, account_id, completed_at, completion.as_ref());
             }
             AppEvent::UsageResetQuotaLoaded { thread_id, turn_id, account_id, completed_at, hard_stop_generation, response } => {
                 if self.chat_widget.thread_id() == Some(thread_id)
@@ -1877,6 +1877,8 @@ impl App {
                         "account/rateLimitResetCredit/consume failed during TUI request: {err}"
                     );
                 }
+                let discover_completion = result.is_err() && self.chat_widget.is_pending_reset_consume(request_id);
+                let completion = result.as_ref().ok().and_then(|response| response.reset_completion.clone());
                 if self.chat_widget.finish_rate_limit_reset_consume(
                     request_id,
                     idempotency_key,
@@ -1892,6 +1894,12 @@ impl App {
                         app_server,
                         RateLimitRefreshOrigin::ResetConsume { request_id },
                     );
+                    if let Some(completion) = completion {
+                        let _ = self.refresh_owned_reset(app_server, /*periodic_request_id*/ None, Some(&completion));
+                    }
+                } else if discover_completion {
+                    // A different incoming tuple can settle the original reset and still return an error.
+                    let _ = self.refresh_owned_reset(app_server, /*periodic_request_id*/ None, /*completion*/ None);
                 }
             }
             AppEvent::ThreadUsageLoaded {

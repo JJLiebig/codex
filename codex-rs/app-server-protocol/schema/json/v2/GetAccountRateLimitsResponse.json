@@ -300,6 +300,10 @@
           "format": "int64",
           "type": "integer"
         },
+        "completedAtNs": {
+          "description": "Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.",
+          "type": "string"
+        },
         "id": {
           "type": "string"
         },
@@ -310,6 +314,7 @@
       "required": [
         "accountId",
         "completedAt",
+        "completedAtNs",
         "id",
         "source"
       ],

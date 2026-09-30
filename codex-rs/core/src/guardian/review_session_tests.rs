@@ -808,6 +808,7 @@ async fn wait_for_guardian_review_ignores_prior_turn_errors() {
         .send(Event {
             id: "prior-turn".to_string(),
             msg: EventMsg::Error(ErrorEvent {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "stale guardian error".to_string(),
@@ -855,6 +856,7 @@ async fn wait_for_guardian_review_preserves_structured_session_error() {
         .send(Event {
             id: "current-turn".to_string(),
             msg: EventMsg::Error(ErrorEvent {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "temporary failure".to_string(),

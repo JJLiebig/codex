@@ -137,6 +137,7 @@ async fn cyber_policy_response_emits_typed_error_notification_v2() -> Result<()>
         error,
         ErrorNotification {
             error: codex_app_server_protocol::TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: CYBER_POLICY_MESSAGE.to_string(),

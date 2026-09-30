@@ -558,6 +558,19 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
             if case == "stream"
                 && let Some(err) = error.take()
             {
+                let captured_at = err
+                    .usage_limit_observed_at_ns()
+                    .expect("host quota observation");
+                assert!(captured_at <= chrono::Utc::now().timestamp_nanos_opt().unwrap());
+                let duplicate = session.owned_request.as_ref().unwrap().map_error(
+                    &client.state.provider,
+                    ApiError::UsageLimitReached {
+                        plan_type: None,
+                        resets_at: None,
+                        limit_window_minutes: None,
+                    },
+                );
+                assert_eq!(duplicate.usage_limit_observed_at_ns(), Some(captured_at));
                 let CodexErrorDetails::UsageLimitReached(usage) = err.details() else {
                     panic!("native stream quota: {err}");
                 };
@@ -574,6 +587,12 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
                 let replacement =
                     CodexErr::UnsupportedOperation("manual selection guidance".into())
                         .with_inference_attribution_from(&err);
+                assert_eq!(
+                    replacement
+                        .to_error_event(/*message_prefix*/ None)
+                        .usage_limit_observed_at_ns,
+                    Some(captured_at.to_string())
+                );
                 assert_eq!(
                     replacement
                         .to_error_event(/*message_prefix*/ None)

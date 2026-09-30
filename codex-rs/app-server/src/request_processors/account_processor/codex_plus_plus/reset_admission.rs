@@ -12,6 +12,11 @@ pub(super) async fn read(
     target: UsageResetTargetParams,
 ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
     tokio::time::timeout(Duration::from_secs(/*secs*/ 10), async {
+        let failed_at = match target.failed_at_ns.as_deref() {
+            Some(value) => value.parse::<i64>().ok().filter(|at| *at >= 0),
+            None => target.failed_at.checked_mul(1_000_000_000),
+        }
+        .ok_or_else(|| invalid_request("invalid reset failure time"))?;
         let account_id: AccountId = serde_json::from_value(serde_json::json!(target.account_id))
             .map_err(|error| invalid_request(format!("invalid reset account: {error}")))?;
         let source = match target.source {
@@ -59,7 +64,7 @@ pub(super) async fn read(
                                 InferenceNativeSource::Root => ResetCredentialSource::Root,
                                 InferenceNativeSource::Imported => ResetCredentialSource::Imported,
                             })
-                        && completion.completed_at / 1_000_000_000 >= target.failed_at
+                        && completion.completed_at >= failed_at
                         && target
                             .completion_id
                             .as_ref()
@@ -95,6 +100,7 @@ pub(super) async fn read(
                 source: target.source,
                 account_id: target.account_id,
                 completed_at: completion.completed_at / 1_000_000_000,
+                completed_at_ns: completion.completed_at.to_string(),
             }),
             ordinary_usage_allowed: usage.ordinary_usage_allowed,
             rate_limits,

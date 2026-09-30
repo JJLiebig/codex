@@ -1111,6 +1111,7 @@ pub(crate) enum AppEvent {
         response: Option<GetAccountRateLimitsResponse>,
     },
     UsageResetCompleted {
+        completion: Option<codex_app_server_protocol::UsageResetCompletion>,
         account_id: codex_login::AccountId,
         completed_at: i64,
     },

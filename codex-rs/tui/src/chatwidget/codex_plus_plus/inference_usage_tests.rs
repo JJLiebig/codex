@@ -129,6 +129,7 @@ async fn inference_status_tracks_scoped_success_and_failure_without_native_quota
         /*duration_ms*/ None,
         Some(codex_app_server_protocol::TurnError {
             message: "quota".into(),
+            usage_limit_observed_at_ns: None,
             inference_attribution: Some(native.clone()),
             codex_error_info: None,
             additional_details: None,

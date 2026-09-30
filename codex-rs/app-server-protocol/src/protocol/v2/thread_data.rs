@@ -425,6 +425,9 @@ pub enum TurnItemsView {
 #[ts(export_to = "v2/")]
 #[error("{message}")]
 pub struct TurnError {
+    /// Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
+    #[serde(default)]
+    pub usage_limit_observed_at_ns: Option<String>,
     pub message: String,
     pub codex_error_info: Option<CodexErrorInfo>,
     #[serde(default)]

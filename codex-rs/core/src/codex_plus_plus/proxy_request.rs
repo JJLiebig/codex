@@ -17,6 +17,7 @@ pub(super) struct OwnedRequest {
     pub(super) quota_attribution: OnceLock<NativeQuotaAttribution>,
     pub(super) response_trace: OnceLock<Option<String>>,
     pub(super) served_native_source: OnceLock<Option<NativeCredentialSource>>,
+    usage_limit_observed_at_ns: OnceLock<Option<i64>>,
     accepted_output: AtomicBool,
 }
 
@@ -164,6 +165,8 @@ impl OwnedRequest {
             };
             if let Some(attribution) = attribution {
                 let _ = self.quota_attribution.set(attribution);
+                self.usage_limit_observed_at_ns
+                    .get_or_init(|| chrono::Utc::now().timestamp_nanos_opt());
             }
         }
         let mapped = if status == Some(StatusCode::UNAUTHORIZED) || suspended_auth {
@@ -192,7 +195,11 @@ impl OwnedRequest {
         } else {
             mapped
         };
-        mapped.with_inference_attribution(self.failure_attribution())
+        mapped
+            .with_inference_attribution(self.failure_attribution())
+            .with_usage_limit_observed_at_ns(
+                self.usage_limit_observed_at_ns.get().copied().flatten(),
+            )
     }
 }
 
@@ -205,7 +212,11 @@ impl ModelClientSession {
 
     pub(crate) fn attribute_owned_error(&self, error: CodexErr) -> CodexErr {
         match &self.owned_request {
-            Some(request) => error.with_inference_attribution(request.failure_attribution()),
+            Some(request) => error
+                .with_inference_attribution(request.failure_attribution())
+                .with_usage_limit_observed_at_ns(
+                    request.usage_limit_observed_at_ns.get().copied().flatten(),
+                ),
             None => error,
         }
     }
@@ -273,6 +284,7 @@ impl ModelClientSession {
                 quota_attribution: OnceLock::new(),
                 response_trace: OnceLock::new(),
                 served_native_source: OnceLock::new(),
+                usage_limit_observed_at_ns: OnceLock::new(),
                 accepted_output: AtomicBool::new(false),
             }));
             return Ok((

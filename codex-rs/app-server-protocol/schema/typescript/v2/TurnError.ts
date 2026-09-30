@@ -5,7 +5,11 @@ import type { CodexErrorInfo } from "./CodexErrorInfo";
 import type { InferenceAttribution } from "./InferenceAttribution";
 import type { MisalignmentErrorDetails } from "./MisalignmentErrorDetails";
 
-export type TurnError = { message: string, codexErrorInfo: CodexErrorInfo | null, inferenceAttribution: InferenceAttribution | null, additionalDetails: string | null,
+export type TurnError = {
+/**
+ * Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
+ */
+usageLimitObservedAtNs: string | null, message: string, codexErrorInfo: CodexErrorInfo | null, inferenceAttribution: InferenceAttribution | null, additionalDetails: string | null,
 /**
  * Optional public explanation and continuation instruction for a misalignment block.
  */

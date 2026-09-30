@@ -1063,6 +1063,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             // We don't need to update the turn summary store for stream errors as they are intermediate error states for retries,
             // but we notify the client.
             let turn_error = TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: ev.message,
@@ -1839,6 +1840,7 @@ async fn on_request_permissions_response(
                 conversation_id,
                 &turn_id,
                 TurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message,
@@ -3067,6 +3069,7 @@ mod tests {
         handle_error(
             conversation_id,
             TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "boom".to_string(),
@@ -3081,6 +3084,7 @@ mod tests {
         assert_eq!(
             turn_summary.last_error,
             Some(TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "boom".to_string(),
@@ -3515,6 +3519,7 @@ mod tests {
         handle_error(
             conversation_id,
             TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "oops".to_string(),
@@ -3567,6 +3572,7 @@ mod tests {
         handle_error(
             conversation_id,
             TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "bad".to_string(),
@@ -3604,6 +3610,7 @@ mod tests {
                 assert_eq!(
                     n.turn.error,
                     Some(TurnError {
+                        usage_limit_observed_at_ns: None,
                         inference_attribution: None,
                         misalignment: None,
                         message: "bad".to_string(),
@@ -3821,6 +3828,7 @@ mod tests {
         handle_error(
             conversation_a,
             TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "a1".to_string(),
@@ -3844,6 +3852,7 @@ mod tests {
         handle_error(
             conversation_b,
             TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "b1".to_string(),
@@ -3882,6 +3891,7 @@ mod tests {
                 assert_eq!(
                     n.turn.error,
                     Some(TurnError {
+                        usage_limit_observed_at_ns: None,
                         inference_attribution: None,
                         misalignment: None,
                         message: "a1".to_string(),
@@ -3902,6 +3912,7 @@ mod tests {
                 assert_eq!(
                     n.turn.error,
                     Some(TurnError {
+                        usage_limit_observed_at_ns: None,
                         inference_attribution: None,
                         misalignment: None,
                         message: "b1".to_string(),

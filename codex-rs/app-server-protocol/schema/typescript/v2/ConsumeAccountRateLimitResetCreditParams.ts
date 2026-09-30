@@ -4,6 +4,10 @@
 
 export type ConsumeAccountRateLimitResetCreditParams = {
 /**
+ * Optional loaded thread whose provider needs source-bound reset completion.
+ */
+threadId?: string | null,
+/**
  * Identifies one logical reset attempt. A UUID is recommended; reuse the same value when
  * retrying that attempt.
  */

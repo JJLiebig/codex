@@ -246,6 +246,7 @@ async fn replayed_turn_completions_do_not_start_live_billing_refreshes() {
             (
                 TurnStatus::Failed,
                 Some(TurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message: "the replayed turn failed".to_string(),
@@ -326,6 +327,7 @@ async fn replayed_errors_do_not_start_live_billing_refreshes() {
 
         let notification = ServerNotification::Error(ErrorNotification {
             error: TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "the replayed turn failed".to_string(),

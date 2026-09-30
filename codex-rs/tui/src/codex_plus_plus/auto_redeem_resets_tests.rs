@@ -420,8 +420,27 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
     drop(lease);
     for _ in 0..2 {
         notices.poll(&store, &tx);
-        assert!(
-            matches!(events.try_recv(), Ok(AppEvent::UsageResetCompleted { account_id, .. }) if account_id == id)
+        let AppEvent::UsageResetCompleted {
+            account_id,
+            completed_at,
+            completion: Some(actual),
+        } = events.try_recv().unwrap()
+        else {
+            panic!("exact completion notice");
+        };
+        assert_eq!(
+            (account_id, completed_at, actual),
+            (
+                id.clone(),
+                completion.completed_at,
+                codex_app_server_protocol::UsageResetCompletion {
+                    id: completion.id.clone(),
+                    source: codex_protocol::inference_attribution::InferenceNativeSource::Imported,
+                    account_id: id.to_string(),
+                    completed_at: completion.completed_at / 1_000_000_000,
+                    completed_at_ns: completion.completed_at.to_string(),
+                }
+            )
         );
         assert!(
             events.try_recv().is_err(),

@@ -642,6 +642,7 @@ async fn misalignment_buffered_replay_preserves_input_after_continuation() {
         .restore_user_message_to_composer("keep draft".into());
     let saved_input = app.chat_widget.capture_thread_input_state();
     let error = AppServerTurnError {
+        usage_limit_observed_at_ns: None,
         inference_attribution: None,
         misalignment: None,
         message: "Chat stopped".into(),
@@ -748,6 +749,7 @@ async fn misalignment_buffered_replay_preserves_input_after_continuation() {
 async fn misalignment_replay_blocks_when_turn_start_was_evicted() {
     let thread_id = ThreadId::new();
     let error = AppServerTurnError {
+        usage_limit_observed_at_ns: None,
         inference_attribution: Some(
             codex_protocol::inference_attribution::InferenceAttribution::Unknown,
         ),
@@ -785,6 +787,7 @@ async fn misalignment_replay_blocks_when_turn_start_was_evicted() {
                 thread_id: thread_id.to_string(),
                 turn_id: "settings-update".into(),
                 error: AppServerTurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     codex_error_info: Some(AppServerCodexErrorInfo::BadRequest),
                     ..error

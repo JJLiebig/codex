@@ -8,6 +8,7 @@ use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::GetAccountRateLimitsParams;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::RequestId;
+use codex_app_server_protocol::UsageResetCompletion;
 use codex_app_server_protocol::UsageResetTargetParams;
 use codex_login::AccountId;
 use std::ops::ControlFlow;
@@ -27,13 +28,15 @@ impl App {
     pub(super) fn refresh_owned_reset(
         &self,
         app_server: &AppServerSession,
-        periodic_request_id: u64,
+        periodic_request_id: Option<u64>,
+        completion: Option<&UsageResetCompletion>,
     ) -> ControlFlow<()> {
-        let Some(target) = self.chat_widget.owned_reset_target(/*completion*/ None) else {
+        let Some(target) = self.chat_widget.owned_reset_target(completion) else {
             return ControlFlow::Continue(());
         };
-        let owned_only = self.chat_widget.rate_limit_refresh_interval().is_none();
-        let periodic_request_id = owned_only.then_some(periodic_request_id);
+        let owned_only = periodic_request_id.is_some()
+            && self.chat_widget.rate_limit_refresh_interval().is_none();
+        let periodic_request_id = periodic_request_id.filter(|_| owned_only);
         let handle = app_server.request_handle();
         let tx = self.app_event_tx.clone();
         let hard_stop_generation = self.rate_limit_hard_stop_generation;
@@ -90,7 +93,15 @@ impl App {
         app_server: &AppServerSession,
         account_id: AccountId,
         completed_at: i64,
+        completion: Option<&UsageResetCompletion>,
     ) {
+        if let Some(completion) = completion {
+            let _ = self.refresh_owned_reset(
+                app_server,
+                /*periodic_request_id*/ None,
+                Some(completion),
+            );
+        }
         let Some(thread_id) = self.chat_widget.thread_id() else {
             return;
         };

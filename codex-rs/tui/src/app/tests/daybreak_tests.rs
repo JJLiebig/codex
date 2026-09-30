@@ -99,6 +99,7 @@ async fn cyber_refusal_reads_eligibility_without_changing_the_model() -> Result<
                 AppServerEvent::ServerNotification(Box::new(ServerNotification::Error(
                     ErrorNotification {
                         error: AppServerTurnError {
+                            usage_limit_observed_at_ns: None,
                             inference_attribution: None,
                             misalignment: None,
                             message: "server fallback".into(),

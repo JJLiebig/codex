@@ -1106,13 +1106,13 @@ class ConsumeAccountRateLimitResetCreditParams(BaseModel):
             description="Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
         ),
     ]
-
-
-class ConsumeAccountRateLimitResetCreditResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    outcome: ConsumeAccountRateLimitResetCreditOutcome
+    thread_id: Annotated[
+        str | None,
+        Field(
+            alias="threadId",
+            description="Optional loaded thread whose provider needs source-bound reset completion.",
+        ),
+    ] = None
 
 
 class InputTextContentItem(BaseModel):
@@ -6330,6 +6330,13 @@ class UsageResetCompletion(BaseModel):
             description="Unix seconds; does not prove present quota or proxy readiness.",
         ),
     ]
+    completed_at_ns: Annotated[
+        str,
+        Field(
+            alias="completedAtNs",
+            description="Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.",
+        ),
+    ]
     id: str
     source: InferenceNativeSource
 
@@ -6353,6 +6360,13 @@ class UsageResetTargetParams(BaseModel):
             description="Earliest eligible completion, in Unix seconds on the inference host.",
         ),
     ]
+    failed_at_ns: Annotated[
+        str | None,
+        Field(
+            alias="failedAtNs",
+            description="Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.",
+        ),
+    ] = None
     source: InferenceNativeSource
     thread_id: Annotated[str, Field(alias="threadId")]
     turn_id: Annotated[str, Field(alias="turnId")]
@@ -7943,6 +7957,14 @@ class ConfigurationReasoning(BaseModel):
         populate_by_name=True,
     )
     effort: ReasoningEffort
+
+
+class ConsumeAccountRateLimitResetCreditResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    outcome: ConsumeAccountRateLimitResetCreditOutcome
+    reset_completion: Annotated[UsageResetCompletion | None, Field(alias="resetCompletion")] = None
 
 
 class InputImageContentItem(BaseModel):
@@ -10434,6 +10456,13 @@ class TurnError(BaseModel):
         MisalignmentErrorDetails | None,
         Field(
             description="Optional public explanation and continuation instruction for a misalignment block."
+        ),
+    ] = None
+    usage_limit_observed_at_ns: Annotated[
+        str | None,
+        Field(
+            alias="usageLimitObservedAtNs",
+            description="Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.",
         ),
     ] = None
 

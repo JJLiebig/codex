@@ -12,6 +12,10 @@ export type UsageResetTargetParams = { threadId: string, turnId: string, source:
  */
 failedAt: number,
 /**
+ * Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.
+ */
+failedAtNs?: string | null,
+/**
  * When supplied, admission requires this exact durable completion.
  */
 completionId?: string | null, };

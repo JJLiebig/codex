@@ -408,6 +408,9 @@ pub enum RateLimitResetCreditStatus {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConsumeAccountRateLimitResetCreditParams {
+    /// Optional loaded thread whose provider needs source-bound reset completion.
+    #[ts(optional = nullable)]
+    pub thread_id: Option<String>,
     /// Identifies one logical reset attempt. A UUID is recommended; reuse the same value when
     /// retrying that attempt.
     pub idempotency_key: String,
@@ -421,6 +424,7 @@ pub struct ConsumeAccountRateLimitResetCreditParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConsumeAccountRateLimitResetCreditResponse {
+    pub reset_completion: Option<super::UsageResetCompletion>,
     pub outcome: ConsumeAccountRateLimitResetCreditOutcome,
 }
 
