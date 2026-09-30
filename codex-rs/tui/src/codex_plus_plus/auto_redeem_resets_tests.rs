@@ -292,6 +292,8 @@ async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
         .await
         .unwrap();
     config.chatgpt_base_url = server.uri();
+    config.model_provider =
+        codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
     let auth = CodexAuth::from_external_chatgpt_tokens(
         TEST_ID_TOKEN,
         "account-123",
@@ -339,7 +341,19 @@ async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
         .await
         .unwrap();
 
-    assert_eq!(lease.state().unwrap().phase, None);
+    let completed = lease.state().unwrap();
+    assert_eq!(
+        completed,
+        codex_login::ResetState {
+            phase: None,
+            completion: Some(codex_login::ResetCompletion {
+                id: redeem_request_id,
+                completed_at: completed.completion.as_ref().unwrap().completed_at,
+                manual: false,
+                source: Some(ResetCredentialSource::Imported),
+            }),
+        }
+    );
 }
 
 #[test]
@@ -375,6 +389,7 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
         .confirm_redeemed(
             &redeem_request_id,
             Utc::now().timestamp_nanos_opt().unwrap(),
+            /*source*/ None,
         )
         .unwrap();
     drop(lease);
@@ -401,4 +416,42 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
             "redemption notice must remain deduplicated"
         );
     }
+}
+
+#[tokio::test]
+async fn pending_manual_attempt_skips_automatic_redemption_and_completion_notices() {
+    let home = tempfile::tempdir().unwrap();
+    let store = AccountStore::new(home.path().into());
+    let id: AccountId = serde_json::from_str("\"acct_test\"").unwrap();
+    let config = crate::legacy_core::config::ConfigBuilder::default()
+        .codex_home(home.path().into())
+        .build()
+        .await
+        .unwrap();
+    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
+    lease
+        .begin_manual(
+            "manual",
+            ResetCredentialSource::Imported,
+            /*credit_id*/ None,
+        )
+        .unwrap();
+    let pending = lease.state().unwrap();
+    drop(lease);
+    // No profile or auth is available: touching either would fail this scan.
+    process_account(&config, &store, &id, settings(), &FreshRedemption::Allowed)
+        .await
+        .unwrap();
+    let mut notices = CompletionNotices::new();
+    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
+    assert_eq!(lease.state().unwrap(), pending);
+    lease
+        .confirm_manual("manual", Utc::now().timestamp_nanos_opt().unwrap())
+        .unwrap();
+    drop(lease);
+    std::fs::write(home.path().join("accounts/index.json"),
+        r#"{"accounts":[{"id":"acct_test","label":"Primary","auth":{"scope":"file","path":"accounts/acct_test/auth.json"}}]}"#).unwrap();
+    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
+    notices.poll(&store, &AppEventSender::new(tx));
+    assert!(events.try_recv().is_err());
 }
