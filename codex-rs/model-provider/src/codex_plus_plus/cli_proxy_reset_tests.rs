@@ -1,3 +1,4 @@
+use super::super::super::cli_proxy_reset::cli_proxy_reset_ready;
 use super::super::super::cli_proxy_reset::reconcile_cli_proxy_reset;
 use super::*;
 use codex_login::AccountId;
@@ -146,6 +147,61 @@ async fn exact_reset_dispatches_once_and_unknown_requires_positive_current_readb
     reconcile(fixture.home.path(), &id, &acknowledged)
         .await
         .unwrap();
+    // A historical acknowledgment cannot admit a later cooldown, or another source's receipt.
+    let mut clear_root = entries.lock().unwrap()[0].clone();
+    clear_root["cooldowns"] = json!([]);
+    clear_root["unavailable"] = json!(false);
+    for (patch, allowed, ready) in [
+        (
+            json!({"cooldowns": [{"reason": "quota"}]}),
+            Some(true),
+            false,
+        ),
+        (json!({"cooldowns": null}), Some(true), false),
+        (json!({"disabled": true}), Some(true), false),
+        (json!({"unavailable": true}), Some(true), false),
+        (json!({"auth_index": "other"}), Some(true), false),
+        (json!({}), None, false),
+        (json!({}), Some(false), false),
+        (json!({}), Some(true), true),
+    ] {
+        let mut entry = clear_root.clone();
+        entry
+            .as_object_mut()
+            .unwrap()
+            .extend(patch.as_object().unwrap().clone());
+        entries.lock().unwrap()[0] = entry;
+        assert_eq!(
+            cli_proxy_reset_ready(
+                fixture.home.path(),
+                factory(),
+                &id,
+                &acknowledged,
+                Some("workspace-a"),
+                &healthy(),
+                allowed
+            )
+            .await
+            .unwrap(),
+            ready
+        );
+    }
+    let mut wrong = acknowledged.clone();
+    wrong.source = Some(ResetCredentialSource::Imported);
+    assert!(
+        !cli_proxy_reset_ready(
+            fixture.home.path(),
+            factory(),
+            &id,
+            &wrong,
+            Some("workspace-a"),
+            &healthy(),
+            Some(true)
+        )
+        .await
+        .unwrap()
+    );
+    assert_eq!(receipt(&store, &id), acknowledged);
     let (_, imported) = completion(
         fixture.home.path(),
         ResetCredentialSource::Imported,

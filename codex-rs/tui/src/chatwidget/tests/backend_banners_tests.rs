@@ -16,6 +16,7 @@ fn banner_response(
         banner["presentation"] = json!(presentation);
     }
     GetAccountRateLimitsResponse {
+        reset_admission: None,
         ordinary_usage_allowed: None,
         account_id: Some("workspace-a".into()),
         rate_limit_upsell: Some(banner),

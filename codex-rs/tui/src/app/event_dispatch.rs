@@ -836,6 +836,9 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
+            AppEvent::UsageResetAdmissionLoaded { target, periodic_request_id, hard_stop_generation, response } => {
+                self.finish_owned_reset(&target, periodic_request_id, hard_stop_generation, response);
+            }
             AppEvent::UsageResetCompleted { account_id, completed_at } => {
                 self.refresh_after_usage_reset(app_server, account_id, completed_at);
             }

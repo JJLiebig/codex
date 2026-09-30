@@ -1140,10 +1140,7 @@ See the Codex keymap documentation for supported actions and examples."
                             && has_pending_app_events
                         || (!waiting_for_initial_session_configured
                             && app.has_queued_startup_protected_request());
-                let rate_limit_poll_deadline = app
-                    .chat_widget
-                    .rate_limit_refresh_interval()
-                    .and_then(|interval| app.rate_limit_refresh_state.poll_deadline(interval));
+                let rate_limit_poll_deadline = app.rate_limit_poll_deadline();
                 let control = select! {
                     Some(event) = app_event_rx.recv() => {
                         let is_initial_session_header = matches!(

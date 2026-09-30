@@ -16,7 +16,7 @@ async fn automatic_usage_reset_reads_current_account_and_submits_one_continuatio
     let home = tempdir()?;
     write_chatgpt_auth(
         home.path(),
-        ChatGptAuthFixture::new("local-test-token")
+        ChatGptAuthFixture::new("e30.eyJleHAiOjQxMDI0NDQ4MDB9.c2ln")
             .account_id("reset-account")
             .chatgpt_user_id("user-a")
             .plan_type("pro"),
@@ -138,6 +138,97 @@ async fn automatic_usage_reset_reads_current_account_and_submits_one_continuatio
         }]]
     );
     insta::assert_snapshot!(transcript.trim(), @"› continue");
+    // The same live wait consumes an owned admission only in its current hard-stop generation.
+    let host_completed_at = chrono::Utc::now().timestamp() + 60;
+    for (method, status, error) in [
+        ("turn/started", "inProgress", serde_json::Value::Null),
+        (
+            "turn/completed",
+            "failed",
+            json!({"message":"Usage exhausted", "codexErrorInfo":"usageLimitExceeded",
+            "inferenceAttribution":{"type":"servedNative", "source":"root", "accountId":"acct_f2b6477631260f18", "displayLabel":null}}),
+        ),
+    ] {
+        app.chat_widget.handle_server_notification(
+            serde_json::from_value(json!({
+                "method": method, "params":{"threadId":thread_id.to_string(),
+                    "turn":{"id":"owned-failure","items":[],"itemsView":"full","status":status,
+                        "completedAt":host_completed_at,"error":error}}
+            }))?,
+            /*replay_kind*/ None,
+        );
+    }
+    let target = app
+        .chat_widget
+        .owned_reset_target(/*completion*/ None)
+        .unwrap();
+    // A per-thread owned provider still polls when global native display polling is disabled.
+    app.chat_widget.requires_openai_auth = false;
+    let usage_count = |requests: Vec<wiremock::Request>| {
+        requests
+            .iter()
+            .filter(|request| request.url.path() == "/api/codex/usage")
+            .count()
+    };
+    for confirmed in [false, true] {
+        if confirmed {
+            let mut lease = codex_login::AccountStore::new(home.path().into())
+                .acquire_reset_mutation_lease(&account_id)?;
+            lease.begin_manual(
+                "owned-completion",
+                codex_login::ResetCredentialSource::Root,
+                /*credit_id*/ None,
+            )?;
+            lease.confirm_manual("owned-completion", target.failed_at * 1_000_000_000)?;
+            let completion = lease.state()?.completion.unwrap();
+            lease.reconcile_proxy(&completion, codex_login::ResetReconciliation::ObservedClear)?;
+        }
+        assert!(app.rate_limit_poll_deadline().is_some());
+        let before = usage_count(backend.received_requests().await.unwrap());
+        app.refresh_rate_limits(&server, RateLimitRefreshOrigin::Periodic);
+        app.refresh_rate_limits(&server, RateLimitRefreshOrigin::Periodic);
+        assert!(app.rate_limit_poll_deadline().is_none());
+        let loaded = next_usage_event(&mut events).await?;
+        assert!(
+            matches!(&loaded, AppEvent::UsageResetAdmissionLoaded { response, .. }
+            if response.is_some() == confirmed && response.as_ref().is_none_or(|response| response.reset_admission.is_none()))
+        );
+        app.handle_event(&mut tui, &mut server, loaded).await?;
+        assert!(app.rate_limit_poll_deadline().is_some());
+        assert_eq!(
+            usage_count(backend.received_requests().await.unwrap()),
+            before + usize::from(confirmed)
+        );
+    }
+    let mut owned = response.clone();
+    owned.ordinary_usage_allowed = Some(true);
+    owned.reset_admission = Some(codex_app_server_protocol::UsageResetCompletion {
+        id: "owned-completion".into(),
+        source: target.source,
+        account_id: target.account_id.clone(),
+        completed_at: target.failed_at,
+    });
+    for (generation, expected_count) in [
+        (hard_stop_generation.wrapping_add(1), 0),
+        (hard_stop_generation, 1),
+        (hard_stop_generation, 0),
+    ] {
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::UsageResetAdmissionLoaded {
+                target: target.clone(),
+                periodic_request_id: None,
+                hard_stop_generation: generation,
+                response: Some(owned.clone()),
+            },
+        )
+        .await?;
+        let count = std::iter::from_fn(|| ops.try_recv().ok())
+            .filter(|op| matches!(op, Op::UserTurn { .. }))
+            .count();
+        assert_eq!(count, expected_count);
+    }
     server.shutdown().await?;
     Ok(())
 }
@@ -151,7 +242,9 @@ async fn next_usage_event(
                 let event = events.recv().await.expect("app event channel");
                 if matches!(
                     event,
-                    AppEvent::RateLimitsLoaded { .. } | AppEvent::UsageResetQuotaLoaded { .. }
+                    AppEvent::RateLimitsLoaded { .. }
+                        | AppEvent::UsageResetQuotaLoaded { .. }
+                        | AppEvent::UsageResetAdmissionLoaded { .. }
                 ) {
                     break event;
                 }

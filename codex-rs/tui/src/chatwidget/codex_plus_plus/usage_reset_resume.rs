@@ -4,6 +4,8 @@ use codex_app_server_protocol::CodexErrorInfo;
 use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::TurnStatus;
+use codex_app_server_protocol::UsageResetCompletion;
+use codex_app_server_protocol::UsageResetTargetParams;
 use codex_login::AccountId;
 use codex_protocol::inference_attribution::InferenceAttribution;
 use sha2::Digest;
@@ -11,7 +13,7 @@ use sha2::Sha256;
 
 pub(in crate::chatwidget) struct UsageResetWait {
     turn_id: String,
-    failed_at: i64,
+    failed_at: Option<i64>,
     attribution: Option<InferenceAttribution>,
 }
 
@@ -73,8 +75,10 @@ impl ChatWidget {
                 self.usage_reset_wait = Some(UsageResetWait {
                     turn_id: turn_id.clone(),
                     attribution: attribution.cloned(),
-                    failed_at: completed_at.unwrap_or_else(|| {
-                        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX)
+                    failed_at: completed_at.or_else(|| {
+                        attribution
+                            .is_none()
+                            .then(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX))
                     }),
                 });
             } else if let Some(waiting) = self.usage_reset_wait.as_mut()
@@ -83,7 +87,11 @@ impl ChatWidget {
                 && let Some(completed_at) = completed_at
             {
                 // Server time survives independent delivery; exclude its ambiguous whole second.
-                waiting.failed_at = waiting.failed_at.min(completed_at);
+                waiting.failed_at = Some(if attribution.is_some() {
+                    completed_at
+                } else {
+                    waiting.failed_at.unwrap_or(completed_at).min(completed_at)
+                });
             }
         }
     }
@@ -101,11 +109,17 @@ impl ChatWidget {
     }
 
     pub(crate) fn usage_reset_turn(&self, completed_at: i64) -> Option<String> {
+        self.usage_reset_wait
+            .as_ref()?
+            .attribution
+            .is_none()
+            .then_some(())?;
+        self.reset_ready_turn(completed_at)
+    }
+
+    fn reset_ready_turn(&self, completed_at: i64) -> Option<String> {
         let waiting = self.usage_reset_wait.as_ref()?;
-        // Owned recovery needs an exact receipt, current quota and proxy cooldown admission.
-        // This stage retains the failed source but cannot authorize native "continue" for it.
-        (waiting.attribution.is_none()
-            && completed_at >= waiting.failed_at
+        (completed_at >= waiting.failed_at?
             && self
                 .last_resumed_usage_reset_at
                 .is_none_or(|last| completed_at > last)
@@ -114,6 +128,68 @@ impl ChatWidget {
             && !self.input_queue.has_queued_follow_up_messages()
             && self.input_queue.pending_steers.is_empty())
         .then(|| waiting.turn_id.clone())
+    }
+
+    pub(crate) fn owned_reset_target(
+        &self,
+        completion: Option<&UsageResetCompletion>,
+    ) -> Option<UsageResetTargetParams> {
+        let turn_id = self.reset_ready_turn(i64::MAX)?;
+        let waiting = self.usage_reset_wait.as_ref()?;
+        let (source, account_id) = match waiting.attribution.as_ref()? {
+            InferenceAttribution::ServedNative {
+                source, account_id, ..
+            }
+            | InferenceAttribution::IntendedNative {
+                source, account_id, ..
+            } => (*source, account_id),
+            InferenceAttribution::Claude | InferenceAttribution::Unknown => return None,
+        };
+        if completion.is_some_and(|completion| {
+            completion.source != source || &completion.account_id != account_id
+        }) {
+            return None;
+        }
+        Some(UsageResetTargetParams {
+            thread_id: self.thread_id()?.to_string(),
+            turn_id,
+            source,
+            account_id: account_id.clone(),
+            failed_at: waiting.failed_at?.saturating_add(999_999_999) / 1_000_000_000,
+            completion_id: completion.map(|completion| completion.id.clone()),
+        })
+    }
+
+    pub(crate) fn resume_after_owned_reset(
+        &mut self,
+        target: &UsageResetTargetParams,
+        response: &GetAccountRateLimitsResponse,
+    ) {
+        let Some(completion) = &response.reset_admission else {
+            return;
+        };
+        let Some(current) = self.owned_reset_target(Some(completion)) else {
+            return;
+        };
+        let mut expected = target.clone();
+        if expected
+            .completion_id
+            .as_ref()
+            .is_some_and(|id| id != &completion.id)
+        {
+            return;
+        }
+        expected.completion_id = Some(completion.id.clone());
+        let completed_at = completion.completed_at.saturating_mul(1_000_000_000);
+        if current != expected
+            || self.reset_ready_turn(completed_at).as_deref() != Some(&target.turn_id)
+            || response.ordinary_usage_allowed != Some(true)
+        {
+            return;
+        }
+        self.usage_reset_wait = None;
+        self.last_resumed_usage_reset_at = Some(completed_at);
+        self.submit_user_message("continue".into());
     }
 
     pub(crate) fn resume_after_usage_reset(

@@ -1104,6 +1104,12 @@ pub(crate) enum AppEvent {
         turn_id: String,
     },
 
+    UsageResetAdmissionLoaded {
+        target: codex_app_server_protocol::UsageResetTargetParams,
+        periodic_request_id: Option<u64>,
+        hard_stop_generation: u64,
+        response: Option<GetAccountRateLimitsResponse>,
+    },
     UsageResetCompleted {
         account_id: codex_login::AccountId,
         completed_at: i64,

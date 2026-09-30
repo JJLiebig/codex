@@ -8631,6 +8631,17 @@
           "description": "Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
           "type": "boolean"
         },
+        "resetAdmission": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageResetTargetParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Read-only reset admission for an exact failed native source."
+        },
         "supportsLunaReserve": {
           "description": "The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
           "type": "boolean"
@@ -8685,6 +8696,17 @@
             "object",
             "null"
           ]
+        },
+        "resetAdmission": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageResetCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Present only after fresh exact reset admission succeeds."
         }
       },
       "required": [
@@ -23693,6 +23715,68 @@
       },
       "required": [
         "data"
+      ],
+      "type": "object"
+    },
+    "UsageResetCompletion": {
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "completedAt": {
+          "description": "Unix seconds; does not prove present quota or proxy readiness.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/InferenceNativeSource"
+        }
+      },
+      "required": [
+        "accountId",
+        "completedAt",
+        "id",
+        "source"
+      ],
+      "type": "object"
+    },
+    "UsageResetTargetParams": {
+      "description": "An existing live wait's exact native source; this read never changes account selection.",
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "completionId": {
+          "description": "When supplied, admission requires this exact durable completion.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failedAt": {
+          "description": "Earliest eligible completion, in Unix seconds on the inference host.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "source": {
+          "$ref": "#/definitions/InferenceNativeSource"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "accountId",
+        "failedAt",
+        "source",
+        "threadId",
+        "turnId"
       ],
       "type": "object"
     },

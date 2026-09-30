@@ -4,8 +4,13 @@
 import type { JsonValue } from "../serde_json/JsonValue";
 import type { RateLimitResetCreditsSummary } from "./RateLimitResetCreditsSummary";
 import type { RateLimitSnapshot } from "./RateLimitSnapshot";
+import type { UsageResetCompletion } from "./UsageResetCompletion";
 
 export type GetAccountRateLimitsResponse = {
+/**
+ * Present only after fresh exact reset admission succeeds.
+ */
+resetAdmission: UsageResetCompletion | null,
 /**
  * Backend permission for ordinary included usage, validated against the active account.
  * Null means unavailable; clients must not infer recovery from percentages or reset times.

@@ -22,6 +22,13 @@
       ],
       "type": "object"
     },
+    "InferenceNativeSource": {
+      "enum": [
+        "root",
+        "imported"
+      ],
+      "type": "string"
+    },
     "PlanType": {
       "enum": [
         "free",
@@ -282,6 +289,31 @@
         "used"
       ],
       "type": "object"
+    },
+    "UsageResetCompletion": {
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "completedAt": {
+          "description": "Unix seconds; does not prove present quota or proxy readiness.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/InferenceNativeSource"
+        }
+      },
+      "required": [
+        "accountId",
+        "completedAt",
+        "id",
+        "source"
+      ],
+      "type": "object"
     }
   },
   "properties": {
@@ -329,6 +361,17 @@
         "object",
         "null"
       ]
+    },
+    "resetAdmission": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UsageResetCompletion"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Present only after fresh exact reset admission succeeds."
     }
   },
   "required": [

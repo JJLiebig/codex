@@ -648,3 +648,106 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
     }
     Ok(())
 }
+
+#[tokio::test]
+async fn reset_admission_reads_imported_a_without_switching_selected_b() -> Result<()> {
+    use codex_app_server_protocol::GetAccountRateLimitsResponse;
+    use codex_app_server_protocol::UsageResetTargetParams;
+    use codex_login::ResetCredentialSource;
+    use codex_login::ResetReconciliation;
+    use codex_protocol::inference_attribution::InferenceNativeSource;
+    const TOKEN: &str = "e30.eyJleHAiOjQxMDI0NDQ4MDB9.c2ln";
+    let home = TempDir::new()?;
+    let backend = MockServer::start().await;
+    write_chatgpt_auth(
+        home.path(),
+        ChatGptAuthFixture::new(TOKEN).account_id("account-a"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let store = AccountStore::new(home.path().into());
+    let profile = store.import_current(
+        /*label*/ None,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    let mut lease = store.acquire_reset_mutation_lease(&profile.id)?;
+    lease.begin_manual(
+        "completed-a",
+        ResetCredentialSource::Imported,
+        /*credit_id*/ None,
+    )?;
+    lease.confirm_manual("completed-a", /*completed_at*/ 10_000_000_000)?;
+    let completion = lease.state()?.completion.unwrap();
+    lease.reconcile_proxy(&completion, ResetReconciliation::ObservedClear)?;
+    drop(lease);
+    write_chatgpt_auth(
+        home.path(),
+        ChatGptAuthFixture::new(TOKEN).account_id("account-b"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    let selected = std::fs::read(home.path().join("auth.json"))?;
+    std::fs::write(
+        home.path().join("config.toml"),
+        format!(
+            "automatic_account_selection = \"disabled\"\nchatgpt_base_url = {:?}\n",
+            backend.uri()
+        ),
+    )?;
+    for account in ["account-a", "account-b"] {
+        Mock::given(method("GET")).and(path("/api/codex/usage"))
+            .and(header("chatgpt-account-id", account))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "account_id": account, "plan_type": "pro", "rate_limit": {"allowed": true, "limit_reached": false,
+                    "secondary_window": {"used_percent": 1, "limit_window_seconds": 604800, "reset_after_seconds": 3600, "reset_at": 2000000000}}
+            }))).expect(1).mount(&backend).await;
+    }
+    let mut app = initialized_app_server(home.path()).await?;
+    let target = UsageResetTargetParams {
+        thread_id: "waiting-thread".into(),
+        turn_id: "waiting-turn".into(),
+        source: InferenceNativeSource::Imported,
+        account_id: profile.id.to_string(),
+        failed_at: 9,
+        completion_id: Some("completed-a".into()),
+    };
+    for mismatch in ["kind", "completion", "old", "matching"] {
+        let mut request = target.clone();
+        match mismatch {
+            "kind" => request.source = InferenceNativeSource::Root,
+            "completion" => request.completion_id = Some("other-reset".into()),
+            "old" => request.failed_at = 11,
+            _ => {}
+        }
+        let id = app
+            .send_request(
+                "account/rateLimits/read",
+                Some(json!({"resetAdmission": request})),
+            )
+            .await?;
+        if mismatch != "matching" {
+            assert_eq!(
+                read_error_response(&mut app, id).await?.error.code,
+                INVALID_REQUEST_ERROR_CODE
+            );
+        } else {
+            let response: GetAccountRateLimitsResponse =
+                timeout(DEFAULT_READ_TIMEOUT, app.read_response(id)).await??;
+            assert_eq!(
+                (response.account_id.as_deref(), response.reset_admission),
+                (Some("account-a"), None)
+            );
+        }
+    }
+    let id = app
+        .send_request(
+            "account/rateLimits/read",
+            Some(json!({"excludeResetCreditDetails": true})),
+        )
+        .await?;
+    let response: GetAccountRateLimitsResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(id)).await??;
+    assert_eq!(response.account_id.as_deref(), Some("account-b"));
+    assert_eq!(std::fs::read(home.path().join("auth.json"))?, selected);
+    assert!(!home.path().join("cli-proxy").exists());
+    Ok(())
+}
