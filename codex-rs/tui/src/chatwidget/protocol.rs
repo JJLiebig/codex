@@ -217,7 +217,11 @@ impl ChatWidget {
                             notification.error.misalignment,
                         );
                     } else {
-                        self.handle_terminal_inference_error(notification.error);
+                        self.handle_non_retry_error(
+                            notification.error.message,
+                            notification.error.codex_error_info,
+                            notification.error.inference_attribution,
+                        );
                     }
                 }
             }
@@ -507,7 +511,11 @@ impl ChatWidget {
                     {
                         self.last_non_retry_error = None;
                     } else {
-                        self.handle_terminal_inference_error(error);
+                        self.handle_non_retry_error(
+                            error.message,
+                            error.codex_error_info,
+                            error.inference_attribution,
+                        );
                     }
                 } else {
                     self.last_non_retry_error = None;

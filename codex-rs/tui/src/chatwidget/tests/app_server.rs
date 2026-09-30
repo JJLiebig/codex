@@ -1904,14 +1904,23 @@ async fn app_server_safety_access_errors_render_dedicated_notice() {
     let mut rendered_cases = Vec::new();
     for (case, message) in cases {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-        chat.handle_non_retry_error(message, /*codex_error_info*/ None);
+        for attribution in [
+            None,
+            Some(codex_protocol::inference_attribution::InferenceAttribution::Claude),
+        ] {
+            chat.handle_non_retry_error(
+                message.clone(),
+                /*codex_error_info*/ None,
+                attribution,
+            );
 
-        let cells = drain_insert_history(&mut rx);
-        assert_eq!(cells.len(), 1);
-        let rendered = lines_to_single_string(&cells[0]);
-        assert!(rendered.contains("This content can't be shown"));
-        assert!(rendered.contains("biological research"));
-        rendered_cases.push((case, rendered));
+            let cells = drain_insert_history(&mut rx);
+            assert_eq!(cells.len(), 1);
+            let rendered = lines_to_single_string(&cells[0]);
+            assert!(rendered.contains("This content can't be shown"));
+            assert!(rendered.contains("biological research"));
+            rendered_cases.push((case, rendered));
+        }
     }
 
     let canonical = &rendered_cases[0].1;

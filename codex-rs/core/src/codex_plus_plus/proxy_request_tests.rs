@@ -30,8 +30,13 @@ async fn owned_compaction_failures_preserve_source_in_terminal_event() -> anyhow
         (true, "claude-new", QUOTA, CLAUDE_TRACE),
     ] {
         let fixture = OwnedFixture::new().await?;
-        let source = fixture.manager.export_native_credentials().await?;
-        let Some(NativeCredentialSource::Root(id)) = source.selected_source() else {
+        let source = fixture
+            .manager
+            .export_native_credentials()
+            .await?
+            .selected_source()
+            .cloned();
+        let Some(NativeCredentialSource::Root(id)) = source else {
             panic!("synthetic root account");
         };
         let expected = Some(if model == "claude-new" {

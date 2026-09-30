@@ -3537,6 +3537,7 @@ async fn failed_turn_refreshes_estimated_thread_usage() {
     chat.handle_non_retry_error(
         "turn failed after generating tokens".to_string(),
         /*codex_error_info*/ None,
+        /*inference_attribution*/ None,
     );
 
     assert!(

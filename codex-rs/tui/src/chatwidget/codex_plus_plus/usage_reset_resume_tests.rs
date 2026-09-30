@@ -244,9 +244,13 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
             while let Ok(event) = events.try_recv() {
                 match event {
                     crate::app_event::AppEvent::InsertHistoryCell(cell) => {
-                        errors.push(crate::chatwidget::tests::lines_to_single_string(
-                            &cell.display_lines(/*width*/ 80),
-                        ))
+                        errors.push(
+                            cell.display_lines(/*width*/ 80)
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<_>>()
+                                .join("\n"),
+                        )
                     }
                     crate::app_event::AppEvent::RefreshRateLimits { .. } => {
                         panic!("owned error requested native recovery")

@@ -15,21 +15,19 @@ pub enum InferenceNativeSource {
 
 /// Discovery or the current native login cannot establish which account served a request.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
-#[serde(
-    tag = "type",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
+#[serde(tag = "type", rename_all = "camelCase")]
 #[ts(tag = "type", rename_all = "camelCase", export_to = "v2/")]
 pub enum InferenceAttribution {
     ServedNative {
         source: InferenceNativeSource,
+        #[serde(rename = "accountId")]
         #[ts(rename = "accountId")]
         account_id: String,
     },
     /// A matching local cooldown prevented an upstream attempt.
     IntendedNative {
         source: InferenceNativeSource,
+        #[serde(rename = "accountId")]
         #[ts(rename = "accountId")]
         account_id: String,
     },
