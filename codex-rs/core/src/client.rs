@@ -1866,7 +1866,10 @@ impl ModelClientSession {
                     if let CodexErrorDetails::UsageLimitReached(usage_limit) = err.details() {
                         if let Some(outcome) = self
                             .switch_owned_quota(&mut attempted_account_ids, usage_limit)
-                            .await?
+                            .await
+                            .map_err(|replacement| {
+                                replacement.with_inference_attribution_from(&err)
+                            })?
                         {
                             if outcome == ImportedAccountSwitchOutcome::ReadyToRetry {
                                 continue;

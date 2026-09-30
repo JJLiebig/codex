@@ -184,6 +184,7 @@ async fn backend_banner_limit_error_refreshes_again_after_intervening_rolling_ha
     app.chat_widget.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "credits exhausted".into(),
                 codex_error_info: Some(CodexErrorInfo::UsageLimitExceeded),

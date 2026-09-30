@@ -42,6 +42,7 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
                     TurnStatus::Completed
                 },
                 error: event.error.as_ref().map(|error| TurnError {
+                    inference_attribution: error.inference_attribution.clone(),
                     misalignment: error.misalignment.clone().map(Into::into),
                     message: error.message.clone(),
                     codex_error_info: error.codex_error_info.clone().map(Into::into),
@@ -63,6 +64,7 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
                     root_turn_id: None,
                     status: TurnStatus::Interrupted,
                     error: event.error.as_ref().map(|error| TurnError {
+                        inference_attribution: error.inference_attribution.clone(),
                         message: error.message.clone(),
                         codex_error_info: error.codex_error_info.clone().map(Into::into),
                         misalignment: error.misalignment.clone().map(Into::into),

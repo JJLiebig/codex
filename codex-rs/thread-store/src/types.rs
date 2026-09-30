@@ -412,6 +412,8 @@ pub enum StoredTurnStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredTurnError {
+    #[serde(default)]
+    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// User-visible error message.
     pub message: String,
     /// Structured Codex error classification, when available.

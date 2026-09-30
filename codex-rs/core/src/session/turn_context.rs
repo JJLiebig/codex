@@ -1079,6 +1079,7 @@ impl Session {
                 self.send_event_raw(Event {
                     id: sub_id,
                     msg: EventMsg::Error(ErrorEvent {
+                        inference_attribution: None,
                         misalignment: None,
                         message: message.clone(),
                         codex_error_info: Some(CodexErrorInfo::BadRequest),

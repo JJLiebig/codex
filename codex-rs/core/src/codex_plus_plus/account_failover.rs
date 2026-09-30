@@ -53,7 +53,8 @@ pub(crate) async fn switch_and_report(
 ) -> Result<UsageLimitFailoverOutcome, CodexErr> {
     if let Some(outcome) = client_session
         .switch_owned_quota(attempted_account_ids, usage_limit)
-        .await?
+        .await
+        .map_err(|error| client_session.attribute_owned_error(error))?
     {
         report_tracked_client_failovers(client_session, attempted_account_ids, sess, turn_context)
             .await;

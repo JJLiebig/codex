@@ -36,6 +36,18 @@ pub struct ProxyRequestRoute {
 }
 
 impl ProxyRequestRoute {
+    /// Identify only the provider advertised for this exact frozen wire model, not its account.
+    pub fn is_claude_model(&self, wire_model: &str) -> bool {
+        self.inventory.iter().any(|credential| {
+            !credential.disabled
+                && credential.source.is_none()
+                && credential.provider.as_deref() == Some("claude")
+                && credential.models.iter().any(|member| {
+                    member.id == wire_model && member.provider.as_deref() == Some("claude")
+                })
+        })
+    }
+
     pub fn native_expectation(&self) -> Option<&codex_login::auth::NativeCredentialExpectation> {
         self.native_expectation.as_ref()
     }

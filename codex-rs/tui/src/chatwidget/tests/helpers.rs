@@ -534,6 +534,7 @@ pub(super) fn handle_error(
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: message.into(),
                 codex_error_info,
@@ -568,6 +569,7 @@ pub(super) fn handle_stream_error_with_replay(
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: message.into(),
                 codex_error_info: None,

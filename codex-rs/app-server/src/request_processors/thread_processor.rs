@@ -5877,6 +5877,7 @@ fn stored_turn_to_api_turn(
         StoredTurnStatus::InProgress => TurnStatus::InProgress,
     };
     let error = turn.error.map(|error| TurnError {
+        inference_attribution: error.inference_attribution,
         misalignment: None,
         message: error.message,
         codex_error_info: error.codex_error_info,

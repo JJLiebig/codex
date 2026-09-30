@@ -1567,6 +1567,7 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "permission denied".to_string(),
                 codex_error_info: None,
@@ -1591,6 +1592,7 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
                 items: Vec::new(),
                 status: AppServerTurnStatus::Failed,
                 error: Some(AppServerTurnError {
+                    inference_attribution: None,
                     misalignment: None,
                     message: "permission denied".to_string(),
                     codex_error_info: None,
@@ -1735,6 +1737,7 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "Reconnecting... 1/5".to_string(),
                 codex_error_info: Some(CodexErrorInfo::Other),
@@ -1812,6 +1815,7 @@ async fn live_app_server_server_overloaded_error_renders_error() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "server overloaded".to_string(),
                 codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
@@ -1855,6 +1859,7 @@ async fn live_app_server_cyber_policy_error_renders_dedicated_notice() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "server fallback message".to_string(),
                 codex_error_info: Some(CodexErrorInfo::CyberPolicy),

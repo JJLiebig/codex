@@ -2,6 +2,8 @@ use super::*;
 use codex_login::NativeCredentialSource;
 use codex_login::auth::ImportedAccountSwitchOutcome;
 use codex_protocol::config_types::ReasoningSummary as ReasoningSummaryConfig;
+use codex_protocol::inference_attribution::InferenceAttribution;
+use codex_protocol::inference_attribution::InferenceNativeSource;
 use pretty_assertions::assert_eq;
 use std::collections::HashSet;
 
@@ -15,6 +17,75 @@ const COMPLETED: &str =
     "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"done\",\"output\":[]}}\n\n";
 const QUOTA: &str = "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"type\":\"usage_limit_reached\"}}}\n\n";
 const PARTIAL: &str = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"accepted\"}\n\n";
+
+#[tokio::test]
+async fn owned_compaction_eof_preserves_source_in_terminal_event() -> anyhow::Result<()> {
+    for remote in [false, true] {
+        let fixture = OwnedFixture::new().await?;
+        let source = fixture.manager.export_native_credentials().await?;
+        let Some(NativeCredentialSource::Root(id)) = source.selected_source() else {
+            panic!("synthetic root account");
+        };
+        let expected = Some(InferenceAttribution::ServedNative {
+            source: InferenceNativeSource::Root,
+            account_id: id.to_string(),
+        });
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("x-cpa-trace-id", NATIVE_TRACE)
+                    .set_body_string(PARTIAL),
+            )
+            .expect(1)
+            .mount(&fixture.server)
+            .await;
+        let (mut session, mut turn, events) =
+            crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+                CodexAuth::from_api_key("synthetic"),
+                Vec::new(),
+                |config| config.model = Some("future-9.7".into()),
+            )
+            .await;
+        let provider = create_model_provider(
+            ModelProviderInfo::create_cli_proxy_provider(),
+            Some(fixture.manager.clone()),
+        );
+        let mut client = test_model_client(SessionSource::Cli);
+        Arc::get_mut(&mut client.state).unwrap().provider = provider.clone();
+        Arc::get_mut(&mut session).unwrap().services.model_client = client;
+        let context = Arc::get_mut(&mut turn).unwrap();
+        context.provider = provider;
+        context.auth_manager = Some(fixture.manager.clone());
+        let result = if remote {
+            crate::compact_remote_v2::run_remote_compact_task(session, turn.clone()).await
+        } else {
+            crate::compact::run_compact_task(session, turn.clone(), Vec::new()).await
+        };
+        assert_eq!(
+            result.unwrap_err().inference_attribution().cloned(),
+            expected
+        );
+        let terminal = turn
+            .terminal_error
+            .lock()
+            .await
+            .clone()
+            .expect("terminal failure");
+        assert_eq!(terminal.inference_attribution, expected);
+        let emitted = std::iter::from_fn(|| events.try_recv().ok())
+            .find_map(|event| {
+                if let codex_protocol::protocol::EventMsg::Error(error) = event.msg {
+                    Some(error)
+                } else {
+                    None
+                }
+            })
+            .expect("canonical error event");
+        assert_eq!(emitted, terminal);
+    }
+    Ok(())
+}
 
 #[tokio::test]
 async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> anyhow::Result<()> {
@@ -84,6 +155,22 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
         while let Some(event) = stream.next().await {
             event?;
         }
+        let terminal = session
+            .attribute_owned_error(CodexErr::Stream("stream closed".into()))
+            .to_error_event(Some("Error running remote compact task".into()));
+        assert_eq!(
+            terminal.inference_attribution,
+            Some(if trace == Some(NATIVE_TRACE) {
+                InferenceAttribution::ServedNative {
+                    source: InferenceNativeSource::Root,
+                    account_id: id.to_string(),
+                }
+            } else if model == "claude-new" {
+                InferenceAttribution::Claude
+            } else {
+                InferenceAttribution::Unknown
+            })
+        );
         let captured = session.owned_request.as_ref().unwrap();
         assert_eq!(
             captured.response_trace.get(),
@@ -221,6 +308,35 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
             }
             let native_quota =
                 model == "future-9.7" && matches!(case, "http_quota" | "stream_quota");
+            if let Some(error) = &error {
+                let expected = if model == "claude-new" {
+                    InferenceAttribution::Claude
+                } else if matches!(case, "local_401" | "cooldown") {
+                    InferenceAttribution::Unknown
+                } else {
+                    let NativeCredentialSource::Root(id) = fixture
+                        .manager
+                        .export_native_credentials()
+                        .await?
+                        .selected_source()
+                        .unwrap()
+                        .clone()
+                    else {
+                        panic!("root source")
+                    };
+                    InferenceAttribution::ServedNative {
+                        source: InferenceNativeSource::Root,
+                        account_id: id.to_string(),
+                    }
+                };
+                assert_eq!(
+                    error
+                        .to_error_event(/*message_prefix*/ None)
+                        .inference_attribution,
+                    Some(expected),
+                    "{case}"
+                );
+            }
             if native_quota {
                 let CodexErrorDetails::UsageLimitReached(usage) = error.as_ref().unwrap().details()
                 else {
@@ -416,11 +532,36 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
                     session.switch_owned_quota(&mut attempted, usage).await?,
                     Some(ImportedAccountSwitchOutcome::ReadyToRetry)
                 );
+                assert_eq!(fixture.manager.active_account_id(), Some(ids[1].clone()));
+                // The failed request stays bound to A after selection has moved to B.
+                let replacement =
+                    CodexErr::UnsupportedOperation("manual selection guidance".into())
+                        .with_inference_attribution_from(&err);
+                assert_eq!(
+                    replacement
+                        .to_error_event(/*message_prefix*/ None)
+                        .inference_attribution,
+                    Some(InferenceAttribution::ServedNative {
+                        source: InferenceNativeSource::Imported,
+                        account_id: ids[0].to_string(),
+                    })
+                );
                 continue;
             }
             break;
         }
         if case == "cooldown_pinned" {
+            assert_eq!(
+                error
+                    .as_ref()
+                    .unwrap()
+                    .to_error_event(/*message_prefix*/ None)
+                    .inference_attribution,
+                Some(InferenceAttribution::IntendedNative {
+                    source: InferenceNativeSource::Imported,
+                    account_id: ids[0].to_string(),
+                })
+            );
             assert!(matches!(
                 error.as_ref().unwrap().details(),
                 CodexErrorDetails::UsageLimitReached(_)

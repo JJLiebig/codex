@@ -5,12 +5,14 @@ use codex_app_server_protocol::GetAccountRateLimitsResponse;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::TurnStatus;
 use codex_login::AccountId;
+use codex_protocol::inference_attribution::InferenceAttribution;
 use sha2::Digest;
 use sha2::Sha256;
 
 pub(in crate::chatwidget) struct UsageResetWait {
     turn_id: String,
     failed_at: i64,
+    attribution: Option<InferenceAttribution>,
 }
 
 impl ChatWidget {
@@ -20,7 +22,11 @@ impl ChatWidget {
                 if !error.will_retry
                     && error.error.codex_error_info == Some(CodexErrorInfo::UsageLimitExceeded) =>
             {
-                Some((&error.turn_id, None))
+                Some((
+                    &error.turn_id,
+                    None,
+                    error.error.inference_attribution.as_ref(),
+                ))
             }
             ServerNotification::TurnCompleted(turn)
                 if turn.turn.status == TurnStatus::Failed
@@ -33,6 +39,10 @@ impl ChatWidget {
                     turn.turn
                         .completed_at
                         .map(|at| at.saturating_add(1).saturating_mul(1_000_000_000)),
+                    turn.turn
+                        .error
+                        .as_ref()
+                        .and_then(|error| error.inference_attribution.as_ref()),
                 ))
             }
             ServerNotification::TurnStarted(_)
@@ -47,19 +57,29 @@ impl ChatWidget {
             }
             _ => None,
         };
-        if let Some((turn_id, completed_at)) = failed_turn {
+        if let Some((turn_id, completed_at, attribution)) = failed_turn {
+            if matches!(
+                attribution,
+                Some(InferenceAttribution::Claude | InferenceAttribution::Unknown)
+            ) || (attribution.is_none() && self.config.model_provider.is_cli_proxy())
+            {
+                self.usage_reset_wait = None;
+                return;
+            }
             if self.turn_lifecycle.agent_turn_running
                 && !self.input_queue.user_turn_pending_start
                 && self.turn_lifecycle.last_turn_id.as_ref() == Some(turn_id)
             {
                 self.usage_reset_wait = Some(UsageResetWait {
                     turn_id: turn_id.clone(),
+                    attribution: attribution.cloned(),
                     failed_at: completed_at.unwrap_or_else(|| {
                         chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX)
                     }),
                 });
             } else if let Some(waiting) = self.usage_reset_wait.as_mut()
                 && &waiting.turn_id == turn_id
+                && waiting.attribution.as_ref() == attribution
                 && let Some(completed_at) = completed_at
             {
                 // Server time survives independent delivery; exclude its ambiguous whole second.
@@ -82,7 +102,10 @@ impl ChatWidget {
 
     pub(crate) fn usage_reset_turn(&self, completed_at: i64) -> Option<String> {
         let waiting = self.usage_reset_wait.as_ref()?;
-        (completed_at >= waiting.failed_at
+        // Owned recovery needs an exact receipt, current quota and proxy cooldown admission.
+        // This stage retains the failed source but cannot authorize native "continue" for it.
+        (waiting.attribution.is_none()
+            && completed_at >= waiting.failed_at
             && self
                 .last_resumed_usage_reset_at
                 .is_none_or(|last| completed_at > last)

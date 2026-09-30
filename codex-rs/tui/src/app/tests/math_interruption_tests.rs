@@ -56,6 +56,7 @@ async fn unicode_math_termination_preserves_source_through_mode_and_resize() -> 
                 && let ServerNotification::TurnCompleted(notification) = &mut completed
             {
                 notification.turn.error = Some(AppServerTurnError {
+                    inference_attribution: None,
                     message: if kind == "plan_policy" {
                         r#"{"error":{"code":"bio_policy"}}"#.into()
                     } else {

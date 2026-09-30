@@ -325,6 +325,7 @@ pub(super) fn sample_turn_completed_notification(
             items: vec![],
             status,
             error: codex_error_info.map(|codex_error_info| AppServerTurnError {
+                inference_attribution: None,
                 misalignment: None,
                 message: "turn failed".to_string(),
                 codex_error_info: Some(codex_error_info),
