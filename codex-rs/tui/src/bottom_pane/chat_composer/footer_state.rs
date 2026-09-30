@@ -11,6 +11,10 @@
 //! Only the two base composer modes opt into fresh-thread decoration; queries and help do not.
 //! Shortcut help occupies the space above the composer and keeps its close hint on the final row.
 //! Passive transcript hints retain the shortcuts entry when it fits beside the complete hint.
+//! Codex++ can omit the separate passive hint row; status and active interaction controls remain.
+
+#[path = "codex_plus_plus/footer_hints.rs"]
+mod codex_plus_plus;
 
 use std::time::Instant;
 
@@ -70,6 +74,8 @@ pub(crate) struct ComposerRenderOptions<'a> {
     pub(crate) textarea_right_reserve: u16,
     /// Keep configured status below the composer while hints occupy the final row.
     pub(crate) separate_status_line: bool,
+    /// Omit only the separate passive hint row, not status or active controls.
+    pub(crate) hide_footer_hints: bool,
     pub(crate) command_popup_placement: CommandPopupPlacement,
     pub(crate) footer: Option<&'a TranscriptFooter>,
 }
@@ -133,6 +139,9 @@ impl super::ChatComposer {
     }
 
     pub(super) fn footer_hint_height(&self, width: u16, options: ComposerRenderOptions<'_>) -> u16 {
+        if codex_plus_plus::hide_passive_footer(self, options) {
+            return 0;
+        }
         if self.show_warning_notice(options) || self.shortcuts_above_composer(options) {
             return 1;
         }

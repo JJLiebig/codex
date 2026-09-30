@@ -2,6 +2,7 @@
 
 mod accounts;
 mod dcg;
+mod display_settings;
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -35,7 +36,7 @@ use crate::keymap::primary_binding;
 impl ChatWidget {
     pub(crate) fn open_codex_plus_plus_popup(&mut self, dcg_status: DcgStatus) {
         let list_keymap = settings_list_keymap(self.bottom_pane.list_keymap());
-        let params = codex_plus_plus_settings_params(
+        let mut params = codex_plus_plus_settings_params(
             self.config.automatic_account_selection,
             self.config.weekly_usage_window_auto_start,
             crate::codex_plus_plus::auto_redeem_resets_settings(&self.config.config_layer_stack),
@@ -46,6 +47,7 @@ impl ChatWidget {
             Some(dcg_status),
             &list_keymap,
         );
+        display_settings::add_to_menu(&mut params, &self.local_settings);
         let view = ListSelectionView::new(params, self.app_event_tx.clone(), list_keymap);
         self.bottom_pane.show_view(Box::new(view));
         self.request_redraw();
