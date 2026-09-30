@@ -40,8 +40,14 @@ pub struct NativeCredential {
 #[derive(Clone)]
 pub struct NativeCredentialExpectation {
     source: NativeCredentialSource,
-    revision: u64,
+    pub(super) revision: u64,
     identity: [u8; 32],
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(super) enum NativeRequestAdmission {
+    Eligible,
+    AfterTerminalRefresh,
 }
 
 impl NativeCredentialExpectation {
@@ -186,6 +192,7 @@ impl AuthManager {
     pub(super) async fn native_request_guard(
         &self,
         expected: &NativeCredentialExpectation,
+        admission: NativeRequestAdmission,
     ) -> std::io::Result<Option<crate::account_lease::AuthRefreshGuard>> {
         let guard = self
             .acquire_refresh_file_lock()
@@ -194,6 +201,17 @@ impl AuthManager {
         let Some(guard) = guard else {
             return Ok(None);
         };
+        Ok(self
+            .native_request_matches(expected, admission, &guard)?
+            .then_some(guard))
+    }
+
+    pub(super) fn native_request_matches(
+        &self,
+        expected: &NativeCredentialExpectation,
+        admission: NativeRequestAdmission,
+        guard: &crate::account_lease::AuthRefreshGuard,
+    ) -> std::io::Result<bool> {
         // The caller holds the selector semaphore. Recheck after the asynchronous file lock.
         if self.has_external_auth()
             || !self.is_login_method_allowed(ForcedLoginMethod::Chatgpt)
@@ -205,40 +223,37 @@ impl AuthManager {
                 }
             }
         {
-            return Ok(None);
+            return Ok(false);
         }
-        let imported_id = match &expected.source {
-            NativeCredentialSource::Root(_) => None,
-            NativeCredentialSource::Imported(id) => {
-                if !crate::account::AccountStore::new(self.codex_home.clone())
-                    .list()?
-                    .iter()
-                    .any(|account| &account.id == id && account.enabled && !account.login_required)
-                {
-                    return Ok(None);
-                }
-                Some(id)
-            }
-        };
+        if let NativeCredentialSource::Imported(id) = &expected.source
+            && !crate::account::AccountStore::new(self.codex_home.clone())
+                .list()?
+                .iter()
+                .any(|account| {
+                    &account.id == id
+                        && account.enabled
+                        && (admission == NativeRequestAdmission::AfterTerminalRefresh
+                            || !account.login_required)
+                })
+        {
+            return Ok(false);
+        }
         let auth = load_auth_dot_json_with_guard(
             &self.active_auth_home(),
             self.active_auth_credentials_store_mode(),
             self.active_keyring_backend_kind(),
-            &guard,
+            guard,
         )?;
-        Ok(auth
-            .and_then(|auth| {
-                credential_from_auth(
-                    &auth,
-                    Utc::now(),
-                    imported_id,
-                    self.effective_chatgpt_workspaces().as_deref(),
-                )
-            })
-            .filter(|credential| {
-                credential.source == expected.source && credential.identity == expected.identity
-            })
-            .map(|_| guard))
+        let Some(auth) = auth else { return Ok(false) };
+        let Some(tokens) = auth.tokens.as_ref() else {
+            return Ok(false);
+        };
+        Ok(crate::server::ensure_workspace_allowed(
+            self.effective_chatgpt_workspaces().as_deref(),
+            &tokens.id_token.raw_jwt,
+        )
+        .is_ok()
+            && <[u8; 32]>::from(Sha256::digest(serde_json::to_vec(&auth)?)) == expected.identity)
     }
 }
 
