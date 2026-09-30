@@ -74,15 +74,21 @@ fn confirmed_redemption_recovers_weekly_activation_and_completion() {
     let request_id = redeeming(&attempt).1.to_string();
     let completed_at = 100;
     let confirmed = lease
-        .confirm_redeemed("wrong-request", completed_at)
+        .confirm_redeemed("wrong-request", completed_at, /*source*/ None)
         .unwrap();
     assert!(!confirmed);
-    assert!(lease.confirm_redeemed(&request_id, completed_at).unwrap());
+    assert!(
+        lease
+            .confirm_redeemed(&request_id, completed_at, /*source*/ None)
+            .unwrap()
+    );
     let expected = ResetState {
         phase: Some(ResetAttemptPhase::ActivatingWeekly),
         completion: Some(ResetCompletion {
             id: request_id,
             completed_at: 100,
+            manual: false,
+            source: None,
         }),
     };
     assert_eq!(lease.state().unwrap(), expected);
@@ -179,4 +185,81 @@ async fn auth_lease_uses_exact_identity_and_has_a_deadline() {
             .unwrap()
             .is_some()
     );
+}
+
+#[test]
+fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redemption() {
+    let (_home, store, account_id) = test_store();
+    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
+    assert_eq!(
+        lease
+            .begin_manual("manual", ResetCredentialSource::Root)
+            .unwrap(),
+        ManualResetAttempt::Fresh
+    );
+    let pending = lease.state().unwrap();
+    drop(lease);
+    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
+    assert_eq!(lease.state().unwrap(), pending);
+    assert_eq!(
+        lease
+            .begin_manual("manual", ResetCredentialSource::Root)
+            .unwrap(),
+        ManualResetAttempt::Pending
+    );
+    assert_eq!(
+        lease.load_or_begin("another-credit").unwrap(),
+        pending.phase.unwrap()
+    );
+    assert!(
+        lease
+            .begin_manual("manual", ResetCredentialSource::Imported)
+            .is_err()
+    );
+    assert!(
+        lease
+            .begin_manual("different", ResetCredentialSource::Root)
+            .is_err()
+    );
+    assert!(
+        !lease
+            .confirm_redeemed("manual", 100, /*source*/ None)
+            .unwrap()
+    );
+    assert!(!lease.confirm_manual("different", 100).unwrap());
+    assert!(lease.confirm_manual("manual", 100).unwrap());
+    let completed = ResetState {
+        phase: None,
+        completion: Some(ResetCompletion {
+            id: "manual".into(),
+            completed_at: 100,
+            manual: true,
+            source: Some(ResetCredentialSource::Root),
+        }),
+    };
+    assert_eq!(lease.state().unwrap(), completed);
+    drop(lease);
+    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
+    assert_eq!(
+        lease
+            .begin_manual("manual", ResetCredentialSource::Root)
+            .unwrap(),
+        ManualResetAttempt::Completed
+    );
+    assert!(!lease.confirm_manual("manual", 200).unwrap());
+    assert!(
+        lease
+            .begin_manual("manual", ResetCredentialSource::Imported)
+            .is_err()
+    );
+    assert_eq!(lease.state().unwrap(), completed);
+    assert_eq!(
+        lease
+            .begin_manual("new", ResetCredentialSource::Imported)
+            .unwrap(),
+        ManualResetAttempt::Fresh
+    );
+    assert!(!lease.clear_redeeming("manual").unwrap());
+    assert!(lease.clear_redeeming("new").unwrap());
+    assert_eq!(lease.state().unwrap(), completed);
 }

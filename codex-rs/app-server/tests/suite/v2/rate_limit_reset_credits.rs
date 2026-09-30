@@ -474,3 +474,117 @@ fn write_chatgpt_base_url(codex_home: &Path, base_url: &str) -> std::io::Result<
         format!("chatgpt_base_url = \"{base_url}\"\n"),
     )
 }
+
+#[tokio::test]
+async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -> Result<()> {
+    const TOKEN: &str = "e30.eyJleHAiOjQxMDI0NDQ4MDB9.c2ln";
+    for source in [
+        codex_login::ResetCredentialSource::Root,
+        codex_login::ResetCredentialSource::Imported,
+    ] {
+        let home = TempDir::new()?;
+        let server = MockServer::start().await;
+        write_chatgpt_auth(
+            home.path(),
+            ChatGptAuthFixture::new(TOKEN).account_id("account-123"),
+            AuthCredentialsStoreMode::File,
+        )?;
+        std::fs::write(
+            home.path().join("config.toml"),
+            format!(
+                "model_provider = \"cli-proxy\"\nchatgpt_base_url = \"{}\"\n",
+                server.uri()
+            ),
+        )?;
+        let failed = std::sync::atomic::AtomicBool::new(false);
+        Mock::given(method("POST"))
+            .and(path("/api/codex/rate-limit-reset-credits/consume"))
+            .and(header("authorization", format!("Bearer {TOKEN}")))
+            .and(header("chatgpt-account-id", "account-123"))
+            .respond_with(move |request: &wiremock::Request| {
+                let body: serde_json::Value = request.body_json().unwrap();
+                let key = body["redeem_request_id"].as_str().unwrap();
+                if key == "unknown" && !failed.swap(true, std::sync::atomic::Ordering::SeqCst) {
+                    return ResponseTemplate::new(500);
+                }
+                let code = if key == "new" {
+                    "reset"
+                } else {
+                    "already_redeemed"
+                };
+                ResponseTemplate::new(200).set_body_json(json!({"code": code, "windows_reset": 2}))
+            })
+            .expect(6)
+            .mount(&server)
+            .await;
+        let store = AccountStore::new(home.path().into());
+        if source == codex_login::ResetCredentialSource::Imported {
+            store.import_current(
+                /*label*/ None,
+                AuthCredentialsStoreMode::File,
+                AuthKeyringBackendKind::default(),
+            )?;
+        }
+        let id = serde_json::from_value(json!("acct_ed3ee2fed195b138"))?;
+        let mut app = initialized_app_server(home.path()).await?;
+        assert_eq!(
+            consume_reset_credit(&mut app, "new").await?.outcome,
+            ConsumeAccountRateLimitResetCreditOutcome::Reset
+        );
+        let first = store.acquire_reset_mutation_lease(&id)?.state()?;
+        let completion = first.completion.as_ref().unwrap();
+        assert_eq!(
+            first,
+            codex_login::ResetState {
+                phase: None,
+                completion: Some(codex_login::ResetCompletion {
+                    id: "new".into(),
+                    completed_at: completion.completed_at,
+                    manual: true,
+                    source: Some(source),
+                }),
+            }
+        );
+        // Replayed Reset and an untracked old AlreadyRedeemed cannot freshen completion evidence.
+        for key in ["new", "old"] {
+            consume_reset_credit(&mut app, key).await?;
+            assert_eq!(store.acquire_reset_mutation_lease(&id)?.state()?, first);
+        }
+        let request = send_consume_reset_credit(&mut app, "unknown").await?;
+        assert_eq!(
+            read_error_response(&mut app, request).await?.error.code,
+            INTERNAL_ERROR_CODE
+        );
+        assert_eq!(
+            store.acquire_reset_mutation_lease(&id)?.state()?,
+            codex_login::ResetState {
+                phase: Some(codex_login::ResetAttemptPhase::ManualRedeeming {
+                    redeem_request_id: "unknown".into(),
+                    source,
+                }),
+                completion: first.completion,
+            }
+        );
+        assert_eq!(
+            consume_reset_credit(&mut app, "unknown").await?.outcome,
+            ConsumeAccountRateLimitResetCreditOutcome::AlreadyRedeemed
+        );
+        let recovered = store.acquire_reset_mutation_lease(&id)?.state()?;
+        let completion = recovered.completion.as_ref().unwrap();
+        assert_eq!(
+            recovered,
+            codex_login::ResetState {
+                phase: None,
+                completion: Some(codex_login::ResetCompletion {
+                    id: "unknown".into(),
+                    completed_at: completion.completed_at,
+                    manual: true,
+                    source: Some(source),
+                }),
+            }
+        );
+        consume_reset_credit(&mut app, "unknown").await?;
+        assert_eq!(store.acquire_reset_mutation_lease(&id)?.state()?, recovered);
+    }
+    Ok(())
+}

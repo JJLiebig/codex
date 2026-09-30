@@ -15,6 +15,7 @@ use codex_login::AccountStore;
 use codex_login::AuthCredentialsStoreMode;
 use codex_login::CodexAuth;
 use codex_login::ResetAttemptPhase;
+use codex_login::ResetCredentialSource;
 use codex_login::ResetMutationLease;
 use codex_login::refresh_auth_from_storage;
 use codex_login::token_data::TokenData;
@@ -75,8 +76,12 @@ pub(super) async fn process_account(
         return Ok(());
     };
     let phase = lease.state()?.phase;
+    if matches!(phase, Some(ResetAttemptPhase::ManualRedeeming { .. })) {
+        return Ok(());
+    }
     let account = load_reset_account(config, store, account_id).await?;
     match phase {
+        Some(ResetAttemptPhase::ManualRedeeming { .. }) => Ok(()),
         Some(ResetAttemptPhase::ActivatingWeekly) => account.recover(&mut lease).await,
         Some(ResetAttemptPhase::Redeeming {
             credit_id: id,
@@ -230,6 +235,10 @@ impl ResetAccount<'_> {
                     lease.confirm_redeemed(
                         request_id,
                         Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX),
+                        self.config
+                            .model_provider
+                            .is_cli_proxy()
+                            .then_some(ResetCredentialSource::Imported),
                     )?,
                     "reset attempt changed while its mutation lease was held"
                 );
@@ -390,6 +399,9 @@ impl CompletionNotices {
             let Some(completion) = state.completion else {
                 continue;
             };
+            if completion.manual {
+                continue;
+            }
             // Reconcile readiness on existing scheduler scans, even after a notice was shown.
             // Redemption can succeed while quota recovery is still pending.
             if state.phase.is_none() && completion.completed_at >= self.started_at {
