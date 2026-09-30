@@ -158,6 +158,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
             "tool_partial",
             "truncated",
             "pre_output_500",
+            "pre_output_overload",
         ] {
             let response = match case {
                 "http_quota" => ResponseTemplate::new(429).set_body_json(json!({"error":{"type":"usage_limit_reached"}})),
@@ -168,6 +169,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                 "tool_partial" => ResponseTemplate::new(200).set_body_string(format!("data: {{\"type\":\"response.output_item.done\",\"item\":{{\"type\":\"function_call\",\"name\":\"test\",\"call_id\":\"call\",\"arguments\":\"{{}}\"}}}}\n\n{QUOTA}")),
                 "truncated" => ResponseTemplate::new(200).set_body_string(PARTIAL),
                 "pre_output_500" => ResponseTemplate::new(500),
+                "pre_output_overload" => ResponseTemplate::new(200).set_body_string("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\"}}}\n\n"),
                 _ => unreachable!(),
             };
             let response = if matches!(case, "local_401" | "cooldown") {
@@ -215,7 +217,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                 }
                 Err(err) => error = Some(err),
             }
-            if !matches!(case, "truncated" | "pre_output_500") {
+            if !matches!(case, "truncated" | "pre_output_500" | "pre_output_overload") {
                 let error = error.as_ref().expect("provider rejection must surface");
                 assert!(
                     matches!(error.details(), CodexErrorDetails::UnsupportedOperation(_)),
@@ -228,8 +230,16 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                     messages.push(error.to_string());
                 }
             }
-            if case == "pre_output_500" {
+            if matches!(case, "pre_output_500" | "pre_output_overload") {
                 assert!(!session.owned_retry_forbidden(error.as_ref().expect("HTTP failure")));
+            }
+            if case == "pre_output_overload" {
+                assert!(
+                    crate::codex_plus_plus::model_capacity_retry::applies_to_sampling(
+                        error.as_ref().unwrap(),
+                        &SessionSource::Cli,
+                    )
+                );
             }
             if matches!(case, "partial_quota" | "tool_partial" | "truncated") {
                 assert!(session.owned_retry_forbidden(&CodexErr::Stream("stream ended".into())));

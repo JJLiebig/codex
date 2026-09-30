@@ -155,7 +155,7 @@ impl ModelClientSession {
     pub(crate) fn owned_retry_forbidden(&self, error: &CodexErr) -> bool {
         self.owned_request.as_ref().is_some_and(|request| {
             request.accepted_output.load(Ordering::Relaxed)
-                || error.retry_delay(/*retry_count*/ 1).is_none()
+                || matches!(error.details(), CodexErrorDetails::UnsupportedOperation(_))
         })
     }
 }
