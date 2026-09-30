@@ -1,4 +1,6 @@
 use super::ThreadUsage;
+use super::UsageResetCompletion;
+use super::UsageResetTargetParams;
 use crate::JsonSchema;
 use crate::TS;
 use crate::protocol::common::AuthMode;
@@ -313,6 +315,9 @@ impl fmt::Debug for ChatgptAuthTokensRefreshResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountRateLimitsParams {
+    /// Read-only reset admission for an exact failed native source.
+    #[ts(optional = nullable)]
+    pub reset_admission: Option<UsageResetTargetParams>,
     /// The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users,
     /// allow the backend to record experiment exposure after ordinary usage is blocked.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -329,6 +334,8 @@ pub type NullableGetAccountRateLimitsParams = Option<GetAccountRateLimitsParams>
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountRateLimitsResponse {
+    /// Present only after fresh exact reset admission succeeds.
+    pub reset_admission: Option<UsageResetCompletion>,
     /// Backend permission for ordinary included usage, validated against the active account.
     /// Null means unavailable; clients must not infer recovery from percentages or reset times.
     pub ordinary_usage_allowed: Option<bool>,

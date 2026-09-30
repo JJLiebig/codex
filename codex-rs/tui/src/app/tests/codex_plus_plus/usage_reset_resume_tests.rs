@@ -138,6 +138,53 @@ async fn automatic_usage_reset_reads_current_account_and_submits_one_continuatio
         }]]
     );
     insta::assert_snapshot!(transcript.trim(), @"› continue");
+    // The same live wait consumes an owned admission only in its current hard-stop generation.
+    for (method, status, error) in [
+        ("turn/started", "inProgress", serde_json::Value::Null),
+        (
+            "turn/completed",
+            "failed",
+            json!({"message":"Usage exhausted", "codexErrorInfo":"usageLimitExceeded",
+            "inferenceAttribution":{"type":"servedNative", "source":"root", "accountId":"acct_f2b6477631260f18", "displayLabel":null}}),
+        ),
+    ] {
+        app.chat_widget.handle_server_notification(serde_json::from_value(json!({
+            "method": method, "params":{"threadId":thread_id.to_string(),
+                "turn":{"id":"owned-failure","items":[],"itemsView":"full","status":status,"error":error}}
+        }))?, /*replay_kind*/ None);
+    }
+    let target = app
+        .chat_widget
+        .owned_reset_target(/*completion*/ None)
+        .unwrap();
+    let mut owned = response.clone();
+    owned.ordinary_usage_allowed = Some(true);
+    owned.reset_admission = Some(codex_app_server_protocol::UsageResetCompletion {
+        id: "owned-completion".into(),
+        source: target.source,
+        account_id: target.account_id.clone(),
+        completed_at: target.failed_at,
+    });
+    for (generation, expected_count) in [
+        (hard_stop_generation.wrapping_add(1), 0),
+        (hard_stop_generation, 1),
+        (hard_stop_generation, 0),
+    ] {
+        app.handle_event(
+            &mut tui,
+            &mut server,
+            AppEvent::UsageResetAdmissionLoaded {
+                target: target.clone(),
+                hard_stop_generation: generation,
+                response: owned.clone(),
+            },
+        )
+        .await?;
+        let count = std::iter::from_fn(|| ops.try_recv().ok())
+            .filter(|op| matches!(op, Op::UserTurn { .. }))
+            .count();
+        assert_eq!(count, expected_count);
+    }
     server.shutdown().await?;
     Ok(())
 }

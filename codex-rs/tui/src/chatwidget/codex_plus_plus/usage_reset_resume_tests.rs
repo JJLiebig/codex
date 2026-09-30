@@ -176,7 +176,16 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
         Some(InferenceAttribution::Unknown),
         None,
     ] {
-        for mode in ["live", "completed", "replay"] {
+        for mode in [
+            "live",
+            "completed",
+            "replay",
+            "cancel",
+            "input",
+            "queue",
+            "steer",
+            "new-turn",
+        ] {
             let (mut chat, mut events, mut ops) =
                 make_chatwidget_manual(/*model_override*/ None).await;
             chat.config.model_provider =
@@ -264,6 +273,74 @@ async fn owned_failure_identity_is_displayed_without_native_recovery_or_replay_a
             assert_eq!(errors.len(), 1);
             if mode == "live" {
                 displayed.extend(errors);
+            }
+            if let Some(mut target) = chat.owned_reset_target(/*completion*/ None) {
+                let mut response = quota();
+                response.ordinary_usage_allowed = Some(true);
+                let completion = UsageResetCompletion {
+                    id: "confirmed-reset".into(),
+                    source: target.source,
+                    account_id: target.account_id.clone(),
+                    completed_at: target.failed_at,
+                };
+                target.completion_id = Some(completion.id.clone());
+                for invalid in ["source", "account", "completion", "permission", "old"] {
+                    let mut wrong = completion.clone();
+                    match invalid {
+                        "source" => {
+                            wrong.source = if wrong.source == InferenceNativeSource::Root {
+                                InferenceNativeSource::Imported
+                            } else {
+                                InferenceNativeSource::Root
+                            }
+                        }
+                        "account" => wrong.account_id = "other".into(),
+                        "completion" => wrong.id = "other-reset".into(),
+                        "old" => wrong.completed_at -= 1,
+                        _ => {}
+                    }
+                    response.ordinary_usage_allowed = (invalid != "permission").then_some(true);
+                    response.reset_admission = Some(wrong);
+                    chat.resume_after_owned_reset(&target, &response);
+                    assert_no_submit_op(&mut ops);
+                }
+                response.ordinary_usage_allowed = Some(true);
+                response.reset_admission = Some(completion);
+                match mode {
+                    "cancel" => handle_turn_interrupted(&mut chat, "failed-turn"),
+                    "input" => chat.submit_user_message("new request".into()),
+                    "queue" => {
+                        chat.queue_user_message("queued follow-up".into());
+                    }
+                    "steer" => {
+                        chat.input_queue
+                            .pending_steers
+                            .push_back(crate::chatwidget::PendingSteer {
+                                client_id: "pending".into(),
+                                user_message: "pending steer".into(),
+                                history_record:
+                                    crate::chatwidget::UserMessageHistoryRecord::UserMessageText,
+                                source: crate::chatwidget::UserMessageSource::Prompt,
+                                compare_key: crate::chatwidget::PendingSteerCompareKey {
+                                    message: "pending steer".into(),
+                                    image_count: 0,
+                                },
+                            })
+                    }
+                    "new-turn" => handle_turn_started(&mut chat, "new-turn"),
+                    _ => {}
+                }
+                while ops.try_recv().is_ok() {}
+                for _ in 0..2 {
+                    chat.resume_after_owned_reset(&target, &response);
+                }
+                if matches!(mode, "live" | "completed") {
+                    assert!(matches!(
+                        next_submit_op(&mut ops),
+                        AppCommand::UserTurn { .. }
+                    ));
+                }
+                assert_no_submit_op(&mut ops);
             }
             handle_turn_interrupted(&mut chat, "failed-turn");
             assert!(chat.usage_reset_wait.is_none());

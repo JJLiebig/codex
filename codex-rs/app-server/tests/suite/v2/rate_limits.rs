@@ -250,6 +250,7 @@ async fn get_account_rate_limits_returns_snapshot(
         timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(request_id)).await??;
 
     let expected = GetAccountRateLimitsResponse {
+        reset_admission: None,
         ordinary_usage_allowed: Some(true),
         account_id: Some("account-123".to_string()),
         rate_limit_upsell: Some(banner),

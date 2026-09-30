@@ -626,6 +626,8 @@ export type { TurnSteerParams } from "./TurnSteerParams";
 export type { TurnSteerResponse } from "./TurnSteerResponse";
 export type { TurnToolOutput } from "./TurnToolOutput";
 export type { TurnsPage } from "./TurnsPage";
+export type { UsageResetCompletion } from "./UsageResetCompletion";
+export type { UsageResetTargetParams } from "./UsageResetTargetParams";
 export type { UserInput } from "./UserInput";
 export type { WarningNotification } from "./WarningNotification";
 export type { WebSearchAction } from "./WebSearchAction";

@@ -32,6 +32,7 @@ pub use codex_plus_plus::ProxyRequestRoute;
 pub use codex_plus_plus::WeeklyWindowPingOutcome;
 pub use codex_plus_plus::WeeklyWindowPingRequest;
 pub use codex_plus_plus::cleanup_cli_proxy_credentials;
+pub use codex_plus_plus::cli_proxy_reset_ready;
 pub use codex_plus_plus::list_cli_proxy_claude_accounts;
 pub use codex_plus_plus::ping_weekly_window;
 pub use codex_plus_plus::preflight_weekly_window_ping;

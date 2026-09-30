@@ -1866,26 +1866,6 @@ class GetAccountParams(BaseModel):
     ] = None
 
 
-class GetAccountRateLimitsParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    exclude_reset_credit_details: Annotated[
-        bool | None,
-        Field(
-            alias="excludeResetCreditDetails",
-            description="Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
-        ),
-    ] = None
-    supports_luna_reserve: Annotated[
-        bool | None,
-        Field(
-            alias="supportsLunaReserve",
-            description="The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
-        ),
-    ] = None
-
-
 class GetAccountTokenUsageParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -3012,15 +2992,6 @@ class NetworkUnixSocketPermission(Enum):
 class NonSteerableTurnKind(Enum):
     review = "review"
     compact = "compact"
-
-
-class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    root: Annotated[
-        GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
-    ]
 
 
 class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | None]):
@@ -6347,6 +6318,46 @@ class TurnSteerResponse(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
+class UsageResetCompletion(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    completed_at: Annotated[
+        int,
+        Field(
+            alias="completedAt",
+            description="Unix seconds; does not prove present quota or proxy readiness.",
+        ),
+    ]
+    id: str
+    source: InferenceNativeSource
+
+
+class UsageResetTargetParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    account_id: Annotated[str, Field(alias="accountId")]
+    completion_id: Annotated[
+        str | None,
+        Field(
+            alias="completionId",
+            description="When supplied, admission requires this exact durable completion.",
+        ),
+    ] = None
+    failed_at: Annotated[
+        int,
+        Field(
+            alias="failedAt",
+            description="Earliest eligible completion, in Unix seconds on the inference host.",
+        ),
+    ]
+    source: InferenceNativeSource
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class TextUserInput(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7493,17 +7504,6 @@ class AccountLogoutRequest(BaseModel):
     params: None = None
 
 
-class AccountRateLimitsReadRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
-    ]
-    params: GetAccountRateLimitsParams | None = None
-
-
 class AccountRateLimitResetCreditConsumeRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8239,6 +8239,33 @@ class GatewayOAuthReadResponse(BaseModel):
     ] = None
 
 
+class GetAccountRateLimitsParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    exclude_reset_credit_details: Annotated[
+        bool | None,
+        Field(
+            alias="excludeResetCreditDetails",
+            description="Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
+        ),
+    ] = None
+    reset_admission: Annotated[
+        UsageResetTargetParams | None,
+        Field(
+            alias="resetAdmission",
+            description="Read-only reset admission for an exact failed native source.",
+        ),
+    ] = None
+    supports_luna_reserve: Annotated[
+        bool | None,
+        Field(
+            alias="supportsLunaReserve",
+            description="The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
+        ),
+    ] = None
+
+
 class GetAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8805,6 +8832,15 @@ class NewThreadModelDefaults(BaseModel):
         ReasoningEffort | None, Field(alias="modelReasoningEffort")
     ] = None
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
+
+
+class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: Annotated[
+        GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
+    ]
 
 
 class OverriddenMetadata(BaseModel):
@@ -10632,6 +10668,17 @@ class AccountLoginStartRequest(BaseModel):
     params: LoginAccountParams
 
 
+class AccountRateLimitsReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
+    ]
+    params: GetAccountRateLimitsParams | None = None
+
+
 class CommandExecRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10900,6 +10947,13 @@ class GetAccountRateLimitsResponse(BaseModel):
         Field(
             alias="rateLimitsByLimitId",
             description="Multi-bucket view keyed by metered `limit_id` (for example, `codex`).",
+        ),
+    ] = None
+    reset_admission: Annotated[
+        UsageResetCompletion | None,
+        Field(
+            alias="resetAdmission",
+            description="Present only after fresh exact reset admission succeeds.",
         ),
     ] = None
 

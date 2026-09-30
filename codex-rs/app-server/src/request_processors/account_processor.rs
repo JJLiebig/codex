@@ -18,6 +18,8 @@ mod bedrock_setup;
 mod cli_proxy_logout;
 mod gateway_oauth;
 mod rate_limit_resets;
+#[path = "account_processor/codex_plus_plus/reset_admission.rs"]
+mod reset_admission;
 mod workspace_routing;
 
 // Duration before a browser ChatGPT login attempt is abandoned.
@@ -1129,6 +1131,9 @@ impl AccountRequestProcessor {
         &self,
         params: GetAccountRateLimitsParams,
     ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
+        if let Some(target) = params.reset_admission {
+            return reset_admission::read(self, target).await;
+        }
         let Some((auth, http_client_factory)) =
             self.auth_manager.auth_with_http_client_factory().await
         else {
@@ -1218,6 +1223,7 @@ impl AccountRequestProcessor {
             .filter(|_| matches_active_account);
 
         Ok(GetAccountRateLimitsResponse {
+            reset_admission: None,
             ordinary_usage_allowed: response
                 .ordinary_usage_allowed
                 .filter(|_| matches_active_account),

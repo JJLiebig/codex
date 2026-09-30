@@ -145,6 +145,7 @@ async fn luna_reserve_usage_survives_banner_dismissal_and_typing_during_a_turn()
         /*primary_used*/ 48, /*weekly_used*/ 20,
     )));
     let response = codex_app_server_protocol::GetAccountRateLimitsResponse {
+        reset_admission: None,
         ordinary_usage_allowed: Some(false),
         account_id: Some("account-preview".into()),
         rate_limits: snapshot(/*percent*/ 100.0),
