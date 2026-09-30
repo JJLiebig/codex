@@ -128,6 +128,29 @@ fn exact_route_rejects_missing_selected_membership_and_conflicting_ownership() {
 }
 
 #[tokio::test]
+async fn non_owned_compaction_keeps_capabilities_without_resolving_auth() {
+    for (name, expected) in [
+        ("OpenAI", RemoteCompactionSupport::V2),
+        ("Custom", RemoteCompactionSupport::Unsupported),
+    ] {
+        let provider = crate::create_model_provider(
+            codex_model_provider_info::ModelProviderInfo {
+                name: name.into(),
+                env_key: Some("CODEX_TEST_MISSING_COMPACTION_KEY".into()),
+                ..Default::default()
+            },
+            /*auth_manager*/ None,
+        );
+        assert_eq!(
+            remote_compaction_for_model(provider.as_ref(), "claude-new")
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+}
+
+#[tokio::test]
 async fn native_configured_request_keeps_its_model_and_auth() {
     let provider = crate::create_model_provider(
         codex_model_provider_info::ModelProviderInfo {

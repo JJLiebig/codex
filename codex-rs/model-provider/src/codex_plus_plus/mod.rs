@@ -19,6 +19,7 @@ pub use cli_proxy_reset::reconcile_cli_proxy_reset;
 pub use prepared_request::PreparedModelRequest;
 pub use prepared_request::ProxyRequestRoute;
 pub use prepared_request::prepare_configured_request;
+pub use prepared_request::remote_compaction_for_model;
 
 pub use weekly_window_ping::WeeklyWindowPingOutcome;
 pub use weekly_window_ping::WeeklyWindowPingRequest;

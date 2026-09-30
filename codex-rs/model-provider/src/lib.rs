@@ -39,6 +39,7 @@ pub use codex_plus_plus::preflight_weekly_window_ping;
 pub use codex_plus_plus::prepare_cli_proxy_claude_login;
 pub use codex_plus_plus::prepare_configured_request;
 pub use codex_plus_plus::reconcile_cli_proxy_reset;
+pub use codex_plus_plus::remote_compaction_for_model;
 pub use codex_protocol::account::ProviderAccount;
 pub use provider::ModelProvider;
 pub use provider::ModelProviderFuture;
