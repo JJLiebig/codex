@@ -148,7 +148,7 @@ async fn spawn_process_with_stdin_mode(
 
     let mut command = Command::new(program);
     #[cfg(windows)]
-    command.creation_flags(winapi::um::winbase::DETACHED_PROCESS);
+    command.detach_parent_console();
     #[cfg(unix)]
     if let Some(arg0) = arg0 {
         command.arg0(arg0);

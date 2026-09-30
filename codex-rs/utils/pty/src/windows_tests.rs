@@ -26,8 +26,6 @@ use winapi::um::jobapi::IsProcessInJob;
 use winapi::um::processthreadsapi::OpenProcess;
 use winapi::um::winnt::PROCESS_QUERY_LIMITED_INFORMATION;
 
-use pretty_assertions::assert_eq;
-
 const READY_MARKER: &str = "__CODEX_CHILD_READY__";
 const VALUE_MARKER: &str = "__CODEX_CHILD_VALUE__";
 const CONSOLE_TEST_ROLE_ENV: &str = "CODEX_PTY_CONSOLE_TEST_ROLE";
@@ -161,7 +159,7 @@ async fn assert_terminate_kills_descendant(
     // Exercise descendants created after the best-effort pipe assignment,
     // without making the test depend on winning the intentionally accepted race.
     let code = format!(
-        "import subprocess,sys,time; time.sleep(0.5); code=bytes.fromhex('{}').decode(); subprocess.Popen([sys.executable,'-u','-c',code]); time.sleep(60)",
+        "import subprocess,sys,time; time.sleep(0.5); code=bytes.fromhex('{}').decode(); subprocess.Popen([sys.executable,'-u','-c',code],stdout=sys.stdout,stderr=sys.stderr); time.sleep(60)",
         utf8_hex(&child_code)
     );
     let args = vec!["-u".to_string(), "-c".to_string(), code];
