@@ -31,6 +31,7 @@ pub enum ResetAttemptPhase {
     ActivatingWeekly,
     ManualRedeeming {
         redeem_request_id: String,
+        credit_id: Option<String>,
         source: ResetCredentialSource,
     },
 }
@@ -53,10 +54,13 @@ pub enum ResetCredentialSource {
     Imported,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ManualResetAttempt {
     Fresh,
-    Pending,
+    Pending {
+        redeem_request_id: String,
+        credit_id: Option<String>,
+    },
     Completed,
 }
 
@@ -257,8 +261,28 @@ impl ResetMutationLease {
         &mut self,
         request_id: &str,
         source: ResetCredentialSource,
+        credit_id: Option<&str>,
     ) -> io::Result<ManualResetAttempt> {
         let mut state = read_state(&self.state_path)?;
+        match state.phase.as_ref() {
+            Some(ResetAttemptPhase::ManualRedeeming {
+                redeem_request_id,
+                credit_id,
+                source: current,
+            }) if *current == source => {
+                return Ok(ManualResetAttempt::Pending {
+                    redeem_request_id: redeem_request_id.clone(),
+                    credit_id: credit_id.clone(),
+                });
+            }
+            Some(_) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::WouldBlock,
+                    "another usage reset is pending",
+                ));
+            }
+            None => {}
+        }
         if let Some(done) = &state.completion
             && done.id == request_id
         {
@@ -270,23 +294,9 @@ impl ResetMutationLease {
                 "reset request belongs to a different account source",
             ));
         }
-        match state.phase.as_ref() {
-            Some(ResetAttemptPhase::ManualRedeeming {
-                redeem_request_id,
-                source: current,
-            }) if redeem_request_id == request_id && *current == source => {
-                return Ok(ManualResetAttempt::Pending);
-            }
-            Some(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "another usage reset is pending",
-                ));
-            }
-            None => {}
-        }
         state.phase = Some(ResetAttemptPhase::ManualRedeeming {
             redeem_request_id: request_id.to_owned(),
+            credit_id: credit_id.map(str::to_owned),
             source,
         });
         write_state(&self.state_path, &state)?;
@@ -298,6 +308,7 @@ impl ResetMutationLease {
         let Some(ResetAttemptPhase::ManualRedeeming {
             redeem_request_id,
             source,
+            ..
         }) = state.phase
         else {
             return Ok(false);

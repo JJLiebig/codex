@@ -193,7 +193,7 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
     let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
     assert_eq!(
         lease
-            .begin_manual("manual", ResetCredentialSource::Root)
+            .begin_manual("manual", ResetCredentialSource::Root, Some("credit-a"))
             .unwrap(),
         ManualResetAttempt::Fresh
     );
@@ -203,9 +203,12 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
     assert_eq!(lease.state().unwrap(), pending);
     assert_eq!(
         lease
-            .begin_manual("manual", ResetCredentialSource::Root)
+            .begin_manual("manual", ResetCredentialSource::Root, Some("credit-a"))
             .unwrap(),
-        ManualResetAttempt::Pending
+        ManualResetAttempt::Pending {
+            redeem_request_id: "manual".into(),
+            credit_id: Some("credit-a".into()),
+        }
     );
     assert_eq!(
         lease.load_or_begin("another-credit").unwrap(),
@@ -213,13 +216,21 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
     );
     assert!(
         lease
-            .begin_manual("manual", ResetCredentialSource::Imported)
+            .begin_manual(
+                "manual",
+                ResetCredentialSource::Imported,
+                /*credit_id*/ None
+            )
             .is_err()
     );
-    assert!(
+    assert_eq!(
         lease
-            .begin_manual("different", ResetCredentialSource::Root)
-            .is_err()
+            .begin_manual("different", ResetCredentialSource::Root, Some("credit-b"))
+            .unwrap(),
+        ManualResetAttempt::Pending {
+            redeem_request_id: "manual".into(),
+            credit_id: Some("credit-a".into()),
+        }
     );
     assert!(
         !lease
@@ -242,22 +253,40 @@ fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redempti
     let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
     assert_eq!(
         lease
-            .begin_manual("manual", ResetCredentialSource::Root)
+            .begin_manual("manual", ResetCredentialSource::Root, Some("credit-a"))
             .unwrap(),
         ManualResetAttempt::Completed
     );
     assert!(!lease.confirm_manual("manual", 200).unwrap());
     assert!(
         lease
-            .begin_manual("manual", ResetCredentialSource::Imported)
+            .begin_manual(
+                "manual",
+                ResetCredentialSource::Imported,
+                /*credit_id*/ None
+            )
             .is_err()
     );
     assert_eq!(lease.state().unwrap(), completed);
     assert_eq!(
         lease
-            .begin_manual("new", ResetCredentialSource::Imported)
+            .begin_manual(
+                "new",
+                ResetCredentialSource::Imported,
+                /*credit_id*/ None
+            )
             .unwrap(),
         ManualResetAttempt::Fresh
+    );
+    // Pending takes precedence even when the incoming key matches an older completion.
+    assert_eq!(
+        lease
+            .begin_manual("manual", ResetCredentialSource::Imported, Some("credit-b"))
+            .unwrap(),
+        ManualResetAttempt::Pending {
+            redeem_request_id: "new".into(),
+            credit_id: None
+        }
     );
     assert!(!lease.clear_redeeming("manual").unwrap());
     assert!(lease.clear_redeeming("new").unwrap());

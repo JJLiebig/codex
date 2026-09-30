@@ -430,7 +430,11 @@ async fn pending_manual_attempt_skips_automatic_redemption_and_completion_notice
         .unwrap();
     let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
     lease
-        .begin_manual("manual", ResetCredentialSource::Imported)
+        .begin_manual(
+            "manual",
+            ResetCredentialSource::Imported,
+            /*credit_id*/ None,
+        )
         .unwrap();
     let pending = lease.state().unwrap();
     drop(lease);

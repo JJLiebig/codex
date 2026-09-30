@@ -97,45 +97,60 @@ pub(super) async fn consume(
     let attempt = match (&source, lease.as_mut()) {
         (Some(source), Some(lease)) => Some(
             lease
-                .begin_manual(&params.idempotency_key, *source)
+                .begin_manual(
+                    &params.idempotency_key,
+                    *source,
+                    params.credit_id.as_deref(),
+                )
                 .map_err(|error| internal_error(error.to_string()))?,
         ),
         (Some(_), None) => return Err(invalid_request("reset account is unavailable")),
         (None, _) => None,
     };
+    // A reopened dialog may supply a new key: settle the original ambiguous attempt first.
+    let (request_id, credit_id) = match &attempt {
+        Some(ManualResetAttempt::Pending {
+            redeem_request_id,
+            credit_id,
+        }) => (redeem_request_id.as_str(), credit_id.as_deref()),
+        Some(ManualResetAttempt::Fresh | ManualResetAttempt::Completed) | None => {
+            (params.idempotency_key.as_str(), params.credit_id.as_deref())
+        }
+    };
     let response =
         tokio::time::timeout(deadline.saturating_duration_since(Instant::now()), async {
-            match params.credit_id.as_deref() {
+            match credit_id {
                 Some(credit_id) => {
                     client
-                        .consume_rate_limit_reset_credit_by_id(&params.idempotency_key, credit_id)
+                        .consume_rate_limit_reset_credit_by_id(request_id, credit_id)
                         .await
                 }
-                None => {
-                    client
-                        .consume_rate_limit_reset_credit(&params.idempotency_key)
-                        .await
-                }
+                None => client.consume_rate_limit_reset_credit(request_id).await,
             }
         })
         .await
         .map_err(|_| timeout_error())?
         .map_err(|err| internal_error(format!("failed to consume rate limit reset: {err}")))?;
-    if let (Some(attempt), Some(lease)) = (attempt, lease.as_mut())
-        && attempt != ManualResetAttempt::Completed
+    if let (Some(attempt), Some(lease)) = (&attempt, lease.as_mut())
+        && !matches!(attempt, ManualResetAttempt::Completed)
     {
         let confirmed = response.code == ConsumeRateLimitResetCreditCode::Reset
             || (response.code == ConsumeRateLimitResetCreditCode::AlreadyRedeemed
-                && attempt == ManualResetAttempt::Pending);
+                && matches!(attempt, ManualResetAttempt::Pending { .. }));
         let result = if confirmed {
             lease.confirm_manual(
-                &params.idempotency_key,
+                request_id,
                 chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX),
             )
         } else {
-            lease.clear_redeeming(&params.idempotency_key)
+            lease.clear_redeeming(request_id)
         };
         result.map_err(|error| internal_error(error.to_string()))?;
+    }
+    if request_id != params.idempotency_key || credit_id != params.credit_id.as_deref() {
+        return Err(invalid_request(
+            "Previous reset attempt resolved. No new reset was used; refresh usage before trying again.",
+        ));
     }
     Ok(response)
 }

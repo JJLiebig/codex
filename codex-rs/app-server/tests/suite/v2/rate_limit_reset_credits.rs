@@ -479,9 +479,17 @@ fn write_chatgpt_base_url(codex_home: &Path, base_url: &str) -> std::io::Result<
 #[tokio::test]
 async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -> Result<()> {
     const TOKEN: &str = "e30.eyJleHAiOjQxMDI0NDQ4MDB9.c2ln";
-    for source in [
-        codex_login::ResetCredentialSource::Root,
-        codex_login::ResetCredentialSource::Imported,
+    for (source, retry_key, retry_credit) in [
+        (
+            codex_login::ResetCredentialSource::Root,
+            "reopened",
+            "different",
+        ),
+        (
+            codex_login::ResetCredentialSource::Imported,
+            "unknown",
+            "original",
+        ),
     ] {
         let home = TempDir::new()?;
         let server = MockServer::start().await;
@@ -551,7 +559,14 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
             consume_reset_credit(&mut app, key).await?;
             assert_eq!(store.acquire_reset_mutation_lease(&id)?.state()?, first);
         }
-        let request = send_consume_reset_credit(&mut app, "unknown").await?;
+        let request = app
+            .send_consume_account_rate_limit_reset_credit_request(
+                ConsumeAccountRateLimitResetCreditParams {
+                    idempotency_key: "unknown".into(),
+                    credit_id: Some("original".into()),
+                },
+            )
+            .await?;
         assert_eq!(
             read_error_response(&mut app, request).await?.error.code,
             INTERNAL_ERROR_CODE
@@ -561,14 +576,50 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
             codex_login::ResetState {
                 phase: Some(codex_login::ResetAttemptPhase::ManualRedeeming {
                     redeem_request_id: "unknown".into(),
+                    credit_id: Some("original".into()),
                     source,
                 }),
                 completion: first.completion,
             }
         );
+        drop(app);
+        let mut app = initialized_app_server(home.path()).await?;
+        let retry = app
+            .send_consume_account_rate_limit_reset_credit_request(
+                ConsumeAccountRateLimitResetCreditParams {
+                    idempotency_key: retry_key.into(),
+                    credit_id: Some(retry_credit.into()),
+                },
+            )
+            .await?;
+        if retry_key == "unknown" {
+            let response: ConsumeAccountRateLimitResetCreditResponse =
+                timeout(DEFAULT_READ_TIMEOUT, app.read_response(retry)).await??;
+            assert_eq!(
+                response.outcome,
+                ConsumeAccountRateLimitResetCreditOutcome::AlreadyRedeemed
+            );
+        } else {
+            let error = read_error_response(&mut app, retry).await?;
+            assert_eq!(error.error.code, INVALID_REQUEST_ERROR_CODE);
+            assert_eq!(
+                error.error.message,
+                "Previous reset attempt resolved. No new reset was used; refresh usage before trying again."
+            );
+        }
+        let requests = server.received_requests().await.unwrap();
+        let resets: Vec<_> = requests
+            .iter()
+            .filter(|request| {
+                request.method == "POST"
+                    && request.url.path() == "/api/codex/rate-limit-reset-credits/consume"
+            })
+            .collect();
         assert_eq!(
-            consume_reset_credit(&mut app, "unknown").await?.outcome,
-            ConsumeAccountRateLimitResetCreditOutcome::AlreadyRedeemed
+            resets[4].body_json::<serde_json::Value>()?,
+            json!({
+                "redeem_request_id": "unknown", "credit_id": "original",
+            })
         );
         let recovered = store.acquire_reset_mutation_lease(&id)?.state()?;
         let completion = recovered.completion.as_ref().unwrap();
