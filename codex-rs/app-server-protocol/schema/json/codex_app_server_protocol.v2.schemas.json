@@ -6393,6 +6393,13 @@
         "idempotencyKey": {
           "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
           "type": "string"
+        },
+        "threadId": {
+          "description": "Optional loaded thread whose provider needs source-bound reset completion.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -6406,6 +6413,16 @@
       "properties": {
         "outcome": {
           "$ref": "#/definitions/ConsumeAccountRateLimitResetCreditOutcome"
+        },
+        "resetCompletion": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/UsageResetCompletion"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -23312,6 +23329,14 @@
           ],
           "default": null,
           "description": "Optional public explanation and continuation instruction for a misalignment block."
+        },
+        "usageLimitObservedAtNs": {
+          "default": null,
+          "description": "Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -23728,6 +23753,10 @@
           "format": "int64",
           "type": "integer"
         },
+        "completedAtNs": {
+          "description": "Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.",
+          "type": "string"
+        },
         "id": {
           "type": "string"
         },
@@ -23738,6 +23767,7 @@
       "required": [
         "accountId",
         "completedAt",
+        "completedAtNs",
         "id",
         "source"
       ],
@@ -23760,6 +23790,13 @@
           "description": "Earliest eligible completion, in Unix seconds on the inference host.",
           "format": "int64",
           "type": "integer"
+        },
+        "failedAtNs": {
+          "description": "Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "source": {
           "$ref": "#/definitions/InferenceNativeSource"

@@ -1651,6 +1651,7 @@ fn failed_turn_clears_stale_final_message() {
                 items: Vec::new(),
                 status: TurnStatus::Failed,
                 error: Some(TurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message: "turn failed".to_string(),
@@ -1710,6 +1711,7 @@ fn turn_failure_prefers_structured_error_message() {
 
     let error = processor.collect_thread_events(ServerNotification::Error(ErrorNotification {
         error: TurnError {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             misalignment: None,
             message: "backend failed".to_string(),

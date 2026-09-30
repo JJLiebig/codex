@@ -471,6 +471,16 @@ impl CompletionNotices {
                 && completion.completed_at >= self.started_at
             {
                 tx.send(AppEvent::UsageResetCompleted {
+                    completion: completion.source.map(|source| codex_app_server_protocol::UsageResetCompletion {
+                        id: completion.id.clone(),
+                        source: match source {
+                            ResetCredentialSource::Root => codex_protocol::inference_attribution::InferenceNativeSource::Root,
+                            ResetCredentialSource::Imported => codex_protocol::inference_attribution::InferenceNativeSource::Imported,
+                        },
+                        account_id: profile.id.to_string(),
+                        completed_at: completion.completed_at / 1_000_000_000,
+                        completed_at_ns: completion.completed_at.to_string(),
+                    }),
                     account_id: profile.id.clone(),
                     completed_at: completion.completed_at,
                 });

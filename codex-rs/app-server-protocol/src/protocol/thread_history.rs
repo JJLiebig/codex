@@ -1240,6 +1240,7 @@ impl ThreadHistoryBuilder {
         let changed_turn = if let Some(turn) = self.current_turn.as_mut() {
             turn.status = TurnStatus::Failed;
             turn.error = Some(V2TurnError {
+                usage_limit_observed_at_ns: payload.usage_limit_observed_at_ns.clone(),
                 inference_attribution: payload.inference_attribution.clone(),
                 misalignment: payload.misalignment.clone().map(Into::into),
                 message: payload.message.clone(),
@@ -1257,6 +1258,7 @@ impl ThreadHistoryBuilder {
 
     fn handle_turn_aborted(&mut self, payload: &TurnAbortedEvent) {
         let terminal_error = payload.error.as_ref().map(|error| V2TurnError {
+            usage_limit_observed_at_ns: error.usage_limit_observed_at_ns.clone(),
             inference_attribution: error.inference_attribution.clone(),
             message: error.message.clone(),
             codex_error_info: error.codex_error_info.clone().map(Into::into),
@@ -1308,6 +1310,7 @@ impl ThreadHistoryBuilder {
 
     fn handle_turn_complete(&mut self, payload: &TurnCompleteEvent) {
         let terminal_error = payload.error.as_ref().map(|error| V2TurnError {
+            usage_limit_observed_at_ns: error.usage_limit_observed_at_ns.clone(),
             inference_attribution: error.inference_attribution.clone(),
             misalignment: error.misalignment.clone().map(Into::into),
             message: error.message.clone(),
@@ -4400,6 +4403,7 @@ mod tests {
                 started_at: Some(10),
                 last_agent_message: None,
                 error: Some(ErrorEvent {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),
@@ -4433,6 +4437,7 @@ mod tests {
                     }],
                     status: TurnStatus::Failed,
                     error: Some(TurnError {
+                        usage_limit_observed_at_ns: None,
                         inference_attribution: None,
                         misalignment: None,
                         message: "Selected model is at capacity. Please try a different model."
@@ -4802,6 +4807,7 @@ mod tests {
                 questions: None,
             }),
             EventMsg::Error(ErrorEvent {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "rollback failed".into(),
@@ -4849,6 +4855,7 @@ mod tests {
                 time_to_first_token_ms: None,
             }),
             EventMsg::Error(ErrorEvent {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "request-level failure".into(),
@@ -4905,6 +4912,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::Error(ErrorEvent {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: Some(
                     codex_protocol::inference_attribution::InferenceAttribution::Unknown,
                 ),
@@ -4935,6 +4943,7 @@ mod tests {
         assert_eq!(
             turns[0].error,
             Some(TurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: Some(
                     codex_protocol::inference_attribution::InferenceAttribution::Unknown
                 ),
@@ -4971,6 +4980,7 @@ mod tests {
                 started_at: Some(10),
                 last_agent_message: None,
                 error: Some(ErrorEvent {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),
@@ -5003,6 +5013,7 @@ mod tests {
                 }],
                 status: TurnStatus::Failed,
                 error: Some(TurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),

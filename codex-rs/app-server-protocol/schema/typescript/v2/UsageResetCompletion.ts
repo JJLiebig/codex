@@ -7,4 +7,8 @@ export type UsageResetCompletion = { id: string, source: InferenceNativeSource, 
 /**
  * Unix seconds; does not prove present quota or proxy readiness.
  */
-completedAt: number, };
+completedAt: number,
+/**
+ * Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.
+ */
+completedAtNs: string, };

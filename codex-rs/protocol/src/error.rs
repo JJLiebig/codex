@@ -76,6 +76,7 @@ pub enum SandboxErr {
 pub struct CodexErr {
     details: CodexErrorDetails,
     retry_after: Option<RetryAfter>,
+    usage_limit_observed_at_ns: Option<i64>,
     inference_attribution: Option<Box<crate::inference_attribution::InferenceAttribution>>,
 }
 
@@ -238,6 +239,7 @@ impl From<CodexErrorDetails> for CodexErr {
         Self {
             details,
             retry_after: None,
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
         }
     }
@@ -303,6 +305,7 @@ macro_rules! codex_err_unit_constructors {
             pub const $variant: Self = Self {
                 details: CodexErrorDetails::$variant,
                 retry_after: None,
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
             };
         )*
@@ -511,6 +514,7 @@ impl CodexErr {
         ErrorEvent {
             message,
             codex_error_info: Some(self.to_codex_protocol_error()),
+            usage_limit_observed_at_ns: self.usage_limit_observed_at_ns().map(|at| at.to_string()),
             inference_attribution: self.inference_attribution.as_deref().cloned(),
             misalignment: match &self.details {
                 CodexErrorDetails::MisalignmentPolicyViolation { misalignment, .. } => {

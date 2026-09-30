@@ -1111,6 +1111,7 @@ impl TurnRequestProcessor {
                             ),
                         };
                         let error = TurnError {
+                            usage_limit_observed_at_ns: None,
                             inference_attribution: None,
                             misalignment: None,
                             message: message.clone(),

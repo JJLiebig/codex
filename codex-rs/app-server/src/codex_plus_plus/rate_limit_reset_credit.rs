@@ -14,7 +14,13 @@ const REQUEST_TIMEOUT_ENV_VAR: &str = "CODEX_TEST_RATE_LIMIT_RESET_REQUEST_TIMEO
 pub(super) async fn consume(
     processor: &AccountRequestProcessor,
     params: &ConsumeAccountRateLimitResetCreditParams,
-) -> Result<ConsumeRateLimitResetCreditResponse, JSONRPCErrorError> {
+) -> Result<
+    (
+        ConsumeRateLimitResetCreditResponse,
+        Option<codex_app_server_protocol::UsageResetCompletion>,
+    ),
+    JSONRPCErrorError,
+> {
     let request_timeout = REQUEST_TIMEOUT;
     #[cfg(debug_assertions)]
     let request_timeout = std::env::var(REQUEST_TIMEOUT_ENV_VAR)
@@ -23,6 +29,17 @@ pub(super) async fn consume(
         .map(Duration::from_millis)
         .unwrap_or(request_timeout);
     let deadline = Instant::now() + request_timeout;
+    let mut owned = processor.config.model_provider.is_cli_proxy();
+    if let Some(thread_id) = &params.thread_id {
+        let thread_id = codex_protocol::ThreadId::from_string(thread_id)
+            .map_err(|error| invalid_request(format!("invalid thread id: {error}")))?;
+        let thread = processor
+            .thread_manager
+            .get_thread(thread_id)
+            .await
+            .map_err(|_| invalid_request(format!("thread not found: {thread_id}")))?;
+        owned |= thread.config().await.model_provider.is_cli_proxy();
+    }
     let auth_manager = Arc::clone(&processor.auth_manager);
     let auth_task = tokio::spawn(async move { auth_manager.auth().await });
     let Some(mut auth) =
@@ -42,7 +59,7 @@ pub(super) async fn consume(
             "chatgpt authentication required for rate limit reset credits",
         ));
     }
-    let source = if processor.config.model_provider.is_cli_proxy() {
+    let source = if owned {
         let snapshot = tokio::time::timeout_at(
             tokio::time::Instant::from_std(deadline),
             processor.auth_manager.export_native_credentials(),
@@ -154,14 +171,14 @@ pub(super) async fn consume(
             .transpose()
             .map_err(|error| internal_error(error.to_string()))?
             .and_then(|state| state.completion)
-            .filter(|completion| {
-                completion.id == request_id && completion.needs_proxy_reconciliation()
-            })
+            .filter(|completion| completion.id == request_id)
     } else {
         None
     };
     drop(lease); // Runtime attachment must precede reacquiring the native reset lease.
-    if let (Some(completion), Some(source)) = (completion, &source) {
+    if let (Some(completion), Some(source)) = (&completion, &source)
+        && completion.needs_proxy_reconciliation()
+    {
         let (NativeCredentialSource::Root(account_id)
         | NativeCredentialSource::Imported(account_id)) = source;
         let reconciliation =
@@ -171,7 +188,7 @@ pub(super) async fn consume(
                     &processor.config.codex_home,
                     processor.config.http_client_factory(),
                     account_id,
-                    &completion,
+                    completion,
                     usage.account_id.as_deref(),
                     &usage.rate_limits,
                     usage.ordinary_usage_allowed,
@@ -189,7 +206,26 @@ pub(super) async fn consume(
             "Previous reset attempt resolved. No new reset was used; refresh usage before trying again.",
         ));
     }
-    Ok(response)
+    let reset_completion = completion.zip(source).map(|(completion, source)| {
+        let (source, account_id) = match source {
+            NativeCredentialSource::Root(id) => (
+                codex_protocol::inference_attribution::InferenceNativeSource::Root,
+                id,
+            ),
+            NativeCredentialSource::Imported(id) => (
+                codex_protocol::inference_attribution::InferenceNativeSource::Imported,
+                id,
+            ),
+        };
+        codex_app_server_protocol::UsageResetCompletion {
+            id: completion.id,
+            source,
+            account_id: account_id.to_string(),
+            completed_at: completion.completed_at / 1_000_000_000,
+            completed_at_ns: completion.completed_at.to_string(),
+        }
+    });
+    Ok((response, reset_completion))
 }
 
 fn timeout_error() -> JSONRPCErrorError {

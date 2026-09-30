@@ -2078,6 +2078,9 @@ impl fmt::Debug for MisalignmentSteer {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct ErrorEvent {
+    /// Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
+    #[serde(default)]
+    pub usage_limit_observed_at_ns: Option<String>,
     pub message: String,
     #[serde(default)]
     pub codex_error_info: Option<CodexErrorInfo>,
@@ -5866,6 +5869,7 @@ mod tests {
     #[test]
     fn rollback_failed_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             misalignment: None,
             message: "rollback failed".into(),
@@ -5877,6 +5881,7 @@ mod tests {
     #[test]
     fn active_turn_not_steerable_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             misalignment: None,
             message: "cannot steer a review turn".into(),
@@ -5890,6 +5895,7 @@ mod tests {
     #[test]
     fn generic_error_affects_turn_status() {
         let event = ErrorEvent {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             misalignment: None,
             message: "generic".into(),
@@ -5901,6 +5907,7 @@ mod tests {
     #[test]
     fn misalignment_explanation_and_steer_are_never_serialized_into_error_events() {
         let event = ErrorEvent {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             message: "This request violated the misalignment policy.".to_string(),
             codex_error_info: Some(CodexErrorInfo::MisalignmentPolicyViolation),
@@ -5919,6 +5926,7 @@ mod tests {
             json!({
                 "message": "This request violated the misalignment policy.",
                 "codex_error_info": "misalignment_policy_violation",
+                "usage_limit_observed_at_ns": null,
                 "inference_attribution": null
             })
         );

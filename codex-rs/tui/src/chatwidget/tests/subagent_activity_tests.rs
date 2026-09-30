@@ -192,6 +192,7 @@ async fn terminal_turn_drains_subagents_without_opening_queued_questions() {
                 "■ stream disconnected\n".to_string(),
             ));
             AppServerTurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 message: "stream disconnected".to_string(),
                 misalignment: None,

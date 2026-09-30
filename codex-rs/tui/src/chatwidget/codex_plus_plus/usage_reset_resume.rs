@@ -18,6 +18,10 @@ pub(in crate::chatwidget) struct UsageResetWait {
 }
 
 impl ChatWidget {
+    pub(crate) fn is_pending_reset_consume(&self, request_id: u64) -> bool {
+        self.pending_rate_limit_reset_request_id == Some(request_id)
+    }
+
     pub(in crate::chatwidget) fn observe_usage_reset_turn(&mut self, event: &ServerNotification) {
         let failed_turn = match event {
             ServerNotification::Error(error)
@@ -26,7 +30,12 @@ impl ChatWidget {
             {
                 Some((
                     &error.turn_id,
-                    None,
+                    error
+                        .error
+                        .usage_limit_observed_at_ns
+                        .as_deref()
+                        .and_then(|at| at.parse::<i64>().ok())
+                        .filter(|at| *at >= 0),
                     error.error.inference_attribution.as_ref(),
                 ))
             }
@@ -39,8 +48,16 @@ impl ChatWidget {
                 Some((
                     &turn.turn.id,
                     turn.turn
-                        .completed_at
-                        .map(|at| at.saturating_add(1).saturating_mul(1_000_000_000)),
+                        .error
+                        .as_ref()
+                        .and_then(|error| error.usage_limit_observed_at_ns.as_deref())
+                        .and_then(|at| at.parse::<i64>().ok())
+                        .filter(|at| *at >= 0)
+                        .or_else(|| {
+                            turn.turn
+                                .completed_at
+                                .and_then(|at| at.checked_add(1)?.checked_mul(1_000_000_000))
+                        }),
                     turn.turn
                         .error
                         .as_ref()
@@ -68,7 +85,16 @@ impl ChatWidget {
                 self.usage_reset_wait = None;
                 return;
             }
-            if self.turn_lifecycle.agent_turn_running
+            if attribution.is_some()
+                && let Some(waiting) = self.usage_reset_wait.as_mut()
+                && &waiting.turn_id == turn_id
+                && waiting.attribution.as_ref() == attribution
+            {
+                if let Some(completed_at) = completed_at {
+                    // Keep the original precise host observation through duplicate delivery.
+                    waiting.failed_at = Some(waiting.failed_at.unwrap_or(completed_at));
+                }
+            } else if self.turn_lifecycle.agent_turn_running
                 && !self.input_queue.user_turn_pending_start
                 && self.turn_lifecycle.last_turn_id.as_ref() == Some(turn_id)
             {
@@ -86,12 +112,8 @@ impl ChatWidget {
                 && waiting.attribution.as_ref() == attribution
                 && let Some(completed_at) = completed_at
             {
-                // Server time survives independent delivery; exclude its ambiguous whole second.
-                waiting.failed_at = Some(if attribution.is_some() {
-                    completed_at
-                } else {
-                    waiting.failed_at.unwrap_or(completed_at).min(completed_at)
-                });
+                waiting.failed_at =
+                    Some(waiting.failed_at.unwrap_or(completed_at).min(completed_at));
             }
         }
     }
@@ -156,6 +178,7 @@ impl ChatWidget {
             source,
             account_id: account_id.clone(),
             failed_at: waiting.failed_at?.saturating_add(999_999_999) / 1_000_000_000,
+            failed_at_ns: Some(waiting.failed_at?.to_string()),
             completion_id: completion.map(|completion| completion.id.clone()),
         })
     }
@@ -180,7 +203,14 @@ impl ChatWidget {
             return;
         }
         expected.completion_id = Some(completion.id.clone());
-        let completed_at = completion.completed_at.saturating_mul(1_000_000_000);
+        let Some(completed_at) = completion
+            .completed_at_ns
+            .parse::<i64>()
+            .ok()
+            .filter(|at| *at >= 0)
+        else {
+            return;
+        };
         if current != expected
             || self.reset_ready_turn(completed_at).as_deref() != Some(&target.turn_id)
             || response.ordinary_usage_allowed != Some(true)

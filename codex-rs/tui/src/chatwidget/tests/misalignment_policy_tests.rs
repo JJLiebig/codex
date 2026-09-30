@@ -132,6 +132,7 @@ async fn misalignment_policy_failure_stops_the_thread_and_renders_once() {
                 AppServerTurnStatus::Failed,
                 /*duration_ms*/ None,
                 Some(AppServerTurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: None,
                     message: ERROR_MESSAGE.to_string(),
@@ -209,6 +210,7 @@ async fn misalignment_turn_end_discards_history_search_and_question_drafts() {
                 AppServerTurnStatus::Failed,
                 /*duration_ms*/ None,
                 Some(AppServerTurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     misalignment: Some(review_details()),
                     message: ERROR_MESSAGE.into(),

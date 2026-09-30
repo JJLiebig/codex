@@ -11,6 +11,7 @@ fn app_server_error(
 ) -> ServerNotification {
     ServerNotification::Error(ErrorNotification {
         error: AppServerTurnError {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             misalignment: None,
             message: "retry status".to_string(),

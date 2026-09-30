@@ -32,11 +32,58 @@
           "type": "string"
         }
       ]
+    },
+    "InferenceNativeSource": {
+      "enum": [
+        "root",
+        "imported"
+      ],
+      "type": "string"
+    },
+    "UsageResetCompletion": {
+      "properties": {
+        "accountId": {
+          "type": "string"
+        },
+        "completedAt": {
+          "description": "Unix seconds; does not prove present quota or proxy readiness.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "completedAtNs": {
+          "description": "Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.",
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/definitions/InferenceNativeSource"
+        }
+      },
+      "required": [
+        "accountId",
+        "completedAt",
+        "completedAtNs",
+        "id",
+        "source"
+      ],
+      "type": "object"
     }
   },
   "properties": {
     "outcome": {
       "$ref": "#/definitions/ConsumeAccountRateLimitResetCreditOutcome"
+    },
+    "resetCompletion": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/UsageResetCompletion"
+        },
+        {
+          "type": "null"
+        }
+      ]
     }
   },
   "required": [

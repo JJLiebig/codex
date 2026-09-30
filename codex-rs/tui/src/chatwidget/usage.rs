@@ -358,7 +358,7 @@ impl ChatWidget {
         credit_id: Option<String>,
         result: Result<ConsumeAccountRateLimitResetCreditResponse, String>,
     ) -> bool {
-        if self.pending_rate_limit_reset_request_id != Some(request_id) {
+        if !self.is_pending_reset_consume(request_id) {
             return false;
         }
 

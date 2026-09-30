@@ -42,6 +42,7 @@ async fn consume_rate_limit_reset_credit_requires_chatgpt_auth() -> Result<()> {
     let consume_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: "request-1".to_string(),
                 credit_id: None,
             },
@@ -113,6 +114,7 @@ async fn consume_account_rate_limit_reset_credit_maps_backend_outcomes() -> Resu
         assert_eq!(
             consume_reset_credit(&mut mcp, idempotency_key).await?,
             ConsumeAccountRateLimitResetCreditResponse {
+                reset_completion: None,
                 outcome: expected_outcome,
             }
         );
@@ -145,6 +147,7 @@ async fn chatgpt_auth_without_local_identity_can_still_consume() -> Result<()> {
     assert_eq!(
         consume_reset_credit(&mut mcp, "request-no-local-identity").await?,
         ConsumeAccountRateLimitResetCreditResponse {
+            reset_completion: None,
             outcome: ConsumeAccountRateLimitResetCreditOutcome::Reset,
         }
     );
@@ -174,6 +177,7 @@ async fn consume_account_rate_limit_reset_credit_forwards_selected_credit_id() -
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: "request-selected".to_string(),
                 credit_id: Some("credit-123".to_string()),
             },
@@ -187,6 +191,7 @@ async fn consume_account_rate_limit_reset_credit_forwards_selected_credit_id() -
         )
         .await??,
         ConsumeAccountRateLimitResetCreditResponse {
+            reset_completion: None,
             outcome: ConsumeAccountRateLimitResetCreditOutcome::Reset,
         }
     );
@@ -201,6 +206,7 @@ async fn consume_account_rate_limit_reset_credit_rejects_empty_idempotency_key()
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: String::new(),
                 credit_id: None,
             },
@@ -221,6 +227,7 @@ async fn consume_account_rate_limit_reset_credit_rejects_empty_credit_id() -> Re
     let request_id = mcp
         .send_consume_account_rate_limit_reset_credit_request(
             ConsumeAccountRateLimitResetCreditParams {
+                thread_id: None,
                 idempotency_key: "request-1".to_string(),
                 credit_id: Some(String::new()),
             },
@@ -400,6 +407,7 @@ async fn imported_account_consume_waits_for_shared_reset_lease() -> Result<()> {
         )
         .await??,
         ConsumeAccountRateLimitResetCreditResponse {
+            reset_completion: None,
             outcome: ConsumeAccountRateLimitResetCreditOutcome::Reset,
         }
     );
@@ -440,6 +448,7 @@ async fn consume_reset_credit(
 async fn send_consume_reset_credit(mcp: &mut TestAppServer, idempotency_key: &str) -> Result<i64> {
     mcp.send_consume_account_rate_limit_reset_credit_request(
         ConsumeAccountRateLimitResetCreditParams {
+            thread_id: None,
             idempotency_key: idempotency_key.to_string(),
             credit_id: None,
         },
@@ -542,12 +551,28 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
         }
         let id = serde_json::from_value(json!("acct_ed3ee2fed195b138"))?;
         let mut app = initialized_app_server(home.path()).await?;
+        let reset = consume_reset_credit(&mut app, "new").await?;
         assert_eq!(
-            consume_reset_credit(&mut app, "new").await?.outcome,
+            reset.outcome,
             ConsumeAccountRateLimitResetCreditOutcome::Reset
         );
         let first = store.acquire_reset_mutation_lease(&id)?.state()?;
         let completion = first.completion.as_ref().unwrap();
+        assert_eq!(
+            reset.reset_completion,
+            Some(codex_app_server_protocol::UsageResetCompletion {
+                id: completion.id.clone(),
+                source: match source {
+                    codex_login::ResetCredentialSource::Root =>
+                        codex_protocol::inference_attribution::InferenceNativeSource::Root,
+                    codex_login::ResetCredentialSource::Imported =>
+                        codex_protocol::inference_attribution::InferenceNativeSource::Imported,
+                },
+                account_id: id.to_string(),
+                completed_at: completion.completed_at / 1_000_000_000,
+                completed_at_ns: completion.completed_at.to_string(),
+            })
+        );
         assert_eq!(
             first,
             codex_login::ResetState {
@@ -563,12 +588,17 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
         );
         // Replayed Reset and an untracked old AlreadyRedeemed cannot freshen completion evidence.
         for key in ["new", "old"] {
-            consume_reset_credit(&mut app, key).await?;
+            let replay = consume_reset_credit(&mut app, key).await?;
+            assert_eq!(
+                replay.reset_completion,
+                (key == "new").then(|| reset.reset_completion.clone().unwrap())
+            );
             assert_eq!(store.acquire_reset_mutation_lease(&id)?.state()?, first);
         }
         let request = app
             .send_consume_account_rate_limit_reset_credit_request(
                 ConsumeAccountRateLimitResetCreditParams {
+                    thread_id: None,
                     idempotency_key: "unknown".into(),
                     credit_id: Some("original".into()),
                 },
@@ -594,6 +624,7 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
         let retry = app
             .send_consume_account_rate_limit_reset_credit_request(
                 ConsumeAccountRateLimitResetCreditParams {
+                    thread_id: None,
                     idempotency_key: retry_key.into(),
                     credit_id: Some(retry_credit.into()),
                 },
@@ -605,6 +636,13 @@ async fn owned_manual_completion_requires_a_new_reset_or_known_pending_retry() -
             assert_eq!(
                 response.outcome,
                 ConsumeAccountRateLimitResetCreditOutcome::AlreadyRedeemed
+            );
+            assert_eq!(
+                response
+                    .reset_completion
+                    .as_ref()
+                    .map(|completion| completion.id.as_str()),
+                Some("unknown")
             );
         } else {
             let error = read_error_response(&mut app, retry).await?;
@@ -699,10 +737,11 @@ async fn reset_admission_reads_imported_a_without_switching_selected_b() -> Resu
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
                 "account_id": account, "plan_type": "pro", "rate_limit": {"allowed": true, "limit_reached": false,
                     "secondary_window": {"used_percent": 1, "limit_window_seconds": 604800, "reset_after_seconds": 3600, "reset_at": 2000000000}}
-            }))).expect(1).mount(&backend).await;
+            }))).expect(if account == "account-a" { 2 } else { 1 }).mount(&backend).await;
     }
     let mut app = initialized_app_server(home.path()).await?;
     let target = UsageResetTargetParams {
+        failed_at_ns: None,
         thread_id: "waiting-thread".into(),
         turn_id: "waiting-turn".into(),
         source: InferenceNativeSource::Imported,
@@ -710,12 +749,23 @@ async fn reset_admission_reads_imported_a_without_switching_selected_b() -> Resu
         failed_at: 9,
         completion_id: Some("completed-a".into()),
     };
-    for mismatch in ["kind", "completion", "old", "matching"] {
+    for mismatch in [
+        "kind",
+        "completion",
+        "old",
+        "nanosecond-before",
+        "malformed",
+        "matching",
+        "nanosecond-after",
+    ] {
         let mut request = target.clone();
         match mismatch {
             "kind" => request.source = InferenceNativeSource::Root,
             "completion" => request.completion_id = Some("other-reset".into()),
             "old" => request.failed_at = 11,
+            "nanosecond-before" => request.failed_at_ns = Some("10000000001".into()),
+            "malformed" => request.failed_at_ns = Some("99999999999999999999999999".into()),
+            "nanosecond-after" => request.failed_at_ns = Some("9999999999".into()),
             _ => {}
         }
         let id = app
@@ -724,7 +774,7 @@ async fn reset_admission_reads_imported_a_without_switching_selected_b() -> Resu
                 Some(json!({"resetAdmission": request})),
             )
             .await?;
-        if mismatch != "matching" {
+        if !matches!(mismatch, "matching" | "nanosecond-after") {
             assert_eq!(
                 read_error_response(&mut app, id).await?.error.code,
                 INVALID_REQUEST_ERROR_CODE
@@ -749,5 +799,95 @@ async fn reset_admission_reads_imported_a_without_switching_selected_b() -> Resu
     assert_eq!(response.account_id.as_deref(), Some("account-b"));
     assert_eq!(std::fs::read(home.path().join("auth.json"))?, selected);
     assert!(!home.path().join("cli-proxy").exists());
+    Ok(())
+}
+
+#[tokio::test]
+async fn native_global_with_owned_thread_records_manual_completion() -> Result<()> {
+    let (home, backend) = chatgpt_test_context().await?;
+    write_chatgpt_auth(
+        home.path(),
+        ChatGptAuthFixture::new("e30.eyJleHAiOjQxMDI0NDQ4MDB9.c2ln").account_id("account-123"),
+        AuthCredentialsStoreMode::File,
+    )?;
+    Mock::given(method("POST"))
+        .and(path("/api/codex/rate-limit-reset-credits/consume"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({"code":"reset","windows_reset":2})),
+        )
+        .expect(1)
+        .mount(&backend)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/codex/usage"))
+        .respond_with(ResponseTemplate::new(503))
+        .expect(1)
+        .mount(&backend)
+        .await;
+    // A child-only invalid executable prevents discovery from provisioning or starting any proxy.
+    let missing = home.path().join("no-proxy-executable");
+    let mut app = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .without_auto_env()
+        .with_env_overrides(&[
+            ("OPENAI_API_KEY", None),
+            ("CODEX_CLI_PROXY_EXECUTABLE", missing.to_str()),
+        ])
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+    let start = app
+        .send_thread_start_request(codex_app_server_protocol::ThreadStartParams {
+            model_provider: Some("cli-proxy".into()),
+            model: Some("gpt-5.5".into()),
+            ephemeral: Some(true),
+            ..Default::default()
+        })
+        .await?;
+    let started: codex_app_server_protocol::ThreadStartResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(start)).await??;
+    assert_eq!(started.model_provider, "cli-proxy");
+    let mut params = ConsumeAccountRateLimitResetCreditParams {
+        thread_id: Some("invalid".into()),
+        idempotency_key: "actual-reset".into(),
+        credit_id: None,
+    };
+    let invalid = app
+        .send_consume_account_rate_limit_reset_credit_request(params.clone())
+        .await?;
+    assert_eq!(
+        read_error_response(&mut app, invalid).await?.error.code,
+        INVALID_REQUEST_ERROR_CODE
+    );
+    params.thread_id = Some(started.thread.id);
+    let request = app
+        .send_consume_account_rate_limit_reset_credit_request(params)
+        .await?;
+    let response: ConsumeAccountRateLimitResetCreditResponse =
+        timeout(DEFAULT_READ_TIMEOUT, app.read_response(request)).await??;
+    let completion = response
+        .reset_completion
+        .expect("owned thread completion under native global provider");
+    let id = serde_json::from_value(json!("acct_ed3ee2fed195b138"))?;
+    let durable = AccountStore::new(home.path().into())
+        .acquire_reset_mutation_lease(&id)?
+        .state()?
+        .completion
+        .unwrap();
+    assert_eq!(
+        (
+            response.outcome,
+            completion.id,
+            completion.source,
+            completion.account_id,
+            completion.completed_at_ns
+        ),
+        (
+            ConsumeAccountRateLimitResetCreditOutcome::Reset,
+            durable.id,
+            codex_protocol::inference_attribution::InferenceNativeSource::Root,
+            id.to_string(),
+            durable.completed_at.to_string()
+        )
+    );
     Ok(())
 }

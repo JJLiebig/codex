@@ -59,6 +59,13 @@
           "format": "int64",
           "type": "integer"
         },
+        "failedAtNs": {
+          "description": "Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source": {
           "$ref": "#/definitions/InferenceNativeSource"
         },

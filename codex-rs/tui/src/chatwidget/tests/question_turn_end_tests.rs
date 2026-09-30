@@ -130,6 +130,7 @@ async fn question_turn_end_recovers_collapsed_drafts_on_completion_and_failure()
                     status.clone(),
                     /*duration_ms*/ None,
                     (status == AppServerTurnStatus::Failed).then(|| AppServerTurnError {
+                        usage_limit_observed_at_ns: None,
                         inference_attribution: None,
                         misalignment: None,
                         message: "Turn failed".into(),

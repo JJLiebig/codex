@@ -130,6 +130,7 @@ async fn circuit_break_action_preserves_warning_and_reports_error_in_live_and_sa
         let completed: TurnCompletedNotification =
             timeout(TIMEOUT, app.read_notification("turn/completed")).await??;
         let expected_error = (action == Some("strict")).then_some(TurnError {
+            usage_limit_observed_at_ns: None,
             inference_attribution: None,
             message: warning.message,
             codex_error_info: Some(CodexErrorInfo::TooManyDenials),

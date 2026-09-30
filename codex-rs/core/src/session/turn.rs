@@ -849,6 +849,9 @@ pub(crate) async fn run_turn(
                 sess.emit_turn_error_lifecycle(turn_context.as_ref(), error.clone())
                     .await;
                 let event = EventMsg::Error(ErrorEvent {
+                    usage_limit_observed_at_ns: codex_error
+                        .usage_limit_observed_at_ns()
+                        .map(|at| at.to_string()),
                     inference_attribution: codex_error.inference_attribution().cloned(),
                     misalignment: None,
                     message: "Invalid image in your last message. Please remove it and try again."

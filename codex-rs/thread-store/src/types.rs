@@ -412,6 +412,9 @@ pub enum StoredTurnStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredTurnError {
+    /// Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
+    #[serde(default)]
+    pub usage_limit_observed_at_ns: Option<String>,
     #[serde(default)]
     pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// User-visible error message.

@@ -7403,6 +7403,7 @@ fn test_session_telemetry(config: &Config, model: &str) -> SessionTelemetry {
 #[test]
 fn active_turn_not_steerable_turn_error_extracts_structured_server_error() {
     let turn_error = AppServerTurnError {
+        usage_limit_observed_at_ns: None,
         inference_attribution: None,
         misalignment: None,
         message: "cannot steer a review turn".to_string(),

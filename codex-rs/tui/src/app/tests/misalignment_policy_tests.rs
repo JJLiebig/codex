@@ -7,6 +7,7 @@ use pretty_assertions::assert_eq;
 
 fn policy_error() -> AppServerTurnError {
     AppServerTurnError {
+        usage_limit_observed_at_ns: None,
         inference_attribution: None,
         message: "Chat paused".into(),
         codex_error_info: Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation),
@@ -109,6 +110,7 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
                     thread_id: thread_id.to_string(),
                     turn: Turn {
                         error: Some(AppServerTurnError {
+                            usage_limit_observed_at_ns: None,
                             inference_attribution: None,
                             misalignment: None,
                             ..withdrawn
@@ -159,6 +161,7 @@ async fn misalignment_continuation_requires_current_review_and_submits_once() ->
                 thread_id,
                 "settings-update",
                 AppServerTurnError {
+                    usage_limit_observed_at_ns: None,
                     inference_attribution: None,
                     codex_error_info: Some(AppServerCodexErrorInfo::BadRequest),
                     ..policy_error()

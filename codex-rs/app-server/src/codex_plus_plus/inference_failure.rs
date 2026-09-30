@@ -9,6 +9,7 @@ pub(super) fn completed_error(error: Option<ErrorEvent>) -> Option<TurnError> {
 
 pub(super) fn error_event(error: ErrorEvent) -> TurnError {
     TurnError {
+        usage_limit_observed_at_ns: error.usage_limit_observed_at_ns,
         inference_attribution: error.inference_attribution,
         message: error.message,
         codex_error_info: error.codex_error_info.map(Into::into),

@@ -184,6 +184,7 @@ async fn backend_banner_limit_error_refreshes_again_after_intervening_rolling_ha
     app.chat_widget.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
+                usage_limit_observed_at_ns: None,
                 inference_attribution: None,
                 misalignment: None,
                 message: "credits exhausted".into(),
@@ -450,6 +451,7 @@ async fn backend_banner_reset_redemption_rejects_pre_reset_content() -> Result<(
             credit_id: None,
             result: Ok(
                 codex_app_server_protocol::ConsumeAccountRateLimitResetCreditResponse {
+                    reset_completion: None,
                     outcome:
                         codex_app_server_protocol::ConsumeAccountRateLimitResetCreditOutcome::Reset,
                 },
