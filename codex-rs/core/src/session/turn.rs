@@ -1802,7 +1802,7 @@ async fn run_sampling_request(
                         &turn_context,
                         e,
                     )
-                    .await
+                    .await?
                     {
                         crate::codex_plus_plus::account_failover::UsageLimitFailoverOutcome::Retried => {
                             if original_input.is_none() {

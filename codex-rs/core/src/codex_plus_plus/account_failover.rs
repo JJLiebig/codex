@@ -50,15 +50,27 @@ pub(crate) async fn switch_and_report(
     sess: &Session,
     turn_context: &TurnContext,
     usage_limit: &UsageLimitReachedError,
-) -> UsageLimitFailoverOutcome {
+) -> Result<UsageLimitFailoverOutcome, CodexErr> {
+    if let Some(outcome) = client_session
+        .switch_owned_quota(attempted_account_ids, usage_limit)
+        .await?
+    {
+        report_tracked_client_failovers(client_session, attempted_account_ids, sess, turn_context)
+            .await;
+        return Ok(if outcome == ImportedAccountSwitchOutcome::ReadyToRetry {
+            UsageLimitFailoverOutcome::Retried
+        } else {
+            UsageLimitFailoverOutcome::Unavailable
+        });
+    }
     if let Some(rate_limits) = usage_limit.rate_limits.clone() {
         sess.update_rate_limits(turn_context, *rate_limits).await;
     }
     let Some(auth_manager) = turn_context.auth_manager.as_ref() else {
-        return UsageLimitFailoverOutcome::Unavailable;
+        return Ok(UsageLimitFailoverOutcome::Unavailable);
     };
     if client_session.request_account_id() != auth_manager.active_account_id() {
-        return UsageLimitFailoverOutcome::RequestAccountChanged;
+        return Ok(UsageLimitFailoverOutcome::RequestAccountChanged);
     }
     if let Some(account_id) = auth_manager.active_account_id() {
         if let Some(resets_at) = usage_limit.resets_at.as_ref()
@@ -74,14 +86,14 @@ pub(crate) async fn switch_and_report(
         .switch_to_next_imported_account(attempted_account_ids)
         .await;
     if outcome != ImportedAccountSwitchOutcome::ReadyToRetry {
-        return UsageLimitFailoverOutcome::Unavailable;
+        return Ok(UsageLimitFailoverOutcome::Unavailable);
     }
 
     client_session.reset_websocket_session();
     if let Some(account_id) = auth_manager.active_account_id() {
         report_switch(sess, turn_context, auth_manager, &account_id).await;
     }
-    UsageLimitFailoverOutcome::Retried
+    Ok(UsageLimitFailoverOutcome::Retried)
 }
 
 pub(crate) fn manual_selection_error(

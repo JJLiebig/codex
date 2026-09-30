@@ -459,7 +459,7 @@ async fn run_remote_compaction_request_v2(
                         turn_context,
                         usage_limit,
                     )
-                    .await,
+                    .await?,
                     crate::codex_plus_plus::account_failover::UsageLimitFailoverOutcome::Retried
                 ) {
                     return Err(err);

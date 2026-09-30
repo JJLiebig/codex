@@ -68,7 +68,7 @@ impl OwnedFixture {
                     ("GET", "/v0/management/auth-files") => ResponseTemplate::new(200)
                         .insert_header("X-CPA-VERSION", "7.3.14")
                         .set_body_json(json!({"files": files.iter().map(|(name, record)| {
-                            json!({"name": name, "type": record["type"], "auth_index": if name == "claude.json" {"0000000000000002"} else {"0000000000000001"}, "disabled": false})
+                            json!({"name": name, "type": record["type"], "auth_index": if name == "claude.json" {"0000000000000002"} else if record["account_id"] == "upstream-b" {"0000000000000003"} else {"0000000000000001"}, "disabled": false})
                         }).collect::<Vec<_>>()})),
                     ("GET", "/v0/management/auth-files/download") => files.get(name.as_deref().unwrap()).map_or(ResponseTemplate::new(404), |record| ResponseTemplate::new(200).set_body_json(record)),
                     ("GET", "/v0/management/auth-files/models") => {
@@ -142,6 +142,32 @@ impl OwnedFixture {
             files,
             tls,
         })
+    }
+    pub async fn import_pair(&self) -> anyhow::Result<Vec<codex_login::AccountId>> {
+        let store = AccountStore::new(self.home.path().to_path_buf());
+        let mut auth: codex_login::auth::AuthDotJson =
+            serde_json::from_slice(&std::fs::read(self.home.path().join("auth.json"))?)?;
+        let mut ids = Vec::new();
+        for id in ["upstream-a", "upstream-b"] {
+            auth.tokens.as_mut().unwrap().account_id = Some(id.into());
+            codex_login::save_auth(
+                self.home.path(),
+                &auth,
+                AuthCredentialsStoreMode::File,
+                AuthKeyringBackendKind::default(),
+            )?;
+            ids.push(
+                store
+                    .import_current(
+                        None,
+                        AuthCredentialsStoreMode::File,
+                        AuthKeyringBackendKind::default(),
+                    )?
+                    .id,
+            );
+        }
+        self.manager.activate_imported_account(&ids[0]).await?;
+        Ok(ids)
     }
 }
 

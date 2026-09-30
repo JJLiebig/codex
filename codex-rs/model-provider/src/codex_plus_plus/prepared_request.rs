@@ -30,11 +30,16 @@ mod tests;
 #[derive(Debug)]
 pub struct ProxyRequestRoute {
     pub auth_revision: u64,
+    pub(super) native_expectation: Option<codex_login::auth::NativeCredentialExpectation>,
     inventory: Arc<[CredentialModels]>,
     native_credential: Option<usize>,
 }
 
 impl ProxyRequestRoute {
+    pub fn native_expectation(&self) -> Option<&codex_login::auth::NativeCredentialExpectation> {
+        self.native_expectation.as_ref()
+    }
+
     pub fn native_source(&self) -> Option<&NativeCredentialSource> {
         self.inventory.get(self.native_credential?)?.source.as_ref()
     }
@@ -139,6 +144,7 @@ pub(super) fn resolve_route(
         wire_model.ok_or_else(unavailable)?,
         ProxyRequestRoute {
             auth_revision,
+            native_expectation: None,
             inventory: inventory.into(),
             native_credential,
         },
