@@ -13,7 +13,7 @@ use sha2::Sha256;
 
 pub(in crate::chatwidget) struct UsageResetWait {
     turn_id: String,
-    failed_at: i64,
+    failed_at: Option<i64>,
     attribution: Option<InferenceAttribution>,
 }
 
@@ -75,8 +75,10 @@ impl ChatWidget {
                 self.usage_reset_wait = Some(UsageResetWait {
                     turn_id: turn_id.clone(),
                     attribution: attribution.cloned(),
-                    failed_at: completed_at.unwrap_or_else(|| {
-                        chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX)
+                    failed_at: completed_at.or_else(|| {
+                        attribution
+                            .is_none()
+                            .then(|| chrono::Utc::now().timestamp_nanos_opt().unwrap_or(i64::MAX))
                     }),
                 });
             } else if let Some(waiting) = self.usage_reset_wait.as_mut()
@@ -85,7 +87,11 @@ impl ChatWidget {
                 && let Some(completed_at) = completed_at
             {
                 // Server time survives independent delivery; exclude its ambiguous whole second.
-                waiting.failed_at = waiting.failed_at.min(completed_at);
+                waiting.failed_at = Some(if attribution.is_some() {
+                    completed_at
+                } else {
+                    waiting.failed_at.unwrap_or(completed_at).min(completed_at)
+                });
             }
         }
     }
@@ -113,7 +119,7 @@ impl ChatWidget {
 
     fn reset_ready_turn(&self, completed_at: i64) -> Option<String> {
         let waiting = self.usage_reset_wait.as_ref()?;
-        (completed_at >= waiting.failed_at
+        (completed_at >= waiting.failed_at?
             && self
                 .last_resumed_usage_reset_at
                 .is_none_or(|last| completed_at > last)
@@ -149,7 +155,7 @@ impl ChatWidget {
             turn_id,
             source,
             account_id: account_id.clone(),
-            failed_at: waiting.failed_at.saturating_add(999_999_999) / 1_000_000_000,
+            failed_at: waiting.failed_at?.saturating_add(999_999_999) / 1_000_000_000,
             completion_id: completion.map(|completion| completion.id.clone()),
         })
     }

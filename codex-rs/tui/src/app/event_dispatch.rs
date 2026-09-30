@@ -836,10 +836,8 @@ impl App {
             AppEvent::InsertHistoryCell(cell) => {
                 self.insert_history_cell(tui, cell);
             }
-            AppEvent::UsageResetAdmissionLoaded { target, hard_stop_generation, response } => {
-                if self.rate_limit_hard_stop_generation == hard_stop_generation {
-                    self.chat_widget.resume_after_owned_reset(&target, &response);
-                }
+            AppEvent::UsageResetAdmissionLoaded { target, periodic_request_id, hard_stop_generation, response } => {
+                self.finish_owned_reset(&target, periodic_request_id, hard_stop_generation, response);
             }
             AppEvent::UsageResetCompleted { account_id, completed_at } => {
                 self.refresh_after_usage_reset(app_server, account_id, completed_at);

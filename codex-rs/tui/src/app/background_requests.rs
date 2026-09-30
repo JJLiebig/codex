@@ -94,8 +94,10 @@ impl App {
         else {
             return;
         };
-        if origin == RateLimitRefreshOrigin::Periodic {
-            self.refresh_owned_reset(app_server);
+        if origin == RateLimitRefreshOrigin::Periodic
+            && self.refresh_owned_reset(app_server, request_id).is_break()
+        {
+            return;
         }
         self.chat_widget.start_usage_notice_read(request_id);
         let request_handle = app_server.request_handle();
