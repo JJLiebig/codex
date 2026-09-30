@@ -442,6 +442,8 @@ pub struct ListTurnsParams {
 /// Store-owned turn representation used by turn pagination APIs.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoredTurn {
+    #[serde(default)]
+    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// Turn id.
     pub turn_id: String,
     /// Projected app-server item snapshots associated with this turn, according to `items_view`.

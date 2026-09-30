@@ -173,6 +173,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let turn = {
                 let state = thread_state.lock().await;
                 let mut turn = state.active_turn_snapshot().unwrap_or_else(|| Turn {
+                    inference_attribution: None,
                     id: payload.turn_id.clone(),
                     items: Vec::new(),
                     items_view: TurnItemsView::NotLoaded,
@@ -1318,6 +1319,7 @@ async fn handle_turn_plan_update(
 }
 
 struct TurnCompletionMetadata {
+    inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     status: TurnStatus,
     error: Option<TurnError>,
     last_agent_message: Option<ThreadItem>,
@@ -1339,6 +1341,7 @@ async fn emit_turn_completed_with_status(
     let notification = TurnCompletedNotification {
         thread_id: conversation_id.to_string(),
         turn: Turn {
+            inference_attribution: turn_completion_metadata.inference_attribution,
             id: event_turn_id,
             items,
             items_view,
@@ -1529,6 +1532,7 @@ async fn handle_turn_complete(
         conversation_id,
         event_turn_id,
         TurnCompletionMetadata {
+            inference_attribution: turn_complete_event.inference_attribution,
             status,
             error,
             last_agent_message,
@@ -1554,6 +1558,7 @@ async fn handle_turn_interrupted(
         conversation_id,
         event_turn_id,
         TurnCompletionMetadata {
+            inference_attribution: None,
             status: TurnStatus::Interrupted,
             error: turn_aborted_event.error.map(inference_failure::error_event),
             last_agent_message: None,
@@ -1588,11 +1593,16 @@ async fn handle_token_count_event(
     token_count_event: TokenCountEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let TokenCountEvent { info, rate_limits } = token_count_event;
+    let TokenCountEvent {
+        info,
+        rate_limits,
+        inference_attribution,
+    } = token_count_event;
     if let Some(token_usage) = info.map(ThreadTokenUsage::from) {
         let notification = ThreadTokenUsageUpdatedNotification {
+            inference_attribution: inference_attribution.clone(),
             thread_id: conversation_id.to_string(),
-            turn_id,
+            turn_id: turn_id.clone(),
             token_usage,
         };
         outgoing
@@ -1603,6 +1613,13 @@ async fn handle_token_count_event(
         outgoing
             .send_server_notification(ServerNotification::AccountRateLimitsUpdated(
                 AccountRateLimitsUpdatedNotification {
+                    inference: inference_attribution.map(|attribution| {
+                        codex_protocol::inference_attribution::InferenceScope {
+                            thread_id: conversation_id.to_string(),
+                            turn_id,
+                            attribution,
+                        }
+                    }),
                     rate_limits: rate_limits.into(),
                 },
             ))
@@ -2186,6 +2203,7 @@ mod tests {
 
     fn turn_complete_event(turn_id: &str) -> TurnCompleteEvent {
         TurnCompleteEvent {
+            inference_attribution: None,
             turn_id: turn_id.to_string(),
             started_at: None,
             last_agent_message: None,
@@ -3711,6 +3729,7 @@ mod tests {
             conversation_id,
             turn_id.clone(),
             TokenCountEvent {
+                inference_attribution: None,
                 info: Some(info),
                 rate_limits: Some(rate_limits),
             },
@@ -3764,6 +3783,7 @@ mod tests {
             conversation_id,
             turn_id.clone(),
             TokenCountEvent {
+                inference_attribution: None,
                 info: None,
                 rate_limits: None,
             },
@@ -3946,3 +3966,7 @@ mod tests {
         Ok(())
     }
 }
+
+#[cfg(test)]
+#[path = "codex_plus_plus/inference_usage_tests.rs"]
+mod inference_usage_tests;

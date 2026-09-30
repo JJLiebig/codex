@@ -811,6 +811,7 @@ async fn drain_to_completed(
     )
     .await;
     let mut stream = stream?;
+    turn_context.begin_inference_request(client_session).await;
     let mut output = Vec::new();
     loop {
         let maybe_event = stream.next().await;

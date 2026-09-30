@@ -320,6 +320,7 @@ fn turn_completed_recovers_final_message_from_turn_items() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                inference_attribution: None,
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: vec![ThreadItem::AgentMessage {
@@ -370,6 +371,7 @@ fn turn_completed_overwrites_stale_final_message_from_turn_items() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                inference_attribution: None,
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: vec![ThreadItem::AgentMessage {
@@ -421,6 +423,7 @@ fn turn_completed_preserves_streamed_final_message_when_turn_items_are_empty() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                inference_attribution: None,
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
@@ -465,6 +468,7 @@ fn turn_failed_clears_stale_final_message() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                inference_attribution: None,
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
@@ -510,6 +514,7 @@ fn turn_interrupted_clears_stale_final_message() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
+                inference_attribution: None,
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),

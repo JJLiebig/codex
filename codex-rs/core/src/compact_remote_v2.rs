@@ -440,7 +440,10 @@ async fn run_remote_compaction_request_v2(
         )
         .await;
         let result = match stream {
-            Ok(stream) => collect_compaction_output(sess, turn_context, stream).await,
+            Ok(stream) => {
+                turn_context.begin_inference_request(client_session).await;
+                collect_compaction_output(sess, turn_context, stream).await
+            }
             Err(err) => Err(err),
         }
         .map_err(|error| client_session.attribute_owned_error(error));
@@ -518,6 +521,9 @@ async fn collect_compaction_output(
                         compaction_output = Some(item);
                     }
                 }
+            }
+            ResponseEvent::RateLimits(snapshot) => {
+                turn_context.record_inference_rate_limits(&snapshot).await;
             }
             ResponseEvent::Completed {
                 response_id,

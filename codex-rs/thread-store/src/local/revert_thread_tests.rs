@@ -332,6 +332,7 @@ fn turn_started(turn_id: &str) -> RolloutItem {
 
 fn turn_completed(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+        inference_attribution: None,
         turn_id: turn_id.to_string(),
         last_agent_message: None,
         error: None,

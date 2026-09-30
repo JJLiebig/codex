@@ -2160,6 +2160,9 @@ pub struct ContextCompactedEvent;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TurnCompleteEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub inference_attribution: Option<crate::inference_attribution::InferenceAttribution>,
     pub turn_id: String,
     pub last_agent_message: Option<String>,
     /// Terminal error details when the turn completed unsuccessfully.
@@ -2350,6 +2353,9 @@ impl TokenUsageInfo {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TokenCountEvent {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub inference_attribution: Option<crate::inference_attribution::InferenceAttribution>,
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshot>,
 }

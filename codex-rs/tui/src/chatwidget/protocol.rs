@@ -20,6 +20,9 @@ impl ChatWidget {
         {
             return;
         }
+        if !self.observe_inference_usage(&notification) {
+            return;
+        }
         let was_replaying_turn_completion = self.thread_usage.replaying_turn_completion;
         if replay_kind.is_some()
             || matches!(

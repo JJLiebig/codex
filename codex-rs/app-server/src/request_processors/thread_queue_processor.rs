@@ -228,6 +228,7 @@ impl ThreadQueueRequestProcessor {
             .await;
         Ok(ThreadQueueStartResponse {
             turn: Turn {
+                inference_attribution: None,
                 id: turn_id,
                 items: vec![],
                 items_view: TurnItemsView::NotLoaded,

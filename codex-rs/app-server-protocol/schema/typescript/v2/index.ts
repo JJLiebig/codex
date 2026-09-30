@@ -237,6 +237,7 @@ export type { HooksListResponse } from "./HooksListResponse";
 export type { InAppBrowserRequirements } from "./InAppBrowserRequirements";
 export type { InferenceAttribution } from "./InferenceAttribution";
 export type { InferenceNativeSource } from "./InferenceNativeSource";
+export type { InferenceScope } from "./InferenceScope";
 export type { InstalledApp } from "./InstalledApp";
 export type { ItemCompletedNotification } from "./ItemCompletedNotification";
 export type { ItemGuardianApprovalReviewCompletedNotification } from "./ItemGuardianApprovalReviewCompletedNotification";

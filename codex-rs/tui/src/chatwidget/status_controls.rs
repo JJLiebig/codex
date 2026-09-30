@@ -216,6 +216,7 @@ impl ChatWidget {
         refreshing_rate_limits: bool,
         request_id: Option<u64>,
     ) {
+        let refreshing_rate_limits = refreshing_rate_limits && !self.has_inference_display();
         let default_usage = TokenUsage::default();
         let token_info = self.token_info.as_ref();
         let total_usage = token_info
@@ -238,28 +239,25 @@ impl ChatWidget {
                 .or_else(|| self.config.model_reasoning_effort.clone())
                 .or(model_default_reasoning_effort),
         );
-        let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> = self
-            .rate_limit_snapshots_by_limit_id
-            .values()
-            .cloned()
-            .collect();
+        let rate_limit_snapshots: Vec<RateLimitSnapshotDisplay> =
+            self.inference_status_limits().values().cloned().collect();
         let agents_summary =
             crate::status::compose_agents_summary(&self.config, &self.instruction_source_paths);
         let (cell, handle) = crate::status::new_status_output_with_rate_limits_handle(
             &self.config,
-            self.requires_openai_auth,
+            self.requires_openai_auth && !self.has_inference_display(),
             self.thread_id
                 .map(|_| self.config.model_provider_id.as_str()),
             self.remote_connection.as_ref(),
-            self.status_account_display.as_ref(),
-            self.account_identity_freshness.may_be_stale(),
+            self.inference_status_account(),
+            !self.has_inference_display() && self.account_identity_freshness.may_be_stale(),
             token_info,
             total_usage,
             &self.thread_id,
             self.thread_name.clone(),
             self.forked_from,
             rate_limit_snapshots.as_slice(),
-            self.plan_type,
+            self.plan_type.filter(|_| !self.has_inference_display()),
             Local::now(),
             self.model_display_name(),
             collaboration_mode,
@@ -267,7 +265,7 @@ impl ChatWidget {
             agents_summary,
             refreshing_rate_limits,
         );
-        if let Some(request_id) = request_id {
+        if let Some(request_id) = request_id.filter(|_| !self.has_inference_display()) {
             self.refreshing_status_outputs
                 .push((request_id, handle.clone()));
         }

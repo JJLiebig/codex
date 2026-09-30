@@ -50,6 +50,7 @@ pub(super) struct RolloutHistoryPosition {
 }
 
 pub(super) struct StoredTurnRow {
+    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     pub position: RolloutHistoryPosition,
     pub turn_id: String,
     pub status: StoredTurnStatus,
@@ -138,6 +139,7 @@ pub(in crate::local) async fn list_turns(
             StoredTurnItemsView::Summary => turn.summary_items,
         };
         turns.push(StoredTurn {
+            inference_attribution: turn.inference_attribution,
             turn_id: turn.turn_id,
             items,
             items_view: params.items_view,
@@ -304,6 +306,12 @@ pub(super) fn stored_turn_row(row: sqlx::sqlite::SqliteRow) -> ThreadStoreResult
         .transpose()
         .map_err(super::thread_history_error)?;
     Ok(StoredTurnRow {
+        inference_attribution: row
+            .try_get::<Option<String>, _>("inference_attribution_json")?
+            .as_deref()
+            .map(serde_json::from_str)
+            .transpose()
+            .map_err(super::thread_history_error)?,
         position: RolloutHistoryPosition {
             rollout_ordinal: row.try_get("rollout_ordinal")?,
         },

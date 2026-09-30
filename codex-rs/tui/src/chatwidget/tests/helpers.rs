@@ -506,6 +506,7 @@ pub(super) fn handle_token_count(chat: &mut ChatWidget, info: Option<TokenUsageI
             chat.handle_server_notification(
                 ServerNotification::ThreadTokenUsageUpdated(
                     codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
+                        inference_attribution: None,
                         thread_id: thread_id(chat),
                         turn_id: chat
                             .turn_lifecycle
@@ -1135,6 +1136,7 @@ pub(in crate::chatwidget) fn app_server_turn(
     error: Option<AppServerTurnError>,
 ) -> AppServerTurn {
     AppServerTurn {
+        inference_attribution: None,
         id: turn_id.to_string(),
         items_view: codex_app_server_protocol::TurnItemsView::Full,
         items: Vec::new(),

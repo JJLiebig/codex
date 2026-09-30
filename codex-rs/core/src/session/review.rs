@@ -187,6 +187,7 @@ pub(super) async fn spawn_review_thread(
         turn_metadata_state,
         extension_data,
         turn_timing_state: Arc::new(TurnTimingState::default()),
+        inference_usage: Default::default(),
         terminal_error: Arc::new(Mutex::new(None)),
         server_model_warning_emitted: AtomicBool::new(false),
         model_verification_emitted: AtomicBool::new(false),

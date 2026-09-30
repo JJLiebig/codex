@@ -702,6 +702,7 @@ impl TurnRequestProcessor {
             .record_request_turn_id(&request_id, &turn_id)
             .await;
         let turn = Turn {
+            inference_attribution: None,
             id: turn_id,
             items: vec![],
             items_view: TurnItemsView::NotLoaded,
@@ -1402,6 +1403,7 @@ impl TurnRequestProcessor {
         };
 
         Turn {
+            inference_attribution: None,
             id: turn_id,
             items,
             items_view: TurnItemsView::NotLoaded,

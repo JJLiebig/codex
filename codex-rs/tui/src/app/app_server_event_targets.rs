@@ -190,12 +190,17 @@ pub(super) fn server_notification_thread_target(
                 None => return ServerNotificationThreadTarget::AppScoped,
             }
         }
+        ServerNotification::AccountRateLimitsUpdated(notification) => {
+            match notification.inference.as_ref() {
+                Some(scope) => Some(scope.thread_id.as_str()),
+                None => return ServerNotificationThreadTarget::AppScoped,
+            }
+        }
         ServerNotification::ProjectChanged(_)
         | ServerNotification::SkillsChanged(_)
         | ServerNotification::McpServerOauthLoginCompleted(_)
         | ServerNotification::AccountUpdated(_)
         | ServerNotification::GatewayOAuthChanged(_)
-        | ServerNotification::AccountRateLimitsUpdated(_)
         | ServerNotification::AppListUpdated(_)
         | ServerNotification::EnvironmentConnected(_)
         | ServerNotification::EnvironmentDisconnected(_)

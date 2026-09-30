@@ -175,6 +175,7 @@ fn turn_complete_event(
     Event {
         id: turn_id.to_string(),
         msg: EventMsg::TurnComplete(TurnCompleteEvent {
+            inference_attribution: None,
             turn_id: turn_id.to_string(),
             started_at: None,
             last_agent_message: last_agent_message.map(str::to_string),

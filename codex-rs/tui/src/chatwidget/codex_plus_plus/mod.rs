@@ -6,7 +6,9 @@ use crate::history_cell::WebSearchCell;
 
 mod compact_activity;
 mod completion_wait;
+mod inference_usage;
 mod model_catalogue;
+pub(super) use inference_usage::InferenceDisplay;
 mod usage_reset_resume;
 pub(super) use usage_reset_resume::UsageResetWait;
 

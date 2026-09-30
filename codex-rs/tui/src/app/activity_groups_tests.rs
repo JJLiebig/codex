@@ -43,6 +43,7 @@ fn reasoning(id: &str) -> ThreadItem {
 
 fn turn(items: Vec<ThreadItem>) -> Turn {
     Turn {
+        inference_attribution: None,
         id: "turn".to_owned(),
         items,
         items_view: TurnItemsView::Full,

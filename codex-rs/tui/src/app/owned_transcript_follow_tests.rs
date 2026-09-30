@@ -28,6 +28,7 @@ async fn follow_control_click_preserves_draft_caret_and_composer_geometry() -> R
                     codex_app_server_protocol::TurnStartedNotification {
                         thread_id: ThreadId::new().to_string(),
                         turn: codex_app_server_protocol::Turn {
+                            inference_attribution: None,
                             id: "turn".into(),
                             items_view: codex_app_server_protocol::TurnItemsView::Full,
                             items: Vec::new(),

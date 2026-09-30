@@ -5,4 +5,5 @@ pub(crate) enum StatusAccountDisplay {
         plan: Option<String>,
     },
     ApiKey,
+    Inference(String),
 }

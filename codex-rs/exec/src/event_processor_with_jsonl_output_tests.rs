@@ -34,6 +34,7 @@ fn failed_turn_does_not_overwrite_output_last_message_file() {
         codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: codex_app_server_protocol::Turn {
+                inference_attribution: None,
                 id: "turn-1".to_string(),
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),

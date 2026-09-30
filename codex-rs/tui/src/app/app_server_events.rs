@@ -277,7 +277,9 @@ impl App {
             ServerNotification::McpServerStatusUpdated(_) => {
                 self.refresh_mcp_startup_expected_servers_from_config();
             }
-            ServerNotification::AccountRateLimitsUpdated(notification) => {
+            ServerNotification::AccountRateLimitsUpdated(notification)
+                if notification.inference.is_none() =>
+            {
                 let workspace_hard_stop = matches!(
                     notification.rate_limits.rate_limit_reached_type,
                     Some(

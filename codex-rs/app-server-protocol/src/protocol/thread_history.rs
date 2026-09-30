@@ -104,6 +104,7 @@ pub struct ThreadHistoryItemChange {
 /// Turn metadata for history projection and snapshots that do not need items.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadHistoryTurnMetadata {
+    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     pub turn_id: String,
     pub root_turn_id: Option<String>,
     pub status: TurnStatus,
@@ -136,6 +137,7 @@ impl From<ThreadHistoryTurnMetadata> for Turn {
             id: value.turn_id,
             items: Vec::new(),
             items_view: TurnItemsView::NotLoaded,
+            inference_attribution: value.inference_attribution,
             error: value.error,
             status: value.status,
             started_at: value.started_at,
@@ -151,6 +153,7 @@ impl ThreadHistoryTurnMetadata {
             turn_id: turn.id.clone(),
             root_turn_id: turn.root_turn_id.clone(),
             status: turn.status.clone(),
+            inference_attribution: turn.inference_attribution.clone(),
             error: turn.error.clone(),
             started_at: turn.started_at,
             completed_at: turn.completed_at,
@@ -1312,6 +1315,7 @@ impl ThreadHistoryBuilder {
             additional_details: None,
         });
         let apply_completion = |turn: &mut PendingTurn| {
+            turn.inference_attribution = payload.inference_attribution.clone();
             if let Some(error) = terminal_error.as_ref() {
                 turn.status = TurnStatus::Failed;
                 turn.error = Some(error.clone());
@@ -1346,6 +1350,7 @@ impl ThreadHistoryBuilder {
             } else if matches!(turn.status, TurnStatus::Completed | TurnStatus::InProgress) {
                 turn.status = TurnStatus::Completed;
             }
+            turn.inference_attribution = payload.inference_attribution.clone();
             turn.completed_at = payload.completed_at;
             turn.duration_ms = payload.duration_ms;
             let changed_turn = ThreadHistoryTurnMetadata::from_pending_turn(turn);
@@ -1414,6 +1419,7 @@ impl ThreadHistoryBuilder {
             }
         });
         PendingTurn {
+            inference_attribution: None,
             id,
             root_turn_id: None,
             items: Vec::new(),
@@ -1694,6 +1700,7 @@ impl TurnItemIndex {
 }
 
 struct PendingTurn {
+    inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     id: String,
     root_turn_id: Option<String>,
     items: Vec<ThreadItem>,
@@ -1734,6 +1741,7 @@ impl PendingTurn {
             id: self.id.clone(),
             items: items_view.project_items(&self.items),
             items_view,
+            inference_attribution: self.inference_attribution.clone(),
             error: self.error.clone(),
             status: self.status.clone(),
             started_at: self.started_at,
@@ -1749,6 +1757,7 @@ impl From<PendingTurn> for Turn {
             id: value.id,
             items: value.items,
             items_view: TurnItemsView::Full,
+            inference_attribution: value.inference_attribution,
             error: value.error,
             status: value.status,
             started_at: value.started_at,
@@ -1991,6 +2000,7 @@ mod tests {
                 review_output: None,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-1".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -2053,6 +2063,7 @@ mod tests {
                 completed_at_ms: 0,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-1".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -2215,6 +2226,7 @@ mod tests {
                 started_at_ms: 0,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2270,6 +2282,7 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2351,6 +2364,7 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2468,6 +2482,7 @@ mod tests {
                 status: CoreExecCommandStatus::Completed,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2571,6 +2586,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
                 last_agent_message: None,
@@ -2673,6 +2689,7 @@ mod tests {
                 saved_path: Some(test_path_buf("/tmp/ig_123.png").abs()),
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-image".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -2688,6 +2705,7 @@ mod tests {
         assert_eq!(
             turns[0],
             Turn {
+                inference_attribution: None,
                 id: "turn-image".into(),
                 status: TurnStatus::Completed,
                 error: None,
@@ -3062,6 +3080,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -3733,6 +3752,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -3798,6 +3818,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -3845,6 +3866,7 @@ mod tests {
                 status: CoreExecCommandStatus::Completed,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-b".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -3908,6 +3930,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -3955,6 +3978,7 @@ mod tests {
                 status: CoreExecCommandStatus::Completed,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-b".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4039,6 +4063,7 @@ mod tests {
             Some(expected.clone())
         );
         builder.handle_event(&EventMsg::TurnComplete(TurnCompleteEvent {
+            inference_attribution: None,
             turn_id: "turn-1".into(),
             started_at: Some(100),
             last_agent_message: None,
@@ -4077,6 +4102,7 @@ mod tests {
             ..Default::default()
         }));
         let mut expected = ThreadHistoryTurnMetadata {
+            inference_attribution: None,
             turn_id: "turn-1".into(),
             root_turn_id: Some("root-turn".into()),
             error: None,
@@ -4092,6 +4118,7 @@ mod tests {
         assert_eq!(builder.active_turn_snapshot().unwrap().items.len(), 1);
 
         builder.handle_event(&EventMsg::TurnComplete(TurnCompleteEvent {
+            inference_attribution: None,
             turn_id: "turn-1".into(),
             started_at: Some(100),
             last_agent_message: None,
@@ -4267,6 +4294,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4292,6 +4320,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4308,6 +4337,7 @@ mod tests {
                 questions: None,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-b".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4365,6 +4395,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: Some(10),
                 last_agent_message: None,
@@ -4389,6 +4420,7 @@ mod tests {
             build_turns_from_rollout_items(&items),
             vec![
                 Turn {
+                    inference_attribution: None,
                     id: "turn-a".into(),
                     items_view: TurnItemsView::Full,
                     items: vec![ThreadItem::UserMessage {
@@ -4415,6 +4447,7 @@ mod tests {
                     duration_ms: Some(10_000),
                 },
                 Turn {
+                    inference_attribution: None,
                     id: "turn-b".into(),
                     items_view: TurnItemsView::Full,
                     items: vec![ThreadItem::UserMessage {
@@ -4455,6 +4488,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4534,6 +4568,7 @@ mod tests {
                 resume_metadata: None,
             }),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-compact".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4548,6 +4583,7 @@ mod tests {
         assert_eq!(
             turns,
             vec![Turn {
+                inference_attribution: None,
                 id: "turn-compact".into(),
                 status: TurnStatus::Completed,
                 error: None,
@@ -4803,6 +4839,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4828,6 +4865,7 @@ mod tests {
         assert_eq!(
             turns[0],
             Turn {
+                inference_attribution: None,
                 id: "turn-a".into(),
                 status: TurnStatus::Completed,
                 error: None,
@@ -4875,6 +4913,7 @@ mod tests {
                 codex_error_info: Some(CodexErrorInfo::BadRequest),
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -4927,6 +4966,7 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: Some(10),
                 last_agent_message: None,
@@ -4950,6 +4990,7 @@ mod tests {
         assert_eq!(
             build_turns_from_rollout_items(&items),
             vec![Turn {
+                inference_attribution: None,
                 id: "turn-a".into(),
                 items_view: TurnItemsView::Full,
                 items: vec![ThreadItem::UserMessage {
@@ -5001,6 +5042,7 @@ mod tests {
             })),
             RolloutItem::ResponseItem(hook_prompt.into()),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -5082,6 +5124,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -5142,6 +5185,7 @@ mod tests {
                 .into(),
             ),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -5188,6 +5232,7 @@ mod tests {
                     completed_at_ms: None,
                 }],
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    inference_attribution: None,
                     turn_id: "rollout-0".into(),
                     root_turn_id: None,
                     status: TurnStatus::Completed,
@@ -5296,6 +5341,7 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    inference_attribution: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::InProgress,
@@ -5320,6 +5366,7 @@ mod tests {
         )));
         let complete_changes = builder.handle_rollout_item_with_changes(&RolloutItem::EventMsg(
             EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -5335,6 +5382,7 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    inference_attribution: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::Completed,
@@ -5383,6 +5431,7 @@ mod tests {
                     completed_at_ms: None,
                 }],
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    inference_attribution: None,
                     turn_id: "rollout-0".into(),
                     root_turn_id: None,
                     status: TurnStatus::Completed,
@@ -5409,6 +5458,7 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+                inference_attribution: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
                 last_agent_message: None,
@@ -5424,6 +5474,7 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
+                    inference_attribution: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::Completed,

@@ -1,4 +1,4 @@
-//! Non-secret identity evidence captured for a failed owned-proxy request.
+//! Non-secret identity evidence captured for an owned-proxy request.
 
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -40,4 +40,14 @@ pub enum InferenceAttribution {
     /// The frozen inventory proves the provider, without asserting a Claude account identity.
     Claude,
     Unknown,
+}
+
+/// Scope for rolling inference quota; native account maintenance remains unscoped.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(rename_all = "camelCase", export_to = "v2/")]
+pub struct InferenceScope {
+    pub thread_id: String,
+    pub turn_id: String,
+    pub attribution: InferenceAttribution,
 }

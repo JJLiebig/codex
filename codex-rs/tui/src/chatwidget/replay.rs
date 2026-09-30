@@ -102,6 +102,7 @@ impl ChatWidget {
     /// avoid triggering side effects. Event ids are passed as `None` to
     /// distinguish replayed events from live ones.
     pub(crate) fn replay_thread_turns(&mut self, turns: Vec<Turn>, replay_kind: ReplayKind) {
+        self.restore_inference_display(&turns);
         if !turns.is_empty() || matches!(replay_kind, ReplayKind::ThreadSnapshot) {
             self.bottom_pane.dismiss_composer_sparkle();
         }
@@ -125,6 +126,7 @@ impl ChatWidget {
                 continue;
             }
             let Turn {
+                inference_attribution,
                 id: turn_id,
                 items_view: _,
                 items,
@@ -223,6 +225,7 @@ impl ChatWidget {
                     TurnCompletedNotification {
                         thread_id: self.thread_id.map(|id| id.to_string()).unwrap_or_default(),
                         turn: Turn {
+                            inference_attribution,
                             id: turn_id,
                             items_view: codex_app_server_protocol::TurnItemsView::NotLoaded,
                             items: Vec::new(),

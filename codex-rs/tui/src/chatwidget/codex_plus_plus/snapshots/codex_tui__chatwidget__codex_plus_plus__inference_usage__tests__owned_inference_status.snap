@@ -1,0 +1,11 @@
+---
+source: tui/src/chatwidget/codex_plus_plus/inference_usage_tests.rs
+assertion_line: 149
+expression: "rendered.join(\"\\n\")"
+---
+  Account:             Imported OpenAI account (Work account)
+  5h limit:            [███████████████░░░░░] 75% left
+  Account:             Claude (account label unavailable)
+  5h limit:            [███████████████░░░░░] 75% left
+  Account:             Model provider (account unknown)
+  5h limit:            [███████████████░░░░░] 75% left

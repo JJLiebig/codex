@@ -111,6 +111,16 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
       "properties": {
+        "inference": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InferenceScope"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "rateLimits": {
           "$ref": "#/definitions/RateLimitSnapshot"
         }
@@ -9785,6 +9795,26 @@
         "imported"
       ],
       "type": "string"
+    },
+    "InferenceScope": {
+      "description": "Scope for rolling inference quota; native account maintenance remains unscoped.",
+      "properties": {
+        "attribution": {
+          "$ref": "#/definitions/InferenceAttribution"
+        },
+        "threadId": {
+          "type": "string"
+        },
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "attribution",
+        "threadId",
+        "turnId"
+      ],
+      "type": "object"
     },
     "InitializeCapabilities": {
       "description": "Client-declared capabilities negotiated during initialize.",
@@ -22681,6 +22711,17 @@
     "ThreadTokenUsageUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
+        "inferenceAttribution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InferenceAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "threadId": {
           "type": "string"
         },
@@ -23094,6 +23135,17 @@
         "id": {
           "description": "Identifier for this turn. Codex-generated turn IDs are UUIDv7.",
           "type": "string"
+        },
+        "inferenceAttribution": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/InferenceAttribution"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         },
         "items": {
           "description": "Thread items currently included in this turn payload.",

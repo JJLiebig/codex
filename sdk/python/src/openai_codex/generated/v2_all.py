@@ -8529,6 +8529,15 @@ class InferenceAttribution(
     ]
 
 
+class InferenceScope(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    attribution: InferenceAttribution
+    thread_id: Annotated[str, Field(alias="threadId")]
+    turn_id: Annotated[str, Field(alias="turnId")]
+
+
 class ListMcpServerStatusParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -10315,6 +10324,9 @@ class ThreadTokenUsageUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    inference_attribution: Annotated[
+        InferenceAttribution | None, Field(alias="inferenceAttribution")
+    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
     turn_id: Annotated[str, Field(alias="turnId")]
@@ -10460,6 +10472,7 @@ class AccountRateLimitsUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
+    inference: InferenceScope | None = None
     rate_limits: Annotated[RateLimitSnapshot, Field(alias="rateLimits")]
 
 
@@ -11558,6 +11571,9 @@ class Turn(BaseModel):
     id: Annotated[
         str, Field(description="Identifier for this turn. Codex-generated turn IDs are UUIDv7.")
     ]
+    inference_attribution: Annotated[
+        InferenceAttribution | None, Field(alias="inferenceAttribution")
+    ] = None
     items: Annotated[
         list[ThreadItem], Field(description="Thread items currently included in this turn payload.")
     ]
