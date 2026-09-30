@@ -1,6 +1,56 @@
 use super::*;
 
 #[tokio::test]
+async fn owned_claude_picker_refresh_removes_obsolete_choices() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("claude-sonnet-5-5")).await;
+    chat.config.model_provider =
+        codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
+    chat.thread_id = Some(ThreadId::new());
+    let template = get_available_model(&chat, "gpt-5.5");
+    let models: Vec<_> = [
+        ("claude-fable-5", "Claude Fable 5"),
+        ("claude-fable-5-1", "Claude Fable 5.1"),
+        ("claude-opus-5", "Claude Opus 5"),
+        ("claude-opus-5-5", "Claude Opus 5.5"),
+        ("claude-sonnet-5", "Claude Sonnet 5"),
+        ("claude-sonnet-5-5", "Claude Sonnet 5.5"),
+        ("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
+    ]
+    .into_iter()
+    .map(|(slug, label)| {
+        let mut model = template.clone();
+        model.id = slug.into();
+        model.model = slug.into();
+        model.display_name = label.into();
+        model.description.clear();
+        model.is_default = false;
+        model
+    })
+    .collect();
+    let mut old = template;
+    old.model = "claude-sonnet-4-6".into();
+    old.display_name = "Claude Sonnet 4.6".into();
+    Arc::make_mut(&mut chat.model_catalog).models = vec![old];
+    chat.open_model_popup();
+    let request = chat.model_popup_request_id.unwrap();
+    assert!(chat.on_models_loaded(request, Ok(models)));
+    insta::assert_snapshot!(render_bottom_popup(&chat, /*width*/ 80), @"
+      Select Model and Effort
+
+
+      1. Claude Fable 5
+      2. Claude Fable 5.1
+      3. Claude Opus 5
+      4. Claude Opus 5.5
+      5. Claude Sonnet 5
+    › 6. Claude Sonnet 5.5 (current)
+      7. Claude Haiku 4.5
+
+      enter select · esc back
+    ");
+}
+
+#[tokio::test]
 async fn owned_model_picker_clears_successful_empty_catalogue() {
     for reasoning_submenu in [false, true] {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(Some("gpt-5.5")).await;

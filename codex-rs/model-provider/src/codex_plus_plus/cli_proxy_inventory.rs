@@ -163,8 +163,34 @@ pub(super) fn normalize_catalogue(
                 .push((credential, model));
         }
     }
+    let claude_versions: BTreeMap<_, _> = models
+        .iter()
+        .filter_map(|model| {
+            let entries = membership.get(model.slug.as_str())?;
+            (entries.iter().any(|(credential, _)| !credential.disabled)
+                && entries.iter().all(|(credential, member)| {
+                    credential.source.is_none()
+                        && credential.provider.as_deref() == Some("claude")
+                        && member.provider.as_deref() == Some("claude")
+                        && member.owned_by.as_deref() == Some("anthropic")
+                }))
+            .then(|| claude_version(&model.slug))
+            .flatten()
+            .map(|(family, version)| (model.slug.clone(), (family == "haiku", version)))
+        })
+        .collect();
+    let latest_haiku = claude_versions
+        .values()
+        .filter_map(|(is_haiku, version)| is_haiku.then_some(*version))
+        .max();
     let mut groups: BTreeMap<String, Vec<(String, ModelInfo, bool)>> = BTreeMap::new();
     for original in models {
+        if let Some((is_haiku, version)) = claude_versions.get(&original.slug)
+            && version.0 < 5
+            && !(*is_haiku && Some(*version) == latest_haiku)
+        {
+            continue;
+        }
         let wire_slug = original.slug.clone();
         let mut normalized = original;
         let mut native = false;
@@ -211,6 +237,39 @@ pub(super) fn normalize_catalogue(
         }
     }
     result
+}
+
+// Management supplies no release/version field. Recognize published Claude ID forms,
+// leaving aliases and unfamiliar names untouched rather than guessing their generation.
+fn claude_version(slug: &str) -> Option<(&str, (u32, u32, u32))> {
+    let mut parts: Vec<_> = slug.strip_prefix("claude-")?.split('-').collect();
+    let date = if parts
+        .last()
+        .is_some_and(|part| part.len() == 8 && part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        parts.pop()?.parse().ok()?
+    } else {
+        0
+    };
+    let (family, major, minor) = match parts.as_slice() {
+        [family, major]
+            if !family.is_empty() && family.bytes().all(|b| b.is_ascii_alphabetic()) =>
+        {
+            (*family, *major, "0")
+        }
+        [family, major, minor]
+            if !family.is_empty() && family.bytes().all(|b| b.is_ascii_alphabetic()) =>
+        {
+            (*family, *major, *minor)
+        }
+        [major, family] => (*family, *major, "0"),
+        [major, minor, family] => (*family, *major, *minor),
+        _ => return None,
+    };
+    if family.is_empty() || !family.bytes().all(|byte| byte.is_ascii_alphabetic()) {
+        return None;
+    }
+    Some((family, (major.parse().ok()?, minor.parse().ok()?, date)))
 }
 
 fn legacy_gpt(slug: &str) -> bool {
