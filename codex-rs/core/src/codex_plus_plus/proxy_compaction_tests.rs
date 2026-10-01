@@ -14,15 +14,40 @@ use pretty_assertions::assert_eq;
 use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
-const SUMMARY: &str = "Preserved conversation summary";
+const SUMMARY: &str = "Preserved conversation summary; tool fact 41";
 const PENDING: &str = "Continue after compaction";
 const OPAQUE: &str = "OpenAI-only encrypted checkpoint";
+const CLAUDE_OPAQUE: &str = "Claude-only signed thinking";
+const TOOL_CALL: &str = "completed-tool-call";
 
-fn source_checkpoint() -> ResponseItem {
-    serde_json::from_value(json!({"type":"compaction","encrypted_content":OPAQUE})).unwrap()
+fn source_state(model: &str) -> ResponseItem {
+    serde_json::from_value(if model == "claude-new" {
+        json!({"type":"reasoning","summary":[],"encrypted_content":CLAUDE_OPAQUE})
+    } else {
+        json!({"type":"compaction","encrypted_content":OPAQUE})
+    })
+    .unwrap()
 }
 
 async fn owned_session(fixture: &OwnedFixture, model: &str) -> (Arc<Session>, Arc<TurnContext>) {
+    // Advertise a second model in each family only for these switch controls.
+    let files = fixture.files.clone();
+    Mock::given(method("GET"))
+        .and(path("/v0/management/auth-files/models"))
+        .respond_with(move |request: &wiremock::Request| {
+            let files = files.lock().unwrap();
+            let name = request.url.query_pairs().find(|(key, _)| key == "name").unwrap().1;
+            let models = files.get(name.as_ref()).map_or_else(Vec::new, |record| {
+                match record["prefix"].as_str() {
+                    Some(prefix) => ["future-9.7", "future-9.8"].map(|model| json!({"id":format!("{prefix}/{model}"),"type":"openai","owned_by":"openai"})).to_vec(),
+                    None => ["claude-new", "claude-next"].map(|model| json!({"id":model,"type":"claude","owned_by":"anthropic"})).to_vec(),
+                }
+            });
+            ResponseTemplate::new(200).set_body_json(json!({"models":models}))
+        })
+        .with_priority(/*p*/ 1)
+        .mount(&fixture.server)
+        .await;
     let (mut session, mut turn, _) =
         crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
             CodexAuth::from_api_key("synthetic"),
@@ -45,7 +70,7 @@ async fn owned_session(fixture: &OwnedFixture, model: &str) -> (Arc<Session>, Ar
     services.models_manager = Arc::new(codex_models_manager::manager::StaticModelsManager::new(
         /*auth_manager*/ None,
         ModelsResponse {
-            models: ["future-9.7", "claude-new"]
+            models: ["future-9.7", "future-9.8", "claude-new", "claude-next"]
                 .map(|slug| {
                     let mut info = test_model_info();
                     info.slug = slug.into();
@@ -68,6 +93,14 @@ async fn owned_session(fixture: &OwnedFixture, model: &str) -> (Arc<Session>, Ar
             &[
                 responses::user_message_item("Earlier request"),
                 serde_json::from_value(
+                    responses::ev_function_call(TOOL_CALL, "lookup", "{}")["item"].clone(),
+                )
+                .unwrap(),
+                serde_json::from_value(json!({
+                    "type":"function_call_output","call_id":TOOL_CALL,"output":"tool fact 41"
+                }))
+                .unwrap(),
+                serde_json::from_value(
                     responses::ev_assistant_message("old", "Earlier answer")["item"].clone(),
                 )
                 .unwrap(),
@@ -78,7 +111,7 @@ async fn owned_session(fixture: &OwnedFixture, model: &str) -> (Arc<Session>, Ar
 }
 
 fn compact_response(model: &str) -> String {
-    let output = if model == "claude-new" {
+    let output = if matches!(model, "claude-new" | "claude-next") {
         responses::ev_assistant_message("summary", SUMMARY)
     } else {
         json!({"type":"response.output_item.done","item":{
@@ -107,7 +140,7 @@ fn assert_compact_request(request: &Value, model: &str) {
     let wire = request["model"].as_str().unwrap();
     let input = request["input"].as_array().unwrap();
     assert!(!request.to_string().contains(PENDING));
-    if model == "claude-new" {
+    if matches!(model, "claude-new" | "claude-next") {
         assert_eq!(wire, model);
         assert!(
             input
@@ -121,7 +154,7 @@ fn assert_compact_request(request: &Value, model: &str) {
             crate::compact::SUMMARIZATION_PROMPT
         );
     } else {
-        assert!(wire.ends_with("/future-9.7"), "{wire}");
+        assert!(wire.ends_with(&format!("/{model}")), "{wire}");
         assert_eq!(input.last().unwrap()["type"], "compaction_trigger");
     }
 }
@@ -163,11 +196,19 @@ async fn owned_manual_compaction_uses_exact_model_support() -> anyhow::Result<()
 #[tokio::test]
 async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyhow::Result<()> {
     // Different hashes trigger previous-model compaction; the same model uses its token limit.
-    for (previous, current, hash) in [
-        ("claude-new", "future-9.7", Some("claude-new")),
-        ("future-9.7", "claude-new", Some("future-9.7")),
-        ("future-9.7", "claude-new", None),
-        ("claude-new", "claude-new", Some("claude-new")),
+    for (previous, current, hash, handoff) in [
+        ("claude-new", "future-9.7", Some("claude-new"), true),
+        ("future-9.7", "claude-new", Some("future-9.7"), true),
+        ("claude-new", "future-9.7", Some("future-9.7"), true),
+        ("future-9.7", "claude-new", Some("claude-new"), true),
+        ("claude-new", "future-9.7", None, true),
+        ("future-9.7", "claude-new", None, true),
+        ("future-9.7", "future-9.8", Some("future-9.7"), false),
+        ("claude-new", "claude-next", Some("claude-new"), false),
+        ("future-9.7", "future-9.7", Some("old-hash"), false),
+        ("claude-new", "claude-new", Some("old-hash"), false),
+        ("future-9.7", "future-9.7", Some("future-9.7"), false),
+        ("claude-new", "claude-new", Some("claude-new"), false),
     ] {
         let fixture = OwnedFixture::new().await?;
         let (session, mut turn) = owned_session(&fixture, current).await;
@@ -179,10 +220,9 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
                 realtime_active: Some(false),
             }))
             .await;
-        let handoff = previous == "future-9.7" && current == "claude-new";
         if handoff {
             session
-                .record_conversation_items(&turn, turn.model_info(), &[source_checkpoint()])
+                .record_conversation_items(&turn, turn.model_info(), &[source_state(previous)])
                 .await;
             if hash.is_none() {
                 crate::session::tests::update_turn_settings_for_test(
@@ -237,8 +277,16 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
         assert_eq!(requests.len(), 2, "{previous} -> {current}");
         if handoff {
             let request = &requests[0];
-            assert!(request["model"].as_str().unwrap().ends_with("/future-9.7"));
-            assert!(request.to_string().contains(OPAQUE));
+            assert_eq!(
+                request["model"].as_str().unwrap().rsplit('/').next(),
+                Some(previous)
+            );
+            assert!(request.to_string().contains(if previous == "claude-new" {
+                CLAUDE_OPAQUE
+            } else {
+                OPAQUE
+            }));
+            assert_eq!(request.to_string().matches(TOOL_CALL).count(), 2);
             assert!(!request.to_string().contains(PENDING));
             assert_eq!(
                 request["input"].as_array().unwrap().last().unwrap()["content"][0]["text"],
@@ -257,9 +305,14 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
         assert_eq!(followup.matches(PENDING).count(), 1);
         if handoff {
             assert!(!followup.contains(OPAQUE));
+            assert!(!followup.contains(CLAUDE_OPAQUE));
+            assert!(!followup.contains(TOOL_CALL));
             assert!(!followup.contains("Earlier request"));
             assert!(!followup.contains("Earlier answer"));
             assert!(followup.contains("environment_context"));
+        } else {
+            // Standard compaction retains old user messages; the special handoff does not.
+            assert!(followup.contains("Earlier request"));
         }
         assert!(
             requests[1]["input"]
@@ -280,7 +333,61 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
 }
 
 #[tokio::test]
-async fn owned_readable_handoff_failure_preserves_source_and_pending_input() -> anyhow::Result<()> {
+async fn owned_same_family_switch_without_compaction_keeps_history() -> anyhow::Result<()> {
+    for (previous, current) in [
+        ("future-9.7", "future-9.8"),
+        ("claude-new", "claude-next"),
+        ("future-9.7", "future-9.7"),
+        ("claude-new", "claude-new"),
+    ] {
+        let fixture = OwnedFixture::new().await?;
+        let (session, turn) = owned_session(&fixture, current).await;
+        session
+            .set_previous_turn_settings(Some(PreviousTurnSettings {
+                model: previous.into(),
+                comp_hash: Some(current.into()),
+                cyber_access_program: None,
+                realtime_active: Some(false),
+            }))
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_string(responses::sse(vec![
+                    responses::ev_assistant_message("reply", "Acknowledged"),
+                    responses::ev_completed_with_tokens("done", 10),
+                ])),
+            )
+            .expect(1)
+            .mount(&fixture.server)
+            .await;
+        run_turn(
+            session.clone(),
+            turn,
+            pending_input(),
+            &mut TurnRunState::default(),
+            CancellationToken::new(),
+        )
+        .await?;
+        let requests = inference_requests(&fixture).await;
+        assert_eq!(requests.len(), 1, "{previous} -> {current}");
+        let input = requests[0]["input"].to_string();
+        assert!(!input.contains("compaction_trigger"));
+        assert!(!input.contains(crate::compact::SUMMARIZATION_PROMPT));
+        assert!(input.contains("Earlier request") && input.contains("Earlier answer"));
+        assert_eq!(input.matches(TOOL_CALL).count(), 2);
+        assert_eq!(input.matches(PENDING).count(), 1);
+    }
+    Ok(())
+}
+
+#[test_case::test_case("future-9.7", "claude-new"; "openai_to_claude")]
+#[test_case::test_case("claude-new", "future-9.7"; "claude_to_openai")]
+#[tokio::test]
+async fn owned_readable_handoff_failure_preserves_source_and_pending_input(
+    previous: &str,
+    current: &str,
+) -> anyhow::Result<()> {
     let summary = responses::ev_assistant_message("uncommitted", "Uncommitted summary");
     let failed = responses::sse_failed("failed", "server_error", "Handoff failed");
     for body in [
@@ -298,14 +405,14 @@ async fn owned_readable_handoff_failure_preserves_source_and_pending_input() -> 
         responses::sse_failed("limit", "context_length_exceeded", "Source context is full"),
     ] {
         let fixture = OwnedFixture::new().await?;
-        let (session, turn) = owned_session(&fixture, "claude-new").await;
+        let (session, turn) = owned_session(&fixture, current).await;
         session
-            .record_conversation_items(&turn, turn.model_info(), &[source_checkpoint()])
+            .record_conversation_items(&turn, turn.model_info(), &[source_state(previous)])
             .await;
         let before: Vec<_> = session.clone_history().await.raw_items().cloned().collect();
         session
             .set_previous_turn_settings(Some(PreviousTurnSettings {
-                model: "future-9.7".into(),
+                model: previous.into(),
                 comp_hash: None,
                 cyber_access_program: None,
                 realtime_active: Some(false),
@@ -327,13 +434,19 @@ async fn owned_readable_handoff_failure_preserves_source_and_pending_input() -> 
         .await?;
         let requests = inference_requests(&fixture).await;
         assert_eq!(requests.len(), 1);
-        assert!(
-            requests[0]["model"]
-                .as_str()
-                .unwrap()
-                .ends_with("/future-9.7")
+        assert_eq!(
+            requests[0]["model"].as_str().unwrap().rsplit('/').next(),
+            Some(previous)
         );
-        assert!(requests[0].to_string().contains(OPAQUE));
+        assert!(
+            requests[0]
+                .to_string()
+                .contains(if previous == "claude-new" {
+                    CLAUDE_OPAQUE
+                } else {
+                    OPAQUE
+                })
+        );
         assert!(turn.terminal_error.lock().await.is_some());
         let after: Vec<_> = session.clone_history().await.raw_items().cloned().collect();
         assert_eq!(&after[..before.len()], before.as_slice());
