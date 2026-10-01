@@ -1,4 +1,4 @@
-//! Readable source-model summaries at the owned OpenAI-to-Claude boundary.
+//! Readable source-model summaries only when crossing the owned OpenAI/Claude boundary.
 use super::*;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -60,24 +60,24 @@ pub(crate) async fn maybe_run_readable_handoff(
         .provider
         .prepare_request(&destination.model_info().slug)
         .await?;
-    if !destination_request.as_ref().is_some_and(|request| {
-        request
-            .route
-            .as_ref()
-            .is_some_and(|route| route.is_claude_model(&request.model))
-    }) {
-        return Ok(false);
-    }
     let source_request = source
         .provider
         .prepare_request(&source.model_info().slug)
         .await?;
-    if !source_request.as_ref().is_some_and(|request| {
-        request
-            .route
-            .as_ref()
-            .is_some_and(|route| route.native_source().is_some())
-    }) {
+    let (Some(source_request), Some(destination_request)) = (source_request, destination_request)
+    else {
+        return Ok(false);
+    };
+    let (Some(source_route), Some(destination_route)) =
+        (&source_request.route, &destination_request.route)
+    else {
+        return Ok(false);
+    };
+    let crosses_family = (source_route.native_source().is_some()
+        && destination_route.is_claude_model(&destination_request.model))
+        || (source_route.is_claude_model(&source_request.model)
+            && destination_route.native_source().is_some());
+    if !crosses_family {
         return Ok(false);
     }
     let _profile_guard = destination.turn_timing_state.begin_compaction();
