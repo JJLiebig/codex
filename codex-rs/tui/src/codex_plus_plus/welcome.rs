@@ -20,7 +20,7 @@ pub(crate) fn mark_dcg_nux_pending() {
 }
 
 pub(crate) fn replace_upstream_app_promo(tip: &'static str) -> &'static str {
-    if tip.contains("codex app") || tip.contains("Desktop app") {
+    if tip.contains("codex app") || tip.contains("Desktop app") || tip.contains("desktop app") {
         WELCOME_TIP
     } else {
         tip
