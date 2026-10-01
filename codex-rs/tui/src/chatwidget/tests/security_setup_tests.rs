@@ -76,6 +76,7 @@ async fn security_setup_dismissal_survives_usage_banner_replacement() {
         }
 
         let response = codex_app_server_protocol::GetAccountRateLimitsResponse {
+            reset_admission: None,
             ordinary_usage_allowed: None,
             account_id: Some("account".into()),
             rate_limit_upsell: Some(json!({
@@ -153,6 +154,7 @@ async fn security_setup_respects_applicable_backend_banner() {
     for state in ["visible", "dismissed", "another-model"] {
         let (mut chat, _events, _ops) = make_chatwidget_manual(Some("test-model-a")).await;
         let response = codex_app_server_protocol::GetAccountRateLimitsResponse {
+            reset_admission: None,
             ordinary_usage_allowed: None,
             account_id: Some("workspace-a".into()),
             rate_limit_upsell: Some(json!({
