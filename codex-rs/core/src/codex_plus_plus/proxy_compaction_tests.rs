@@ -16,6 +16,11 @@ use tokio_util::sync::CancellationToken;
 
 const SUMMARY: &str = "Preserved conversation summary";
 const PENDING: &str = "Continue after compaction";
+const OPAQUE: &str = "OpenAI-only encrypted checkpoint";
+
+fn source_checkpoint() -> ResponseItem {
+    serde_json::from_value(json!({"type":"compaction","encrypted_content":OPAQUE})).unwrap()
+}
 
 async fn owned_session(fixture: &OwnedFixture, model: &str) -> (Arc<Session>, Arc<TurnContext>) {
     let (mut session, mut turn, _) =
@@ -158,21 +163,34 @@ async fn owned_manual_compaction_uses_exact_model_support() -> anyhow::Result<()
 #[tokio::test]
 async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyhow::Result<()> {
     // Different hashes trigger previous-model compaction; the same model uses its token limit.
-    for (previous, current) in [
-        ("claude-new", "future-9.7"),
-        ("future-9.7", "claude-new"),
-        ("claude-new", "claude-new"),
+    for (previous, current, hash) in [
+        ("claude-new", "future-9.7", Some("claude-new")),
+        ("future-9.7", "claude-new", Some("future-9.7")),
+        ("future-9.7", "claude-new", None),
+        ("claude-new", "claude-new", Some("claude-new")),
     ] {
         let fixture = OwnedFixture::new().await?;
         let (session, mut turn) = owned_session(&fixture, current).await;
         session
             .set_previous_turn_settings(Some(PreviousTurnSettings {
                 model: previous.into(),
-                comp_hash: Some(previous.into()),
+                comp_hash: hash.map(str::to_owned),
                 cyber_access_program: None,
                 realtime_active: Some(false),
             }))
             .await;
+        let handoff = previous == "future-9.7" && current == "claude-new";
+        if handoff {
+            session
+                .record_conversation_items(&turn, turn.model_info(), &[source_checkpoint()])
+                .await;
+            if hash.is_none() {
+                crate::session::tests::update_turn_settings_for_test(
+                    Arc::get_mut(&mut turn).unwrap(),
+                    |settings| Arc::make_mut(&mut settings.model_info).comp_hash = None,
+                );
+            }
+        }
         if previous == current {
             crate::session::tests::update_turn_settings_for_test(
                 Arc::get_mut(&mut turn).unwrap(),
@@ -192,7 +210,7 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
                 .await?;
         }
         let replies = Mutex::new(VecDeque::from([
-            compact_response(previous),
+            compact_response(if handoff { "claude-new" } else { previous }),
             responses::sse(vec![
                 responses::ev_assistant_message("reply", "Acknowledged"),
                 responses::ev_completed_with_tokens("done", 10),
@@ -217,13 +235,32 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
         .await?;
         let requests = inference_requests(&fixture).await;
         assert_eq!(requests.len(), 2, "{previous} -> {current}");
-        assert_compact_request(&requests[0], previous);
+        if handoff {
+            let request = &requests[0];
+            assert!(request["model"].as_str().unwrap().ends_with("/future-9.7"));
+            assert!(request.to_string().contains(OPAQUE));
+            assert!(!request.to_string().contains(PENDING));
+            assert_eq!(
+                request["input"].as_array().unwrap().last().unwrap()["content"][0]["text"],
+                crate::compact::SUMMARIZATION_PROMPT
+            );
+            assert!(!request.to_string().contains("compaction_trigger"));
+        } else {
+            assert_compact_request(&requests[0], previous);
+        }
         assert_eq!(
             requests[1]["model"].as_str().unwrap().rsplit('/').next(),
             Some(current)
         );
         let followup = requests[1].to_string();
-        assert!(followup.contains(SUMMARY) && followup.contains(PENDING));
+        assert_eq!(followup.matches(SUMMARY).count(), 1);
+        assert_eq!(followup.matches(PENDING).count(), 1);
+        if handoff {
+            assert!(!followup.contains(OPAQUE));
+            assert!(!followup.contains("Earlier request"));
+            assert!(!followup.contains("Earlier answer"));
+            assert!(followup.contains("environment_context"));
+        }
         assert!(
             requests[1]["input"]
                 .as_array()
@@ -238,6 +275,71 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
                 && history.contains(PENDING)
                 && history.contains("Acknowledged")
         );
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn owned_readable_handoff_failure_preserves_source_and_pending_input() -> anyhow::Result<()> {
+    let summary = responses::ev_assistant_message("uncommitted", "Uncommitted summary");
+    let failed = responses::sse_failed("failed", "server_error", "Handoff failed");
+    for body in [
+        format!("{}{}", responses::sse(vec![summary.clone()]), failed),
+        responses::sse(vec![summary]), // Output followed by EOF must also stay buffered.
+        responses::sse(vec![responses::ev_completed("empty")]),
+        responses::sse(vec![
+            responses::ev_assistant_message("blank", "  "),
+            responses::ev_completed("blank"),
+        ]),
+        responses::sse(vec![
+            responses::ev_assistant_message("oversize", &"Uncommitted summary ".repeat(10_000)),
+            responses::ev_completed("oversize"),
+        ]),
+        responses::sse_failed("limit", "context_length_exceeded", "Source context is full"),
+    ] {
+        let fixture = OwnedFixture::new().await?;
+        let (session, turn) = owned_session(&fixture, "claude-new").await;
+        session
+            .record_conversation_items(&turn, turn.model_info(), &[source_checkpoint()])
+            .await;
+        let before: Vec<_> = session.clone_history().await.raw_items().cloned().collect();
+        session
+            .set_previous_turn_settings(Some(PreviousTurnSettings {
+                model: "future-9.7".into(),
+                comp_hash: None,
+                cyber_access_program: None,
+                realtime_active: Some(false),
+            }))
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/v1/responses"))
+            .respond_with(ResponseTemplate::new(200).set_body_string(body))
+            .expect(1)
+            .mount(&fixture.server)
+            .await;
+        run_turn(
+            session.clone(),
+            turn.clone(),
+            pending_input(),
+            &mut TurnRunState::default(),
+            CancellationToken::new(),
+        )
+        .await?;
+        let requests = inference_requests(&fixture).await;
+        assert_eq!(requests.len(), 1);
+        assert!(
+            requests[0]["model"]
+                .as_str()
+                .unwrap()
+                .ends_with("/future-9.7")
+        );
+        assert!(requests[0].to_string().contains(OPAQUE));
+        assert!(turn.terminal_error.lock().await.is_some());
+        let after: Vec<_> = session.clone_history().await.raw_items().cloned().collect();
+        assert_eq!(&after[..before.len()], before.as_slice());
+        let history = serde_json::to_string(&after)?;
+        assert_eq!(history.matches(PENDING).count(), 1);
+        assert!(!history.contains("Uncommitted summary"));
     }
     Ok(())
 }

@@ -1488,6 +1488,17 @@ async fn maybe_run_previous_model_inline_compact(
     previous_model_turn_context.cyber_access_program = previous_turn_settings.cyber_access_program;
     let previous_model_turn_context = Arc::new(previous_model_turn_context);
 
+    if crate::compact::proxy_compaction::maybe_run_readable_handoff(
+        sess,
+        &previous_model_turn_context,
+        turn_context,
+        usage_limit_account_attempts,
+    )
+    .await?
+    {
+        return Ok(());
+    }
+
     if should_compact_for_comp_hash_change {
         let step_context = sess
             .capture_step_context(Arc::clone(&previous_model_turn_context), cancellation_token)
