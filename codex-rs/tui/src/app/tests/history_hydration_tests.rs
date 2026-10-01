@@ -245,6 +245,7 @@ async fn history_hydration_archived_retry_uses_first_attempt_runtime_settings() 
     for action in [
         SessionStartAction::Resume(
             crate::app_server_session::ResumeModelSettings::RestoreFromThread,
+            crate::resume_permissions::ResumePermissions::default(),
         ),
         SessionStartAction::Fork(crate::app_server_session::ForkPermissionMode::InheritSaved),
     ] {
@@ -268,7 +269,7 @@ async fn history_hydration_archived_retry_uses_first_attempt_runtime_settings() 
             )
             .await?;
             let initial = match action {
-                SessionStartAction::Resume(settings) => {
+                SessionStartAction::Resume(settings, _) => {
                     server
                         .resume_thread(
                             &app.local_settings,

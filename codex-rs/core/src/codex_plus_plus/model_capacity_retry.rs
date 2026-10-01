@@ -5,6 +5,7 @@ use crate::responses_retry::ResponsesStreamRequest;
 use crate::responses_retry::ResponsesStreamRetryState;
 use crate::responses_retry::handle_response_stream_error;
 use crate::session::session::Session;
+use crate::session::step_context::StepContext;
 use crate::session::turn_context::TurnContext;
 use codex_config::ModelCapacityRetryMode;
 use codex_protocol::error::CodexErr;
@@ -34,9 +35,10 @@ pub(crate) async fn handle_sampling_error(
     err: CodexErr,
     client_session: &mut ModelClientSession,
     sess: &Session,
-    turn_context: &TurnContext,
+    step_context: &StepContext,
     cancellation_token: &CancellationToken,
 ) -> Result<(), CodexErr> {
+    let turn_context = &step_context.turn;
     if applies_to_sampling(&err, &turn_context.session_source) {
         handle(
             capacity_retries,
@@ -54,7 +56,7 @@ pub(crate) async fn handle_sampling_error(
             err,
             client_session,
             sess,
-            turn_context,
+            step_context,
             ResponsesStreamRequest::Sampling,
         )
         .await

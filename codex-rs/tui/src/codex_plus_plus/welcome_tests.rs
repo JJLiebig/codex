@@ -10,6 +10,11 @@ fn replaces_only_upstream_app_promo() {
     let app_promo = "Run `codex app` to open Codex Desktop";
     assert_eq!(WELCOME_TIP, replace_upstream_app_promo(app_promo));
 
+    assert_eq!(
+        WELCOME_TIP,
+        replace_upstream_app_promo("Use the **desktop app** on Linux and run `chatgpt`.")
+    );
+
     let unrelated_tip = "Use /fast for faster inference";
     assert_eq!(unrelated_tip, replace_upstream_app_promo(unrelated_tip));
 }
