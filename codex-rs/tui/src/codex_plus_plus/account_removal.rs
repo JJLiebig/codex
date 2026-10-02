@@ -93,8 +93,11 @@ pub async fn choose_account_to_remove(
         }
     }
     .await;
-    restore_guard.restore()?;
-    result
+    let restored = restore_guard.restore();
+    if let Err(error) = &restored {
+        tracing::error!(?error, "Failed to restore terminal");
+    }
+    result.and_then(|selection| restored.map(|()| selection))
 }
 
 fn confirmation_view(label: &str) -> ListSelectionView {

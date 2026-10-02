@@ -26,6 +26,11 @@ impl AccountStore {
                 )
             })?;
         let root_guard = AuthRefreshGuard::acquire(&self.codex_home)?;
+        let root_store_mode = crate::auth::account_removal_storage::effective_mode(
+            &self.codex_home,
+            root_store_mode,
+            root_keyring_backend_kind,
+        )?;
         let account_home = self.account_home(account_id);
         let account_guard = AuthRefreshGuard::acquire(&account_home)?;
         let _index_guard = self.acquire_index_lock()?;
@@ -56,7 +61,7 @@ impl AccountStore {
         index.accounts.retain(|account| &account.id != account_id);
         let result = (|| {
             if clear_root {
-                crate::auth::logout_with_guard(
+                crate::auth::account_removal_storage::delete(
                     &self.codex_home,
                     root_store_mode,
                     root_keyring_backend_kind,
@@ -75,7 +80,7 @@ impl AccountStore {
             let mut rollback_errors = Vec::new();
             if clear_root
                 && let Some(auth) = root_auth.as_ref()
-                && let Err(rollback_err) = save_auth_with_guard(
+                && let Err(rollback_err) = crate::auth::account_removal_storage::restore(
                     &self.codex_home,
                     auth,
                     root_store_mode,
