@@ -1056,7 +1056,7 @@ pub fn logout(
     storage.delete()
 }
 
-fn logout_with_guard(
+pub(crate) fn logout_with_guard(
     codex_home: &Path,
     auth_credentials_store_mode: AuthCredentialsStoreMode,
     keyring_backend_kind: AuthKeyringBackendKind,

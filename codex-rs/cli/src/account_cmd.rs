@@ -8,6 +8,8 @@ use codex_login::AccountStore;
 use codex_protocol::config_types::ForcedLoginMethod;
 use codex_utils_cli::CliConfigOverrides;
 
+#[path = "codex_plus_plus/account_remove.rs"]
+mod account_remove;
 #[path = "codex_plus_plus/claude_accounts.rs"]
 mod claude_accounts;
 
@@ -30,6 +32,9 @@ pub(crate) enum AccountSubcommand {
 
     /// List imported accounts.
     List,
+
+    /// Choose an imported account to remove.
+    Remove,
 
     /// Add or list Claude subscription accounts.
     Claude(claude_accounts::ClaudeAccountCli),
@@ -84,6 +89,7 @@ pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Resu
         AccountSubcommand::List => {
             print_accounts(store.list().context("failed to list accounts")?);
         }
+        AccountSubcommand::Remove => account_remove::run(&config).await?,
         AccountSubcommand::Claude(args) => claude_accounts::run(args, &config).await?,
     }
     Ok(())

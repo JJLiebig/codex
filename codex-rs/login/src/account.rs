@@ -25,6 +25,8 @@ use crate::token_data::TokenData;
 mod account_bridge;
 #[path = "codex_plus_plus/account_policy.rs"]
 pub(crate) mod account_policy;
+#[path = "codex_plus_plus/account_removal.rs"]
+mod account_removal;
 #[path = "codex_plus_plus/reset_state.rs"]
 pub(crate) mod reset_state;
 #[path = "codex_plus_plus/weekly_window_state.rs"]
