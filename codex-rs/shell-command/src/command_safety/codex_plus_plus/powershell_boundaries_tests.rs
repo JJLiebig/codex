@@ -40,6 +40,7 @@ fn force_delete_survives_statement_boundaries_and_nested_execution() {
         "Remove-Item { Write-Output test } -Force",
         "Remove-Item -Force @'\nfirst\nsecond\n'@",
         "Remove-Item test -Force; if (",
+        "Remove-Item test -Exclude \u{201c}unused\npattern\u{201d} -Force",
     ] {
         let command = vec![
             "pwsh.exe".to_string(),

@@ -2,6 +2,13 @@ use tree_sitter::Parser;
 
 pub(super) fn split_script(script: &str) -> Option<Vec<String>> {
     let original = shlex::split(script)?;
+    // Match the structured parser's opaque handling of PowerShell syntax aliases.
+    if script
+        .chars()
+        .any(|ch| matches!(ch, '‘' | '’' | '“' | '”' | '–' | '—' | '―'))
+    {
+        return Some(original);
+    }
     let mut parser = Parser::new();
     if parser
         .set_language(&tree_sitter_powershell::LANGUAGE.into())
