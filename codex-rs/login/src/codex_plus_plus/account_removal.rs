@@ -26,11 +26,12 @@ impl AccountStore {
                 )
             })?;
         let root_guard = AuthRefreshGuard::acquire(&self.codex_home)?;
-        let root_store_mode = crate::auth::account_removal_storage::effective_mode(
+        let root_storage = crate::auth::account_removal_storage::capture(
             &self.codex_home,
             root_store_mode,
             root_keyring_backend_kind,
         )?;
+        let root_store_mode = root_storage.mode;
         let account_home = self.account_home(account_id);
         let account_guard = AuthRefreshGuard::acquire(&account_home)?;
         let _index_guard = self.acquire_index_lock()?;
@@ -83,7 +84,7 @@ impl AccountStore {
                 && let Err(rollback_err) = crate::auth::account_removal_storage::restore(
                     &self.codex_home,
                     auth,
-                    root_store_mode,
+                    &root_storage,
                     root_keyring_backend_kind,
                     &root_guard,
                 )

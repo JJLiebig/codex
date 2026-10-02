@@ -2,23 +2,32 @@
 
 use super::super::*;
 
-pub(crate) fn effective_mode(
+pub(crate) struct RemovalStorage {
+    pub(crate) mode: AuthCredentialsStoreMode,
+    file_authority_active: bool,
+}
+
+pub(crate) fn capture(
     home: &Path,
     mode: AuthCredentialsStoreMode,
     backend: AuthKeyringBackendKind,
-) -> std::io::Result<AuthCredentialsStoreMode> {
-    if mode != AuthCredentialsStoreMode::Auto {
-        return Ok(mode);
-    }
-    if !FileAuthorityMarker::new(home).is_active()?
+) -> std::io::Result<RemovalStorage> {
+    let file_authority_active = FileAuthorityMarker::new(home).is_active()?;
+    let mode = if mode != AuthCredentialsStoreMode::Auto {
+        mode
+    } else if !file_authority_active
         && create_keyring_auth_storage(home.to_path_buf(), Arc::new(DefaultKeyringStore), backend)
             .load()
             .is_ok_and(|auth| auth.is_some())
     {
-        Ok(AuthCredentialsStoreMode::Keyring)
+        AuthCredentialsStoreMode::Keyring
     } else {
-        Ok(AuthCredentialsStoreMode::File)
-    }
+        AuthCredentialsStoreMode::File
+    };
+    Ok(RemovalStorage {
+        mode,
+        file_authority_active,
+    })
 }
 
 pub(crate) fn delete(
@@ -58,14 +67,14 @@ fn delete_with_store(
 pub(crate) fn restore(
     home: &Path,
     auth: &AuthDotJson,
-    mode: AuthCredentialsStoreMode,
+    snapshot: &RemovalStorage,
     backend: AuthKeyringBackendKind,
     guard: &AuthRefreshGuard,
 ) -> std::io::Result<()> {
     restore_with_store(
         home,
         auth,
-        mode,
+        snapshot,
         backend,
         guard,
         Arc::new(DefaultKeyringStore),
@@ -75,18 +84,23 @@ pub(crate) fn restore(
 fn restore_with_store(
     home: &Path,
     auth: &AuthDotJson,
-    mode: AuthCredentialsStoreMode,
+    snapshot: &RemovalStorage,
     backend: AuthKeyringBackendKind,
     guard: &AuthRefreshGuard,
     keyring: Arc<dyn KeyringStore>,
 ) -> std::io::Result<()> {
     guard.ensure_matches(home)?;
-    let storage = create_auth_storage_with_store(home.to_path_buf(), mode, keyring, backend);
-    if mode == AuthCredentialsStoreMode::Keyring {
-        storage.save_preserving_file(auth)
+    let storage =
+        create_auth_storage_with_store(home.to_path_buf(), snapshot.mode, keyring, backend);
+    if snapshot.mode == AuthCredentialsStoreMode::Keyring {
+        storage.save_preserving_file(auth)?;
     } else {
-        storage.save_with_guard(auth, guard)
+        storage.save_with_guard(auth, guard)?;
     }
+    if snapshot.file_authority_active {
+        FileAuthorityMarker::new(home).activate()?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

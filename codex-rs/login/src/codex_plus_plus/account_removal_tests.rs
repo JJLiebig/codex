@@ -133,12 +133,14 @@ fn failed_index_save_restores_account_and_root_credentials() {
     let profile = import_test_account(&store, home.path(), "first", "account-a");
     let account_auth = std::fs::read(store.account_home(&profile.id).join("auth.json")).unwrap();
     let root_auth = std::fs::read(home.path().join("auth.json")).unwrap();
+    let authority_path = home.path().join(".codex-plus-plus-auth-file-authority");
+    std::fs::write(&authority_path, "").unwrap();
     std::fs::create_dir(home.path().join("accounts/index.json.tmp")).unwrap();
     assert!(
         store
             .remove(
                 &profile.id,
-                AuthCredentialsStoreMode::File,
+                AuthCredentialsStoreMode::Auto,
                 AuthKeyringBackendKind::default()
             )
             .is_err()
@@ -152,4 +154,5 @@ fn failed_index_save_restores_account_and_root_credentials() {
         std::fs::read(home.path().join("auth.json")).unwrap(),
         root_auth
     );
+    assert!(authority_path.is_file());
 }
