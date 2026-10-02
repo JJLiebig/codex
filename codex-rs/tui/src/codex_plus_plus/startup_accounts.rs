@@ -214,7 +214,7 @@ pub(crate) async fn run_startup_account_picker(
     })
 }
 
-fn sort_candidates_alphabetically(candidates: &mut [AccountCandidate]) {
+pub(super) fn sort_candidates_alphabetically(candidates: &mut [AccountCandidate]) {
     candidates.sort_by(|a, b| {
         a.display_label
             .to_lowercase()
@@ -303,7 +303,7 @@ fn root_auth_allows_imported_account_picker(config: &Config, auto_account: bool)
     }
 }
 
-fn account_picker_candidate(
+pub(super) fn account_picker_candidate(
     candidate: &AccountCandidate,
     usage: Option<&account_usage::AccountUsage>,
     in_use: bool,

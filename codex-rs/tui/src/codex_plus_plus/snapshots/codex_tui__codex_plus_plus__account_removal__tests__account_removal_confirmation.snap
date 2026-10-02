@@ -1,0 +1,11 @@
+---
+source: tui/src/codex_plus_plus/account_removal_tests.rs
+assertion_line: 41
+expression: terminal.backend()
+---
+  Remove first@example.com?
+  You will need to sign in again to add it back.
+
+
+› 1. Cancel                                                                                         
+  2. Remove account

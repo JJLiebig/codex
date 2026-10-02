@@ -31,6 +31,7 @@ use codex_secrets::SecretsManager;
 use once_cell::sync::Lazy;
 
 mod codex_plus_plus;
+pub(crate) use codex_plus_plus::account_removal;
 
 use crate::account_lease::AuthRefreshGuard;
 use codex_plus_plus::FileAuthorityMarker;
