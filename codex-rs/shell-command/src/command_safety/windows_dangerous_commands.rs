@@ -3,6 +3,9 @@ use regex::Regex;
 use shlex::split as shlex_split;
 use url::Url;
 
+#[path = "codex_plus_plus/powershell_boundaries.rs"]
+mod powershell_boundaries;
+
 pub fn is_dangerous_command_windows(command: &[String]) -> bool {
     // Prefer structured parsing for PowerShell/CMD so we can spot URL-bearing
     // invocations of ShellExecute-style entry points before falling back to
@@ -384,7 +387,7 @@ fn parse_powershell_invocation(args: &[String]) -> Option<ParsedPowershell> {
                 if idx + 2 != args.len() {
                     return None;
                 }
-                let tokens = shlex_split(script)?;
+                let tokens = powershell_boundaries::split_script(script)?;
                 return Some(ParsedPowershell { tokens });
             }
             _ if lower.starts_with("-command:") || lower.starts_with("/command:") => {
@@ -392,7 +395,7 @@ fn parse_powershell_invocation(args: &[String]) -> Option<ParsedPowershell> {
                     return None;
                 }
                 let (_, script) = arg.split_once(':')?;
-                let tokens = shlex_split(script)?;
+                let tokens = powershell_boundaries::split_script(script)?;
                 return Some(ParsedPowershell { tokens });
             }
             "-nologo" | "-noprofile" | "-noninteractive" | "-mta" | "-sta" => {
