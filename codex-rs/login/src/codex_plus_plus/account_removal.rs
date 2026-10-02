@@ -3,7 +3,7 @@
 use super::*;
 
 impl AccountStore {
-    /// Forget an idle imported account and clear root auth only if it names that account.
+    /// Forget an imported account whose existing leases are free and clear root auth only if it names that account.
     pub fn remove(
         &self,
         account_id: &AccountId,

@@ -13,7 +13,6 @@ use super::startup_accounts::account_picker_candidate;
 use super::startup_accounts::sort_candidates_alphabetically;
 use crate::TerminalRestoreGuard;
 use crate::account_picker;
-use crate::account_usage;
 use crate::app_event::AppEvent;
 use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::BottomPaneView;
@@ -43,23 +42,6 @@ pub async fn choose_account_to_remove(
         )
         .ok()
         .flatten();
-    let homes: Vec<_> = profiles
-        .iter()
-        .filter_map(|profile| {
-            let path = config
-                .codex_home
-                .join("accounts")
-                .join(profile.id.as_str())
-                .join("auth.json");
-            path.is_file().then(|| {
-                (
-                    profile.id.clone(),
-                    path.parent().expect("account auth parent").to_path_buf(),
-                )
-            })
-        })
-        .collect();
-    let usage = account_usage::load(config, &homes, &store).await;
     let mut candidates = store.candidates()?;
     sort_candidates_alphabetically(&mut candidates);
     let picker_candidates = candidates
@@ -67,7 +49,7 @@ pub async fn choose_account_to_remove(
         .map(|candidate| {
             account_picker_candidate(
                 candidate,
-                usage.usage.get(&candidate.id),
+                /*usage*/ None,
                 store.account_in_use(&candidate.id).unwrap_or(false),
                 current_id.as_ref() == Some(&candidate.id),
             )
