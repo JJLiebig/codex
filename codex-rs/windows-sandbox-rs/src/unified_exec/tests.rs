@@ -236,7 +236,12 @@ async fn collect_stdout_and_exit(
 }
 #[test]
 #[allow(clippy::zombie_processes)]
-fn current_user_runner_isolates_console_and_closes_descendants() {
+fn current_user_runner_isolates_console_and_preserves_descendants() {
+    if std::env::var_os("CODEX_RUNNER_DESCENDANT").is_some() {
+        std::thread::sleep(Duration::from_secs(2));
+        fs::write(std::env::var_os("CODEX_RUNNER_PROBE").unwrap(), "survived").unwrap();
+        return;
+    }
     if std::env::var_os("CODEX_RUNNER_PROBE").is_some() {
         let mut console_pids = [0; 8];
         let count =
@@ -267,7 +272,14 @@ fn current_user_runner_isolates_console_and_closes_descendants() {
             std::env::var("CODEX_BATCH_ARG").unwrap()
         );
         eprintln!("native-stderr");
-        std::process::Command::new(std::env::var_os("ComSpec").unwrap()).args(["/d", "/c", r#""%SystemRoot%\System32\ping.exe" -n 3 127.0.0.1 >nul & echo survived > "%CODEX_RUNNER_PROBE%""#]).spawn().unwrap();
+        Command::new(std::env::current_exe().unwrap())
+            .args(["isolates_console_and_preserves_descendants", "--nocapture"])
+            .env("CODEX_RUNNER_DESCENDANT", "1")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
         return;
     }
     if codex_utils_cargo_bin::cargo_bin("codex-command-runner").is_err() {
@@ -279,7 +291,7 @@ fn current_user_runner_isolates_console_and_closes_descendants() {
         let probe = codex_home.path().join("runner-probe.exe");
         fs::copy(std::env::current_exe().unwrap(), &probe).unwrap();
         let batch = codex_home.path().join("runner-probe.cmd");
-        let script = "@echo shell-stdout\r\n@echo shell-stderr 1>&2\r\n@set CODEX_BATCH_ARG=%~1\r\n@runner-probe.exe isolates_console_and_closes_descendants --nocapture\r\n";
+        let script = "@echo shell-stdout\r\n@echo shell-stderr 1>&2\r\n@set CODEX_BATCH_ARG=%~1\r\n@runner-probe.exe isolates_console_and_preserves_descendants --nocapture\r\n";
         fs::write(&batch, script).unwrap();
         let mut env: HashMap<_, _> = std::env::vars().collect();
         env.retain(|key, _| !key.eq_ignore_ascii_case("PATH"));
@@ -357,8 +369,10 @@ fn current_user_runner_isolates_console_and_closes_descendants() {
             "stderr markers missing; stderr_len={}",
             stderr.len()
         );
-        std::thread::sleep(Duration::from_secs(3));
-        assert!(!marker.exists());
+        assert!(
+            wait_for_path(&marker, Duration::from_secs(10)),
+            "background descendant did not survive normal command completion"
+        );
     });
 }
 
@@ -1320,3 +1334,6 @@ fn legacy_tty_cmd_emits_output_and_accepts_input() {
         assert!(stdout.contains("second"), "stdout={stdout:?}");
     });
 }
+
+#[path = "codex_plus_plus/current_user_lifecycle_tests.rs"]
+mod current_user_lifecycle_tests;
