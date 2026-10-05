@@ -1,0 +1,216 @@
+name: Codex++ platform build
+
+on:
+  workflow_call:
+    inputs:
+      version: {required: true, type: string}
+      runner: {required: true, type: string}
+      target: {required: true, type: string}
+      archive_suffix: {required: true, type: string}
+      executable: {required: true, type: string}
+
+permissions: {}
+
+env:
+  CODEX_REPO_ROOT: ${{ github.workspace }}
+  APT_UPDATE_ARGS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+  APT_INSTALL_ARGS: --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    env:
+      AWS_LC_SYS_NO_JITTER_ENTROPY: ${{ inputs.target == 'x86_64-unknown-linux-musl' && '1' || '' }}
+      AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl: ${{ inputs.target == 'x86_64-unknown-linux-musl' && '1' || '' }}
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      TARGET: ${{ inputs.target }}
+      VERSION: ${{ inputs.version }}
+      STABLE_GIT_COMMIT: ${{ github.sha }}
+      ARCHIVE_SUFFIX: ${{ inputs.archive_suffix }}
+      LIBSQLITE3_FLAGS: ${{ inputs.target == 'x86_64-pc-windows-msvc' && 'SQLITE_DISABLE_INTRINSIC' || '' }}
+      SOURCE_MTIME_STATE: codex-rs/target/codex-plus-plus-source-mtimes-${{ inputs.target }}.json
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        with:
+          targets: ${{ inputs.target }}
+
+      - name: Remove runner-provided Rust toolchain
+        shell: bash
+        run: rustup toolchain uninstall stable
+
+      - name: Configure LLVM linker
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ inputs.target }}
+
+      - name: Resolve release build cache identity
+        id: release-cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          tree="$(git rev-parse 'HEAD^{tree}')"
+          image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}"
+          toolchain="${{ hashFiles('codex-rs/rust-toolchain.toml') }}"
+          build_inputs="${{ hashFiles('.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/install-musl-build-tools.sh', '.github/workflows/codex-plus-plus-release.yml', '.github/workflows/codex-plus-plus-build.yml') }}"
+          prefix="codex-plus-plus-release-v4-${TARGET}-${image}-${toolchain}-${build_inputs}"
+          echo "key=${prefix}-${tree}" >> "$GITHUB_OUTPUT"
+          echo "prefix=${prefix}-" >> "$GITHUB_OUTPUT"
+          echo "tree=${tree}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Codex++ release build cache
+        id: restore-build-cache
+        continue-on-error: true
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          key: ${{ steps.release-cache.outputs.key }}
+          restore-keys: |
+            ${{ steps.release-cache.outputs.prefix }}
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ runner.temp }}/codex-package
+            codex-rs/target/release
+            codex-rs/target/${{ inputs.target }}/release
+            codex-rs/target/.rustc_info.json
+            ${{ env.SOURCE_MTIME_STATE }}
+
+      - name: Regenerate v8 after cache restore
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          cargo clean -p v8 --target "$TARGET" --profile release
+          rm -rf "target/${TARGET}/release/gn_out"
+
+      - name: Install Zig
+        if: runner.os == 'Linux'
+        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.14.0
+          use-cache: false
+
+      - name: Install musl build tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
+            sudo sed -i '\|azure\.archive\.ubuntu\.com|d' /etc/apt/apt-mirrors.txt
+            grep -qE '^[[:space:]]*https?://' /etc/apt/apt-mirrors.txt || { echo "No apt mirror remains" >&2; exit 1; }
+          fi
+          bash .github/scripts/install-musl-build-tools.sh
+
+      - name: Configure rusty_v8 artifact overrides and verify checksums
+        uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ inputs.target }}
+
+      - name: Build bundled bwrap
+        if: runner.os == 'Linux'
+        working-directory: codex-rs
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --target "$TARGET" --profile release --bin bwrap
+          bwrap="target/${TARGET}/release/bwrap"
+          digest="$(sha256sum "$bwrap" | awk '{print $1}')"
+          echo "BWRAP=${GITHUB_WORKSPACE}/codex-rs/${bwrap}" >> "$GITHUB_ENV"
+          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
+
+      - name: Build package archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
+          package_args=(
+            --target "$TARGET"
+            --package-dir "dist/package-${TARGET}"
+            --archive-output "$archive"
+            --force
+          )
+          if [[ -n "${BWRAP:-}" ]]; then
+            package_args+=(--bwrap-bin "$BWRAP")
+          fi
+          python scripts/build_codex_plus_plus.py \
+            --fork-version "$VERSION" \
+            --build-cache-state "$SOURCE_MTIME_STATE" \
+            -- \
+            --cargo-profile release \
+            "${package_args[@]}"
+
+      - name: Build and package Windows voice
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $work = Join-Path $env:RUNNER_TEMP 'codex-plus-plus-voice'
+          & .github/scripts/build-windows-voice.ps1 -Output $work
+          if ($LASTEXITCODE -ne 0) { throw 'Voice build failed' }
+          $commit = git rev-parse HEAD
+          python scripts/codex_package/codex_plus_plus/voice.py package `
+            --work $work --commit $commit `
+            --app "dist/package-$env:TARGET" --output "dist/voice-package-$env:TARGET" `
+            --archive "dist/codex-plus-plus-$env:VERSION-$env:TARGET.$env:ARCHIVE_SUFFIX"
+          if ($LASTEXITCODE -ne 0) { throw 'Voice package or relocated startup smoke failed' }
+
+      - name: Set up Bazel for native voice
+        if: runner.os != 'Windows'
+        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
+        with:
+          bazelisk-version: 1.28.1
+
+      - name: Build and package Unix voice
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          bazel build -c opt --jobs=4 \
+            //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            runtime_name=macos_aarch64
+          else
+            runtime_name=linux_x86_64
+          fi
+          voice_target="${TARGET%-musl}"
+          if [[ "$TARGET" == *-musl ]]; then voice_target="${voice_target}-gnu"; fi
+          work="${RUNNER_TEMP}/codex-plus-plus-voice"
+          mkdir -p "$work"
+          python third_party/voice/release_runtime.py stage \
+            --target "$voice_target" \
+            --source "bazel-bin/third_party/voice/native_runtime_${runtime_name}" \
+            --output "$work/runtime"
+          cp bazel-bin/codex-rs/voice-host/codex-voice-host "$work/codex-voice-host"
+          chmod 0755 "$work/codex-voice-host"
+          python third_party/voice/release_runtime.py seal \
+            --target "$voice_target" --output "$work/runtime"
+          python scripts/codex_package/codex_plus_plus/voice.py package \
+            --work "$work" --commit "$STABLE_GIT_COMMIT" \
+            --app "dist/package-${TARGET}" --output "dist/voice-package-${TARGET}" \
+            --archive "dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
+
+      - name: Smoke package
+        shell: bash
+        env:
+          EXECUTABLE: ${{ inputs.executable }}
+        run: |
+          set -euo pipefail
+          executable="dist/package-${TARGET}/${EXECUTABLE}"
+          [[ "$("$executable" --version)" == "codex-cli ${VERSION}" ]]
+
+      - name: Stage release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-plus-plus-native-${{ inputs.target }}
+          path: dist/codex-plus-plus-${{ env.VERSION }}-${{ inputs.target }}.${{ inputs.archive_suffix }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
