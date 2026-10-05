@@ -2,9 +2,15 @@ use super::windows_common as runner;
 use crate::ipc_framed as ipc;
 use crate::runner_client as client;
 use codex_utils_pty as pty;
+use std::os::windows::io::AsRawHandle;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+use std::sync::atomic::Ordering;
 use tokio::sync;
+use windows_sys::Win32::System::Pipes::PeekNamedPipe;
 fn direct_output_channel(
     mut file: std::fs::File,
+    root_exited: Arc<AtomicBool>,
 ) -> (
     sync::mpsc::Sender<Vec<u8>>,
     sync::mpsc::Receiver<Vec<u8>>,
@@ -14,9 +20,47 @@ fn direct_output_channel(
     let reader_tx = tx.clone();
     let reader_handle = tokio::task::spawn_blocking(move || {
         let mut buffer = [0; 8192];
-        while let Ok(count) = std::io::Read::read(&mut file, &mut buffer) {
+        let mut remaining_after_exit = None;
+        loop {
+            let exited = root_exited.load(Ordering::Acquire);
+            let mut available = 0;
+            if unsafe {
+                PeekNamedPipe(
+                    file.as_raw_handle() as _,
+                    std::ptr::null_mut(),
+                    0,
+                    std::ptr::null_mut(),
+                    &mut available,
+                    std::ptr::null_mut(),
+                )
+            } == 0
+            {
+                break;
+            }
+            // Drain a snapshot of buffered output after root exit, rather than
+            // waiting for EOF from a surviving descendant or its future output.
+            if remaining_after_exit.is_none() && exited {
+                remaining_after_exit = Some(available as usize);
+            }
+            let count = remaining_after_exit
+                .unwrap_or(available as usize)
+                .min(available as usize)
+                .min(buffer.len());
+            if count == 0 {
+                if remaining_after_exit.is_some() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+                continue;
+            }
+            let Ok(count) = std::io::Read::read(&mut file, &mut buffer[..count]) else {
+                break;
+            };
             if count == 0 || reader_tx.blocking_send(buffer[..count].to_vec()).is_err() {
                 break;
+            }
+            if let Some(remaining) = &mut remaining_after_exit {
+                *remaining -= count;
             }
         }
     });
@@ -63,8 +107,11 @@ pub async fn spawn_current_user_runner_session(
     let (pipe_write, pipe_read, stdout_file, stderr_file) = transport.into_files_with_output()?;
     let (writer_tx, writer_rx) = sync::mpsc::channel::<Vec<u8>>(128);
     let (exit_tx, exit_rx) = sync::oneshot::channel::<i32>();
-    let (stdout_tx, stdout_rx, stdout_reader_handle) = direct_output_channel(stdout_file);
-    let (stderr_tx, stderr_rx, stderr_reader_handle) = direct_output_channel(stderr_file);
+    let root_exited = Arc::new(AtomicBool::new(false));
+    let (stdout_tx, stdout_rx, stdout_reader_handle) =
+        direct_output_channel(stdout_file, Arc::clone(&root_exited));
+    let (stderr_tx, stderr_rx, stderr_reader_handle) =
+        direct_output_channel(stderr_file, Arc::clone(&root_exited));
     drop(stdout_tx);
     let outbound_tx = runner::start_runner_pipe_writer(pipe_write);
     let writer_handle =
@@ -76,11 +123,17 @@ pub async fn spawn_current_user_runner_session(
         Some(stderr_tx),
         exit_tx,
     );
+    let (drained_exit_tx, drained_exit_rx) = sync::oneshot::channel();
+    tokio::spawn(async move {
+        let code = exit_rx.await.unwrap_or(-1);
+        root_exited.store(true, Ordering::Release);
+        let _ = drained_exit_tx.send(code);
+    });
     let spawned = pty::spawn_from_direct_driver(pty::DirectProcessDriver {
         writer_tx,
         stdout_rx,
         stderr_rx,
-        exit_rx,
+        exit_rx: drained_exit_rx,
         stdout_reader_handle,
         stderr_reader_handle,
         writer_handle: Some(writer_handle),

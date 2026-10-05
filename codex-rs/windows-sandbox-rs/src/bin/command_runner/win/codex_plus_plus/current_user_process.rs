@@ -40,7 +40,7 @@ pub(in super::super) fn spawn_current_user_process(
         log_dir: req.codex_home.clone(),
         pi: pipes.process,
         job: pipes.job(),
-        preserve_descendants_on_exit: false,
+        preserve_descendants_on_exit: true,
         stdout_handle: INVALID_HANDLE_VALUE,
         stderr_handle: INVALID_HANDLE_VALUE,
         stdin_handle: pipes.stdin_write,
