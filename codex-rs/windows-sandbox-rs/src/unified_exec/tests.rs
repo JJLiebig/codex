@@ -238,7 +238,8 @@ async fn collect_stdout_and_exit(
 #[allow(clippy::zombie_processes)]
 fn current_user_runner_isolates_console_and_preserves_descendants() {
     if std::env::var_os("CODEX_RUNNER_DESCENDANT").is_some() {
-        std::thread::sleep(Duration::from_secs(2));
+        let release = PathBuf::from(std::env::var_os("CODEX_RUNNER_RELEASE").unwrap());
+        assert!(wait_for_path(&release, Duration::from_secs(30)));
         fs::write(std::env::var_os("CODEX_RUNNER_PROBE").unwrap(), "survived").unwrap();
         return;
     }
@@ -276,8 +277,6 @@ fn current_user_runner_isolates_console_and_preserves_descendants() {
             .args(["isolates_console_and_preserves_descendants", "--nocapture"])
             .env("CODEX_RUNNER_DESCENDANT", "1")
             .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
             .spawn()
             .unwrap();
         return;
@@ -288,6 +287,7 @@ fn current_user_runner_isolates_console_and_preserves_descendants() {
     current_thread_runtime().block_on(async move {
         let codex_home = sandbox_home("current-user-runner");
         let marker = codex_home.path().join("descendant-survived");
+        let release = codex_home.path().join("release-descendant");
         let probe = codex_home.path().join("runner-probe.exe");
         fs::copy(std::env::current_exe().unwrap(), &probe).unwrap();
         let batch = codex_home.path().join("runner-probe.cmd");
@@ -297,6 +297,7 @@ fn current_user_runner_isolates_console_and_preserves_descendants() {
         env.retain(|key, _| !key.eq_ignore_ascii_case("PATH"));
         env.insert("Path".into(), codex_home.path().display().to_string());
         env.insert("CODEX_RUNNER_PROBE".into(), marker.display().to_string());
+        env.insert("CODEX_RUNNER_RELEASE".into(), release.display().to_string());
         env.insert("CODEX_PARENT_PID".into(), std::process::id().to_string());
         let spawned = spawn_windows_current_user_runner_session(
             codex_home.path(),
@@ -369,6 +370,7 @@ fn current_user_runner_isolates_console_and_preserves_descendants() {
             "stderr markers missing; stderr_len={}",
             stderr.len()
         );
+        fs::write(&release, "release after command exit and output drain").unwrap();
         assert!(
             wait_for_path(&marker, Duration::from_secs(10)),
             "background descendant did not survive normal command completion"
