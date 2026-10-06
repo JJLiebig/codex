@@ -105,4 +105,5 @@ version = "0.52"
 
 [dev-dependencies]
 codex-utils-cargo-bin = { workspace = true }
+codex-windows-sandbox-test-support = { workspace = true }
 pretty_assertions = { workspace = true }

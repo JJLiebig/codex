@@ -16,9 +16,14 @@ pub(crate) fn capture(
     let mode = if mode != AuthCredentialsStoreMode::Auto {
         mode
     } else if !file_authority_active
-        && create_keyring_auth_storage(home.to_path_buf(), Arc::new(DefaultKeyringStore), backend)
-            .load()
-            .is_ok_and(|auth| auth.is_some())
+        && create_keyring_auth_storage(
+            home.to_path_buf(),
+            Arc::new(DefaultKeyringStore),
+            backend,
+            AuthCredentialsStoreMode::Keyring,
+        )
+        .load()
+        .is_ok_and(|auth| auth.is_some())
     {
         AuthCredentialsStoreMode::Keyring
     } else {
@@ -52,15 +57,20 @@ fn delete_with_store(
             .delete_with_guard(guard);
     }
     match backend {
-        AuthKeyringBackendKind::Direct => {
-            DirectKeyringAuthStorage::new(home.to_path_buf(), keyring).delete_keyring()
-        }
-        AuthKeyringBackendKind::Secrets => {
-            SecretsKeyringAuthStorage::new(home.to_path_buf(), keyring)
-                .secrets_manager
-                .delete(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)
-                .map_err(std::io::Error::other)
-        }
+        AuthKeyringBackendKind::Direct => DirectKeyringAuthStorage::new(
+            home.to_path_buf(),
+            keyring,
+            AuthCredentialsStoreMode::Keyring,
+        )
+        .delete_keyring(),
+        AuthKeyringBackendKind::Secrets => SecretsKeyringAuthStorage::new(
+            home.to_path_buf(),
+            keyring,
+            AuthCredentialsStoreMode::Keyring,
+        )
+        .secrets_manager
+        .delete(&SecretScope::Global, &CODEX_AUTH_SECRET_NAME)
+        .map_err(std::io::Error::other),
     }
 }
 

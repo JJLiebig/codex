@@ -453,7 +453,6 @@ impl ChatWidget {
             service_tier,
             /*final_output_json_schema*/ None,
             collaboration_mode,
-            /*personality*/ None,
         );
         let submitted_message = UserMessage {
             text,

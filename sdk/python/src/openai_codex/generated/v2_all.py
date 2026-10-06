@@ -538,7 +538,7 @@ class ClientInfo(BaseModel):
     version: str
 
 
-class CodexErrorInfoValue(Enum):
+class CodexErrorInfoValue(str, Enum):
     context_window_exceeded = "contextWindowExceeded"
     session_budget_exceeded = "sessionBudgetExceeded"
     usage_limit_exceeded = "usageLimitExceeded"
@@ -554,6 +554,15 @@ class CodexErrorInfoValue(Enum):
     thread_rollback_failed = "threadRollbackFailed"
     sandbox_error = "sandboxError"
     other = "other"
+
+    @classmethod
+    def _missing_(cls, value: object) -> CodexErrorInfoValue | None:
+        if not isinstance(value, str):
+            return None
+        member = str.__new__(cls, value)
+        member._name_ = value
+        member._value_ = value
+        return member
 
 
 class HttpConnectionFailed(BaseModel):
@@ -2595,6 +2604,13 @@ class McpServerOauthLoginCompletedNotification(BaseModel):
         populate_by_name=True,
     )
     error: str | None = None
+    login_id: Annotated[
+        str | None,
+        Field(
+            alias="loginId",
+            description="Identifies the explicit login attempt. Older servers omit this field.",
+        ),
+    ] = None
     name: str
     success: bool
     thread_id: Annotated[str | None, Field(alias="threadId")] = None
@@ -2622,6 +2638,13 @@ class McpServerOauthLoginResponse(BaseModel):
         populate_by_name=True,
     )
     authorization_url: Annotated[str, Field(alias="authorizationUrl")]
+    login_id: Annotated[
+        str | None,
+        Field(
+            alias="loginId",
+            description="Identifies this login attempt across the response and completion notification. Older servers omit this field; current servers always return it.",
+        ),
+    ] = None
 
 
 class McpServerRefreshResponse(BaseModel):
@@ -5236,13 +5259,6 @@ class ThreadExtra(BaseModel):
     )
 
 
-class ThreadGoalClearParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    thread_id: Annotated[str, Field(alias="threadId")]
-
-
 class ThreadGoalClearResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -5262,6 +5278,11 @@ class ThreadGoalGetParams(BaseModel):
         populate_by_name=True,
     )
     thread_id: Annotated[str, Field(alias="threadId")]
+
+
+class ThreadGoalMutationOrigin(Enum):
+    user = "user"
+    automatic = "automatic"
 
 
 class ThreadGoalStatus(Enum):
@@ -5600,6 +5621,39 @@ class ThreadNameUpdatedNotification(BaseModel):
     )
     thread_id: Annotated[str, Field(alias="threadId")]
     thread_name: Annotated[str | None, Field(alias="threadName")] = None
+
+
+class CompletedThreadPredictionResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    text: str | None = None
+    type: Annotated[Literal["completed"], Field(title="CompletedThreadPredictionResultType")]
+
+
+class FailedThreadPredictionResult(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    type: Annotated[Literal["failed"], Field(title="FailedThreadPredictionResultType")]
+
+
+class ThreadPredictionResult(
+    RootModel[CompletedThreadPredictionResult | FailedThreadPredictionResult]
+):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    root: CompletedThreadPredictionResult | FailedThreadPredictionResult
+
+
+class ThreadPredictionUpdatedNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    result: ThreadPredictionResult
+    source_turn_id: Annotated[str, Field(alias="sourceTurnId")]
+    thread_id: Annotated[str, Field(alias="threadId")]
 
 
 class ThreadProjectUpdatedNotification(BaseModel):
@@ -6877,15 +6931,6 @@ class ThreadGoalGetRequest(BaseModel):
     params: ThreadGoalGetParams
 
 
-class ThreadGoalClearRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[Literal["thread/goal/clear"], Field(title="Thread/goal/clearRequestMethod")]
-    params: ThreadGoalClearParams
-
-
 class ThreadMetadataUpdateRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7679,6 +7724,7 @@ class CodexErrorInfo(
         | ResponseStreamDisconnectedCodexErrorInfo
         | ResponseTooManyFailedAttemptsCodexErrorInfo
         | ActiveTurnNotSteerableCodexErrorInfo
+        | dict[str, Any]
     ]
 ):
     model_config = ConfigDict(
@@ -7690,7 +7736,8 @@ class CodexErrorInfo(
         | ResponseStreamConnectionFailedCodexErrorInfo
         | ResponseStreamDisconnectedCodexErrorInfo
         | ResponseTooManyFailedAttemptsCodexErrorInfo
-        | ActiveTurnNotSteerableCodexErrorInfo,
+        | ActiveTurnNotSteerableCodexErrorInfo
+        | dict[str, Any],
         Field(
             description="This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant."
         ),
@@ -9307,6 +9354,24 @@ class ThreadAttachmentUpdatedServerNotification(BaseModel):
     params: ThreadAttachmentUpdatedNotification
 
 
+class ThreadPredictionUpdatedServerNotification(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    emitted_at_ms: Annotated[
+        int | None,
+        Field(
+            alias="emittedAtMs",
+            description="Unix timestamp (in milliseconds) when app-server emitted this notification.",
+        ),
+    ] = None
+    method: Annotated[
+        Literal["thread/prediction/updated"],
+        Field(title="Thread/prediction/updatedNotificationMethod"),
+    ]
+    params: ThreadPredictionUpdatedNotification
+
+
 class ThreadGoalClearedServerNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9890,6 +9955,17 @@ class ThreadGoal(BaseModel):
     updated_at: Annotated[int, Field(alias="updatedAt")]
 
 
+class ThreadGoalClearParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    origin: Annotated[
+        ThreadGoalMutationOrigin | None,
+        Field(description="Missing provenance does not supply user authorization."),
+    ] = None
+    thread_id: Annotated[str, Field(alias="threadId")]
+
+
 class ThreadGoalGetResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9902,6 +9978,10 @@ class ThreadGoalSetParams(BaseModel):
         populate_by_name=True,
     )
     objective: str | None = None
+    origin: Annotated[
+        ThreadGoalMutationOrigin | None,
+        Field(description="Missing provenance does not supply user authorization."),
+    ] = None
     status: ThreadGoalStatus | None = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_budget: Annotated[int | None, Field(alias="tokenBudget")] = None
@@ -10614,6 +10694,15 @@ class ThreadGoalSetRequest(BaseModel):
     id: RequestId
     method: Annotated[Literal["thread/goal/set"], Field(title="Thread/goal/setRequestMethod")]
     params: ThreadGoalSetParams
+
+
+class ThreadGoalClearRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[Literal["thread/goal/clear"], Field(title="Thread/goal/clearRequestMethod")]
+    params: ThreadGoalClearParams
 
 
 class ThreadListRequest(BaseModel):
@@ -13025,6 +13114,7 @@ class ServerNotification(
         | ThreadNameUpdatedServerNotification
         | ThreadAttachmentUpdatedServerNotification
         | ThreadGoalUpdatedServerNotification
+        | ThreadPredictionUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification
@@ -13114,6 +13204,7 @@ class ServerNotification(
         | ThreadNameUpdatedServerNotification
         | ThreadAttachmentUpdatedServerNotification
         | ThreadGoalUpdatedServerNotification
+        | ThreadPredictionUpdatedServerNotification
         | ThreadGoalClearedServerNotification
         | ThreadQueueChangedServerNotification
         | ProjectChangedServerNotification

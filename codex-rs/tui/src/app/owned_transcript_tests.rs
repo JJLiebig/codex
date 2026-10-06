@@ -36,6 +36,7 @@ pub(in crate::app) fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
 pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
     app.chat_widget.handle_thread_session(ThreadSessionState {
         background_completion_waiting: false,
+        daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
         forked_from_id: None,
@@ -53,7 +54,6 @@ pub(in crate::app) fn attach_thread(app: &mut App, thread_id: ThreadId) {
         instruction_source_paths: Vec::new(),
         reasoning_effort: None,
         collaboration_mode: None,
-        personality: None,
         message_history: None,
         network_proxy: None,
         rollout_path: None,
@@ -1000,7 +1000,7 @@ async fn offline_find_closes_before_the_next_ctrl_c_quits() -> Result<()> {
         rendered.lines().nth(usize::from(cursor.y)).map(str::trim),
         Some("Find: needle")
     );
-    assert!(!rendered.contains("ctrl+c quit"));
+    assert!(!rendered.contains("⌃c quit"));
     let close = TuiEvent::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     assert!(matches!(
         app.handle_tui_event(&mut tui, &mut app_server, close)
