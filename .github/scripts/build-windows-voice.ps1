@@ -1,4 +1,7 @@
-param([Parameter(Mandatory = $true)][string]$Output)
+param(
+    [Parameter(Mandatory = $true)][string]$Output,
+    [switch]$ReuseNativeBuild
+)
 
 $ErrorActionPreference = 'Stop'
 # Resolve the runtime from this selected toolchain before downloading or building.
@@ -38,23 +41,26 @@ $msiProcess = Start-Process msiexec.exe -ArgumentList $msiArgs -WindowStyle Hidd
 if ($msiProcess.ExitCode -ne 0) { throw "pkgconf extraction failed: $($msiProcess.ExitCode)" }
 $pkgconf = Join-Path $pkgconfRoot 'PFiles64/pkgconf-3.0.7/pkgconf.exe'
 
-$archives = Join-Path $Output 'archives'
-New-Item -ItemType Directory -Path $archives -Force | Out-Null
-foreach ($source in (Get-Content third_party/voice/sources.json -Raw | ConvertFrom-Json).sources) {
-    Get-VerifiedFile $source.url (Join-Path $archives $source.archive) $source.sha256
-}
-
-$cc = (Get-Command cl.exe -ErrorAction Stop).Source
-$nmake = (Get-Command nmake.exe -ErrorAction Stop).Source
-$cmake = (Get-Command cmake.exe -ErrorAction Stop).Source
 $commit = git rev-parse HEAD
 if ($LASTEXITCODE -ne 0) { throw 'Cannot identify source commit' }
-python third_party/voice/build_native.py --archives $archives --output (Join-Path $Output 'native') `
-    --target x86_64-pc-windows-msvc --cc $cc --cxx $cc --cmake $cmake `
-    --make (Join-Path $cygwin 'bin/make.exe') --shell (Join-Path $cygwin 'bin/bash.exe') `
-    --pkg-config $pkgconf --bootstrap-make $nmake --jobs 4
-if ($LASTEXITCODE -ne 0) { throw 'Native voice build failed' }
+if (-not $ReuseNativeBuild) {
+    $archives = Join-Path $Output 'archives'
+    New-Item -ItemType Directory -Path $archives -Force | Out-Null
+    foreach ($source in (Get-Content third_party/voice/sources.json -Raw | ConvertFrom-Json).sources) {
+        Get-VerifiedFile $source.url (Join-Path $archives $source.archive) $source.sha256
+    }
+    $cc = (Get-Command cl.exe -ErrorAction Stop).Source
+    $nmake = (Get-Command nmake.exe -ErrorAction Stop).Source
+    $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source
+    python third_party/voice/build_native.py --archives $archives --output (Join-Path $Output 'native') `
+        --target x86_64-pc-windows-msvc --cc $cc --cxx $cc --cmake $cmake `
+        --make (Join-Path $cygwin 'bin/make.exe') --shell (Join-Path $cygwin 'bin/bash.exe') `
+        --pkg-config $pkgconf --bootstrap-make $nmake --jobs 4
+    if ($LASTEXITCODE -ne 0) { throw 'Native voice build failed' }
+}
 
+# Inspect the native prefix and regenerate runtime/SDK receipts for this commit,
+# including when the prefix came from an exact-key cache hit.
 python scripts/codex_package/codex_plus_plus/voice.py prepare --work $Output --commit $commit --redist $redist
 if ($LASTEXITCODE -ne 0) { throw 'Voice runtime preparation failed' }
 
