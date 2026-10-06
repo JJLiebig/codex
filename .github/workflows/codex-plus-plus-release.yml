@@ -21,6 +21,8 @@ on:
       - ".github/actions/setup-rusty-v8/**"
       - ".github/scripts/install-musl-build-tools.sh"
       - ".github/workflows/codex-plus-plus-release.yml"
+      - ".github/workflows/codex-plus-plus-build.yml"
+      - ".github/actions/publish-codex-plus-plus-platform/**"
       - "codex-rs/**"
       - "scripts/build_codex_plus_plus.py"
       - "scripts/build_codex_package.py"
@@ -180,7 +182,7 @@ jobs:
           tree="$(git rev-parse 'HEAD^{tree}')"
           image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}"
           toolchain="${{ hashFiles('codex-rs/rust-toolchain.toml') }}"
-          build_inputs="${{ hashFiles('.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/install-musl-build-tools.sh', '.github/workflows/codex-plus-plus-release.yml') }}"
+          build_inputs="${{ hashFiles('.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/install-musl-build-tools.sh', '.github/workflows/codex-plus-plus-release.yml', '.github/workflows/codex-plus-plus-build.yml') }}"
           prefix="codex-plus-plus-release-v4-${TARGET}-${image}-${toolchain}-${build_inputs}"
           echo "key=${prefix}-${tree}" >> "$GITHUB_OUTPUT"
           echo "prefix=${prefix}-" >> "$GITHUB_OUTPUT"
@@ -277,225 +279,111 @@ jobs:
             codex-rs/target/.rustc_info.json
             ${{ env.SOURCE_MTIME_STATE }}
 
-  build:
+  build-windows:
     needs: prepare
     if: needs.prepare.outputs.recovery == 'false'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-            archive_suffix: zip
-            executable: bin/codex.exe
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            archive_suffix: tar.gz
-            executable: bin/codex
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-            archive_suffix: tar.gz
-            executable: bin/codex
-    runs-on: ${{ matrix.runner }}
+    uses: ./.github/workflows/codex-plus-plus-build.yml
     permissions:
       contents: read
-    env:
-      AWS_LC_SYS_NO_JITTER_ENTROPY: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '1' || '' }}
-      AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '1' || '' }}
-      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-      TARGET: ${{ matrix.target }}
-      VERSION: ${{ needs.prepare.outputs.version }}
-      STABLE_GIT_COMMIT: ${{ github.sha }}
-      ARCHIVE_SUFFIX: ${{ matrix.archive_suffix }}
-      LIBSQLITE3_FLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'SQLITE_DISABLE_INTRINSIC' || '' }}
-      SOURCE_MTIME_STATE: codex-rs/target/codex-plus-plus-source-mtimes-${{ matrix.target }}.json
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      runner: windows-latest
+      target: x86_64-pc-windows-msvc
+      archive_suffix: zip
+      executable: bin/codex.exe
+
+  publish-windows:
+    needs: [prepare, build-windows]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+      - uses: ./.github/actions/publish-codex-plus-plus-platform
         with:
-          python-version: "3.12"
+          version: ${{ needs.prepare.outputs.version }}
+          target: x86_64-pc-windows-msvc
+          platform: win32-x64
 
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+  build-macos:
+    needs: prepare
+    if: needs.prepare.outputs.recovery == 'false'
+    uses: ./.github/workflows/codex-plus-plus-build.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      runner: macos-15
+      target: aarch64-apple-darwin
+      archive_suffix: tar.gz
+      executable: bin/codex
+
+  publish-macos:
+    needs: [prepare, build-macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Remove runner-provided Rust toolchain
-        shell: bash
-        run: rustup toolchain uninstall stable
-
-      - name: Configure LLVM linker
-        if: runner.os == 'Windows'
-        uses: ./.github/actions/setup-msvc-env
+          persist-credentials: false
+      - uses: ./.github/actions/publish-codex-plus-plus-platform
         with:
-          target: ${{ matrix.target }}
+          version: ${{ needs.prepare.outputs.version }}
+          target: aarch64-apple-darwin
+          platform: darwin-arm64
 
-      - name: Resolve release build cache identity
-        id: release-cache
-        shell: bash
-        run: |
-          set -euo pipefail
-          tree="$(git rev-parse 'HEAD^{tree}')"
-          image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}"
-          toolchain="${{ hashFiles('codex-rs/rust-toolchain.toml') }}"
-          build_inputs="${{ hashFiles('.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/install-musl-build-tools.sh', '.github/workflows/codex-plus-plus-release.yml') }}"
-          prefix="codex-plus-plus-release-v4-${TARGET}-${image}-${toolchain}-${build_inputs}"
-          echo "key=${prefix}-${tree}" >> "$GITHUB_OUTPUT"
-          echo "prefix=${prefix}-" >> "$GITHUB_OUTPUT"
-          echo "tree=${tree}" >> "$GITHUB_OUTPUT"
+  build-linux:
+    needs: prepare
+    if: needs.prepare.outputs.recovery == 'false'
+    uses: ./.github/workflows/codex-plus-plus-build.yml
+    permissions:
+      contents: read
+    with:
+      version: ${{ needs.prepare.outputs.version }}
+      runner: ubuntu-24.04
+      target: x86_64-unknown-linux-musl
+      archive_suffix: tar.gz
+      executable: bin/codex
 
-      - name: Restore Codex++ release build cache
-        id: restore-build-cache
-        continue-on-error: true
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+  publish-linux:
+    needs: [prepare, build-linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
-          key: ${{ steps.release-cache.outputs.key }}
-          restore-keys: |
-            ${{ steps.release-cache.outputs.prefix }}
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ runner.temp }}/codex-package
-            codex-rs/target/release
-            codex-rs/target/${{ matrix.target }}/release
-            codex-rs/target/.rustc_info.json
-            ${{ env.SOURCE_MTIME_STATE }}
-
-      - name: Regenerate v8 after cache restore
-        working-directory: codex-rs
-        shell: bash
-        run: |
-          cargo clean -p v8 --target "$TARGET" --profile release
-          rm -rf "target/${TARGET}/release/gn_out"
-
-      - name: Install Zig
-        if: runner.os == 'Linux'
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+          persist-credentials: false
+      - uses: ./.github/actions/publish-codex-plus-plus-platform
         with:
-          version: 0.14.0
-          use-cache: false
-
-      - name: Install musl build tools
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            sudo sed -i '\|azure\.archive\.ubuntu\.com|d' /etc/apt/apt-mirrors.txt
-            grep -qE '^[[:space:]]*https?://' /etc/apt/apt-mirrors.txt || { echo "No apt mirror remains" >&2; exit 1; }
-          fi
-          bash .github/scripts/install-musl-build-tools.sh
-
-      - name: Configure rusty_v8 artifact overrides and verify checksums
-        uses: ./.github/actions/setup-rusty-v8
-        with:
-          target: ${{ matrix.target }}
-
-      - name: Build bundled bwrap
-        if: runner.os == 'Linux'
-        working-directory: codex-rs
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build --target "$TARGET" --profile release --bin bwrap
-          bwrap="target/${TARGET}/release/bwrap"
-          digest="$(sha256sum "$bwrap" | awk '{print $1}')"
-          echo "BWRAP=${GITHUB_WORKSPACE}/codex-rs/${bwrap}" >> "$GITHUB_ENV"
-          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
-
-      - name: Build package archive
-        shell: bash
-        run: |
-          set -euo pipefail
-          archive="dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
-          package_args=(
-            --target "$TARGET"
-            --package-dir "dist/package-${TARGET}"
-            --archive-output "$archive"
-            --force
-          )
-          if [[ -n "${BWRAP:-}" ]]; then
-            package_args+=(--bwrap-bin "$BWRAP")
-          fi
-          python scripts/build_codex_plus_plus.py \
-            --fork-version "$VERSION" \
-            --build-cache-state "$SOURCE_MTIME_STATE" \
-            -- \
-            --cargo-profile release \
-            "${package_args[@]}"
-
-      - name: Build and package Windows voice
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $work = Join-Path $env:RUNNER_TEMP 'codex-plus-plus-voice'
-          & .github/scripts/build-windows-voice.ps1 -Output $work
-          if ($LASTEXITCODE -ne 0) { throw 'Voice build failed' }
-          $commit = git rev-parse HEAD
-          python scripts/codex_package/codex_plus_plus/voice.py package `
-            --work $work --commit $commit `
-            --app "dist/package-$env:TARGET" --output "dist/voice-package-$env:TARGET" `
-            --archive "dist/codex-plus-plus-$env:VERSION-$env:TARGET.$env:ARCHIVE_SUFFIX"
-          if ($LASTEXITCODE -ne 0) { throw 'Voice package or relocated startup smoke failed' }
-
-      - name: Set up Bazel for native voice
-        if: runner.os != 'Windows'
-        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        with:
-          bazelisk-version: 1.28.1
-
-      - name: Build and package Unix voice
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          bazel build -c opt --jobs=4 \
-            //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            runtime_name=macos_aarch64
-          else
-            runtime_name=linux_x86_64
-          fi
-          voice_target="${TARGET%-musl}"
-          if [[ "$TARGET" == *-musl ]]; then voice_target="${voice_target}-gnu"; fi
-          work="${RUNNER_TEMP}/codex-plus-plus-voice"
-          mkdir -p "$work"
-          python third_party/voice/release_runtime.py stage \
-            --target "$voice_target" \
-            --source "bazel-bin/third_party/voice/native_runtime_${runtime_name}" \
-            --output "$work/runtime"
-          cp bazel-bin/codex-rs/voice-host/codex-voice-host "$work/codex-voice-host"
-          chmod 0755 "$work/codex-voice-host"
-          python third_party/voice/release_runtime.py seal \
-            --target "$voice_target" --output "$work/runtime"
-          python scripts/codex_package/codex_plus_plus/voice.py package \
-            --work "$work" --commit "$STABLE_GIT_COMMIT" \
-            --app "dist/package-${TARGET}" --output "dist/voice-package-${TARGET}" \
-            --archive "dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
-
-      - name: Smoke package
-        shell: bash
-        env:
-          EXECUTABLE: ${{ matrix.executable }}
-        run: |
-          set -euo pipefail
-          executable="dist/package-${TARGET}/${EXECUTABLE}"
-          [[ "$("$executable" --version)" == "codex-cli ${VERSION}" ]]
-
-      - name: Stage release assets
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codex-plus-plus-native-${{ matrix.target }}
-          path: dist/codex-plus-plus-${{ env.VERSION }}-${{ matrix.target }}.${{ matrix.archive_suffix }}
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+          version: ${{ needs.prepare.outputs.version }}
+          target: x86_64-unknown-linux-musl
+          platform: linux-x64
 
   stage-npm:
     needs:
       - prepare
-      - build
+      - build-windows
+      - build-macos
+      - build-linux
+      - publish-windows
+      - publish-macos
+      - publish-linux
+    if: >-
+      always() && needs.prepare.result == 'success' &&
+      needs.prepare.outputs.recovery == 'false' &&
+      needs.build-windows.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-linux.result == 'success'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -522,14 +410,22 @@ jobs:
           path: dist/archives
           merge-multiple: true
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: codex-plus-plus-npm-platform-*
+          path: dist/npm
+          merge-multiple: true
+
       - name: Stage exact npm payloads
         env:
           VERSION: ${{ needs.prepare.outputs.version }}
         run: |
+          (cd dist/npm && sha256sum --check *.sha256)
           python scripts/codex_package/codex_plus_plus/release.py hydrate \
             --version "$VERSION" --archives-dir dist/archives --vendor-dir dist/vendor
-          python scripts/stage_npm_packages.py --release-version "$VERSION" \
-            --package codex-plus-plus --vendor-src dist/vendor --output-dir dist/npm
+          python codex-cli/scripts/build_npm_package.py --release-version "$VERSION" \
+            --package codex-plus-plus --vendor-src dist/vendor \
+            --pack-output "dist/npm/codex-plus-plus-npm-${VERSION}.tgz"
           python scripts/codex_package/codex_plus_plus/release.py verify \
             --version "$VERSION" --archives-dir dist/archives --npm-dir dist/npm
           cd dist/npm
@@ -547,10 +443,17 @@ jobs:
     needs:
       - prepare
       - stage-npm
+      - publish-windows
+      - publish-macos
+      - publish-linux
     if: >-
       always() &&
       needs.prepare.result == 'success' &&
-      (needs.prepare.outputs.recovery == 'true' || needs.stage-npm.result == 'success')
+      (needs.prepare.outputs.recovery == 'true' ||
+      (needs.stage-npm.result == 'success' &&
+      needs.publish-windows.result == 'success' &&
+      needs.publish-macos.result == 'success' &&
+      needs.publish-linux.result == 'success'))
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -591,7 +494,9 @@ jobs:
   publish-github:
     needs:
       - prepare
-      - build
+      - build-windows
+      - build-macos
+      - build-linux
       - stage-npm
       - publish-npm
     if: >-
@@ -599,7 +504,9 @@ jobs:
       needs.prepare.result == 'success' &&
       needs.publish-npm.result == 'success' &&
       (needs.prepare.outputs.recovery == 'true' ||
-      (needs.build.result == 'success' && needs.stage-npm.result == 'success'))
+      (needs.build-windows.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-linux.result == 'success' && needs.stage-npm.result == 'success'))
     runs-on: ubuntu-24.04
     permissions:
       actions: write

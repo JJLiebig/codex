@@ -33,6 +33,14 @@ PLATFORMS = (
 )
 
 
+def selected_platforms(platform: str | None) -> tuple[Platform, ...]:
+    return (
+        PLATFORMS
+        if platform is None
+        else (next(p for p in PLATFORMS if p.tag == platform),)
+    )
+
+
 def archive_path(directory: Path, version: str, platform: Platform) -> Path:
     return directory / (
         f"codex-plus-plus-{version}-{platform.target}.{platform.archive_suffix}"
@@ -44,9 +52,11 @@ def npm_tarball_path(directory: Path, version: str, tag: str | None) -> Path:
     return directory / f"codex-plus-plus-npm{suffix}-{version}.tgz"
 
 
-def hydrate(version: str, archives_dir: Path, vendor_dir: Path) -> None:
+def hydrate(
+    version: str, archives_dir: Path, vendor_dir: Path, *, platform: str | None = None
+) -> None:
     vendor_dir.mkdir(parents=True, exist_ok=True)
-    for platform in PLATFORMS:
+    for platform in selected_platforms(platform):
         destination = vendor_dir / platform.target
         if destination.exists():
             raise RuntimeError(f"Vendor target already exists: {destination}")
@@ -59,8 +69,10 @@ def hydrate(version: str, archives_dir: Path, vendor_dir: Path) -> None:
                 raise RuntimeError(f"Archive {source.name} is missing {relative}")
 
 
-def verify(version: str, archives_dir: Path, npm_dir: Path) -> None:
-    for platform in PLATFORMS:
+def verify(
+    version: str, archives_dir: Path, npm_dir: Path, *, platform: str | None = None
+) -> None:
+    for platform in selected_platforms(platform):
         archive = archive_path(archives_dir, version, platform)
         tarball = npm_tarball_path(npm_dir, version, platform.tag)
         archive_files = read_release_files(archive)
@@ -119,21 +131,26 @@ def read_manifest(path: Path) -> dict:
         return json.load(manifest_file)
 
 
-def release_entries(version: str, npm_dir: Path) -> list[tuple[Path, str, str]]:
+def release_entries(
+    version: str, npm_dir: Path, *, platform: str | None = None
+) -> list[tuple[Path, str, str]]:
     entries = [
         (
             npm_tarball_path(npm_dir, version, platform.tag),
             f"{version}-{platform.tag}",
             platform.tag,
         )
-        for platform in PLATFORMS
+        for platform in selected_platforms(platform)
     ]
-    entries.append((npm_tarball_path(npm_dir, version, None), version, "latest"))
+    if platform is None:
+        entries.append((npm_tarball_path(npm_dir, version, None), version, "latest"))
     return entries
 
 
-def validate_tarballs(version: str, npm_dir: Path) -> list[tuple[Path, str, str]]:
-    entries = release_entries(version, npm_dir)
+def validate_tarballs(
+    version: str, npm_dir: Path, *, platform: str | None = None
+) -> list[tuple[Path, str, str]]:
+    entries = release_entries(version, npm_dir, platform=platform)
     for path, expected_version, _tag in entries:
         if not path.is_file():
             raise RuntimeError(f"Missing npm tarball: {path}")
@@ -182,8 +199,10 @@ def npm_view(spec: str, field: str) -> str | None:
     raise RuntimeError(result.stderr.strip() or f"npm view failed for {spec}")
 
 
-def publish(version: str, npm_dir: Path, *, dry_run: bool = False) -> None:
-    entries = validate_tarballs(version, npm_dir)
+def publish(
+    version: str, npm_dir: Path, *, dry_run: bool = False, platform: str | None = None
+) -> None:
+    entries = validate_tarballs(version, npm_dir, platform=platform)
     bootstrap_specs = (PACKAGE_NAME, f"{PACKAGE_NAME}@{entries[0][1]}")
     if all(npm_view(spec, "name") is None for spec in bootstrap_specs):
         raise RuntimeError(
@@ -217,6 +236,10 @@ def publish(version: str, npm_dir: Path, *, dry_run: bool = False) -> None:
             if dry_run:
                 print(f"Would publish {spec} with tag {tag}", flush=True)
                 continue
+            print(
+                f"Submitting {spec} ({path.stat().st_size / 1_000_000:.1f} MB)",
+                flush=True,
+            )
             subprocess.run(
                 [
                     "npm",
@@ -231,11 +254,13 @@ def publish(version: str, npm_dir: Path, *, dry_run: bool = False) -> None:
                 check=True,
             )
             awaiting[spec] = expected
+        confirmation_started = time.monotonic()
         confirmation_intervals = 20 * 60 // 5
         for attempt in range(confirmation_intervals + 1):
             for spec, expected in list(awaiting.items()):
                 current = npm_view(spec, "dist.integrity")
                 if current == expected:
+                    print(f"Confirmed {spec}; registry integrity matches", flush=True)
                     del awaiting[spec]
                 elif current is not None:
                     raise RuntimeError(
@@ -243,6 +268,11 @@ def publish(version: str, npm_dir: Path, *, dry_run: bool = False) -> None:
                     )
             if not awaiting:
                 break
+            if attempt % 12 == 0:
+                print(
+                    f"Awaiting npm processing ({time.monotonic() - confirmation_started:.0f}s): {', '.join(awaiting)}",
+                    flush=True,
+                )
             if attempt < confirmation_intervals:
                 time.sleep(5)
         else:
@@ -257,6 +287,7 @@ def parse_args() -> argparse.Namespace:
     for command in ("hydrate", "verify"):
         subparser = subparsers.add_parser(command)
         subparser.add_argument("--version", required=True)
+        subparser.add_argument("--platform", choices=[p.tag for p in PLATFORMS])
         subparser.add_argument("--archives-dir", type=Path, required=True)
         subparser.add_argument(
             "--vendor-dir" if command == "hydrate" else "--npm-dir",
@@ -265,6 +296,7 @@ def parse_args() -> argparse.Namespace:
         )
     publish_parser = subparsers.add_parser("publish")
     publish_parser.add_argument("--version", required=True)
+    publish_parser.add_argument("--platform", choices=[p.tag for p in PLATFORMS])
     publish_parser.add_argument("--npm-dir", type=Path, required=True)
     publish_parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -273,11 +305,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     if args.command == "hydrate":
-        hydrate(args.version, args.archives_dir, args.vendor_dir)
+        hydrate(
+            args.version, args.archives_dir, args.vendor_dir, platform=args.platform
+        )
     elif args.command == "verify":
-        verify(args.version, args.archives_dir, args.npm_dir)
+        verify(args.version, args.archives_dir, args.npm_dir, platform=args.platform)
     else:
-        publish(args.version, args.npm_dir, dry_run=args.dry_run)
+        publish(
+            args.version, args.npm_dir, dry_run=args.dry_run, platform=args.platform
+        )
     return 0
 
 

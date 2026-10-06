@@ -114,6 +114,57 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
 
             release.verify(VERSION, archives, npm)
 
+    def test_single_platform_hydrates_verifies_and_publishes_without_other_targets(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            archives, npm, vendor = root / "archives", root / "npm", root / "vendor"
+            archives.mkdir()
+            npm.mkdir()
+            platform = release.PLATFORMS[0]
+            payload = {
+                "codex-package.json": b'{"layoutVersion":1}',
+                "bin/codex": b"native",
+            }
+            write_tarball(release.archive_path(archives, VERSION, platform), payload)
+            release.hydrate(VERSION, archives, vendor, platform=platform.tag)
+            self.assertEqual(
+                (vendor / platform.target / "bin/codex").read_bytes(), b"native"
+            )
+            tarball = release.npm_tarball_path(npm, VERSION, platform.tag)
+            write_tarball(
+                tarball,
+                {
+                    "package/package.json": manifest(f"{VERSION}-{platform.tag}"),
+                    **{
+                        f"package/vendor/{platform.target}/{name}": content
+                        for name, content in payload.items()
+                    },
+                },
+            )
+            release.verify(VERSION, archives, npm, platform=platform.tag)
+            integrity = release.tarball_integrity(tarball)
+            published = []
+
+            def npm_view(spec: str, field: str) -> str | None:
+                if field == "name":
+                    return release.PACKAGE_NAME
+                self.assertEqual(
+                    spec, f"{release.PACKAGE_NAME}@{VERSION}-{platform.tag}"
+                )
+                return integrity if published else None
+
+            def npm_publish(command: list[str], *, check: bool) -> None:
+                published.append((command[2], command[command.index("--tag") + 1]))
+
+            with (
+                patch.object(release, "npm_view", side_effect=npm_view),
+                patch.object(release.subprocess, "run", side_effect=npm_publish),
+            ):
+                release.publish(VERSION, npm, platform=platform.tag)
+            self.assertEqual(published, [(str(tarball), platform.tag)])
+
     def test_publish_skips_exact_registry_versions(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             npm_dir = Path(temp)
