@@ -233,9 +233,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/codex-plus-plus-voice"
-          tar -xf "${RUNNER_TEMP}/voice-native-cache/native-voice-cache.tar" \
-            -C "${RUNNER_TEMP}/codex-plus-plus-voice"
+          temporary="$(cygpath -u "$RUNNER_TEMP")"
+          mkdir -p "${temporary}/codex-plus-plus-voice"
+          tar -xf "${temporary}/voice-native-cache/native-voice-cache.tar" \
+            -C "${temporary}/codex-plus-plus-voice"
 
       - name: Build Windows voice
         if: runner.os == 'Windows'
@@ -253,7 +254,7 @@ jobs:
           set -euo pipefail
           mkdir -p dist
           tar -cf dist/native-voice-cache.tar \
-            -C "${RUNNER_TEMP}/codex-plus-plus-voice" native/prefix native/built.json
+            -C "$(cygpath -u "$RUNNER_TEMP")/codex-plus-plus-voice" native/prefix native/built.json
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: runner.os == 'Windows' && steps.download-native.outcome != 'success'
@@ -301,10 +302,14 @@ jobs:
         run: |
           set -euo pipefail
           helper=codex-voice-host
-          if [[ "$RUNNER_OS" == "Windows" ]]; then helper+=.exe; fi
+          work="${RUNNER_TEMP}/codex-plus-plus-voice"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            helper+=.exe
+            work="$(cygpath -u "$RUNNER_TEMP")/codex-plus-plus-voice"
+          fi
           mkdir -p dist
           tar -cf "dist/voice-${TARGET}.tar" \
-            -C "${RUNNER_TEMP}/codex-plus-plus-voice" "$helper" runtime
+            -C "$work" "$helper" runtime
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -348,6 +353,9 @@ jobs:
         run: |
           set -euo pipefail
           work="${RUNNER_TEMP}/codex-plus-plus-voice"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            work="$(cygpath -u "$RUNNER_TEMP")/codex-plus-plus-voice"
+          fi
           mkdir -p "dist/package-${TARGET}" "$work"
           tar -xf "dist/app-${TARGET}.tar" -C "dist/package-${TARGET}"
           tar -xf "dist/voice-${TARGET}.tar" -C "$work"

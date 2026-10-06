@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import textwrap
 import unittest
 from unittest.mock import patch
 import zipfile
@@ -20,6 +21,52 @@ from runtime import PLUGINS, digest, required_library_paths
 
 
 class VoicePackageTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows Git Bash artifact transport")
+    def test_packaging_extracts_voice_into_the_native_windows_temporary_root(self):
+        bash = Path(os.environ["ProgramFiles"]) / "Git/bin/bash.exe"
+        workflow = (
+            voice.REPO / ".github/workflows/codex-plus-plus-build.yml"
+        ).read_text()
+        assembly = workflow.split("- name: Assemble and verify package", 1)[1]
+        assembly = assembly.split("run: |", 1)[1].split(
+            "python scripts/codex_package/codex_plus_plus/voice.py", 1
+        )[0]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            target = "x86_64-pc-windows-msvc"
+            (root / "dist").mkdir()
+            for name, member in (("app", "bin/codex.exe"), ("voice", "runtime/probe")):
+                source = root / name / member
+                source.parent.mkdir(parents=True)
+                source.write_bytes(b"fixture")
+                with tarfile.open(root / f"dist/{name}-{target}.tar", "w") as archive:
+                    archive.add(root / name, arcname=".")
+            runner_temp = root / "runner temporary path"
+            subprocess.run(
+                [
+                    str(bash),
+                    "--noprofile",
+                    "--norc",
+                    "-c",
+                    'export PATH="/usr/bin:/bin:$PATH"\n'
+                    + textwrap.dedent(assembly).strip(),
+                ],
+                cwd=root,
+                env={
+                    **os.environ,
+                    "RUNNER_OS": "Windows",
+                    "RUNNER_TEMP": str(runner_temp),
+                    "TARGET": target,
+                },
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            self.assertEqual(
+                (runner_temp / "codex-plus-plus-voice/runtime/probe").read_bytes(),
+                b"fixture",
+            )
+
     @unittest.skipUnless(os.name == "nt", "Windows build prerequisite")
     def test_redist_selection_uses_the_selected_toolchain(self):
         script = (voice.REPO / ".github/scripts/build-windows-voice.ps1").read_text()
