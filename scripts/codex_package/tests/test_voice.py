@@ -156,6 +156,27 @@ class VoicePackageTests(unittest.TestCase):
             (runtime / "bin/unlisted.dll").write_bytes(
                 b"not part of the verified runtime"
             )
+            # Release jobs transfer app and voice independently via uncompressed tar.
+            # Exercise the real transport before the existing payload/mode checks.
+            for source, name, members in (
+                (app, "app", ["."]),
+                (work, "voice", [helper_name, "runtime"]),
+            ):
+                transport = root / f"{name}.tar"
+                destination = root / "downloaded" / name
+                destination.mkdir(parents=True)
+                subprocess.run(
+                    ["tar", "-cf", str(transport), "-C", str(source), *members],
+                    check=True,
+                    capture_output=True,
+                )
+                subprocess.run(
+                    ["tar", "-xf", str(transport), "-C", str(destination)],
+                    check=True,
+                    capture_output=True,
+                )
+            app, work = root / "downloaded/app", root / "downloaded/voice"
+            runtime = work / "runtime"
             archive = root / ("release.zip" if suffix else "release.tar.gz")
             # Native startup is proved by the mandatory moved-package smoke in release jobs.
             with patch.object(voice, "smoke"):
