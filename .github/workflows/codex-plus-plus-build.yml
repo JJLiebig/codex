@@ -17,7 +17,7 @@ env:
   APT_INSTALL_ARGS: --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
 
 jobs:
-  build:
+  app:
     runs-on: ${{ inputs.runner }}
     permissions:
       contents: read
@@ -126,15 +126,13 @@ jobs:
           echo "BWRAP=${GITHUB_WORKSPACE}/codex-rs/${bwrap}" >> "$GITHUB_ENV"
           echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
 
-      - name: Build package archive
+      - name: Build package directory
         shell: bash
         run: |
           set -euo pipefail
-          archive="dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
           package_args=(
             --target "$TARGET"
             --package-dir "dist/package-${TARGET}"
-            --archive-output "$archive"
             --force
           )
           if [[ -n "${BWRAP:-}" ]]; then
@@ -147,19 +145,58 @@ jobs:
             --cargo-profile release \
             "${package_args[@]}"
 
-      - name: Build and package Windows voice
+      - name: Preserve package file modes for artifact transfer
+        shell: bash
+        run: tar -cf "dist/app-${TARGET}.tar" -C "dist/package-${TARGET}" .
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-plus-plus-app-${{ inputs.target }}
+          path: dist/app-${{ inputs.target }}.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  voice:
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ inputs.target }}
+      STABLE_GIT_COMMIT: ${{ github.sha }}
+      CARGO_BUILD_JOBS: "4"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
+        if: runner.os == 'Windows'
+        with:
+          targets: ${{ inputs.target }}
+
+      - name: Remove runner-provided Rust toolchain
+        if: runner.os == 'Windows'
+        shell: bash
+        run: rustup toolchain uninstall stable
+
+      - name: Configure LLVM linker
+        if: runner.os == 'Windows'
+        uses: ./.github/actions/setup-msvc-env
+        with:
+          target: ${{ inputs.target }}
+
+      - name: Build Windows voice
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $work = Join-Path $env:RUNNER_TEMP 'codex-plus-plus-voice'
           & .github/scripts/build-windows-voice.ps1 -Output $work
           if ($LASTEXITCODE -ne 0) { throw 'Voice build failed' }
-          $commit = git rev-parse HEAD
-          python scripts/codex_package/codex_plus_plus/voice.py package `
-            --work $work --commit $commit `
-            --app "dist/package-$env:TARGET" --output "dist/voice-package-$env:TARGET" `
-            --archive "dist/codex-plus-plus-$env:VERSION-$env:TARGET.$env:ARCHIVE_SUFFIX"
-          if ($LASTEXITCODE -ne 0) { throw 'Voice package or relocated startup smoke failed' }
 
       - name: Set up Bazel for native voice
         if: runner.os != 'Windows'
@@ -167,7 +204,7 @@ jobs:
         with:
           bazelisk-version: 1.28.1
 
-      - name: Build and package Unix voice
+      - name: Build Unix voice
         if: runner.os != 'Windows'
         shell: bash
         run: |
@@ -191,6 +228,62 @@ jobs:
           chmod 0755 "$work/codex-voice-host"
           python third_party/voice/release_runtime.py seal \
             --target "$voice_target" --output "$work/runtime"
+
+      - name: Preserve voice file modes for artifact transfer
+        shell: bash
+        run: |
+          set -euo pipefail
+          helper=codex-voice-host
+          if [[ "$RUNNER_OS" == "Windows" ]]; then helper+=.exe; fi
+          mkdir -p dist
+          tar -cf "dist/voice-${TARGET}.tar" \
+            -C "${RUNNER_TEMP}/codex-plus-plus-voice" "$helper" runtime
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-plus-plus-voice-${{ inputs.target }}
+          path: dist/voice-${{ inputs.target }}.tar
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  build:
+    needs: [app, voice]
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: read
+    env:
+      TARGET: ${{ inputs.target }}
+      VERSION: ${{ inputs.version }}
+      ARCHIVE_SUFFIX: ${{ inputs.archive_suffix }}
+      STABLE_GIT_COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codex-plus-plus-app-${{ inputs.target }}
+          path: dist
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: codex-plus-plus-voice-${{ inputs.target }}
+          path: dist
+
+      - name: Assemble and verify package
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="${RUNNER_TEMP}/codex-plus-plus-voice"
+          mkdir -p "dist/package-${TARGET}" "$work"
+          tar -xf "dist/app-${TARGET}.tar" -C "dist/package-${TARGET}"
+          tar -xf "dist/voice-${TARGET}.tar" -C "$work"
           python scripts/codex_package/codex_plus_plus/voice.py package \
             --work "$work" --commit "$STABLE_GIT_COMMIT" \
             --app "dist/package-${TARGET}" --output "dist/voice-package-${TARGET}" \
@@ -202,7 +295,7 @@ jobs:
           EXECUTABLE: ${{ inputs.executable }}
         run: |
           set -euo pipefail
-          executable="dist/package-${TARGET}/${EXECUTABLE}"
+          executable="dist/voice-package-${TARGET}/${EXECUTABLE}"
           [[ "$("$executable" --version)" == "codex-cli ${VERSION}" ]]
 
       - name: Stage release assets
@@ -213,4 +306,3 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
-
