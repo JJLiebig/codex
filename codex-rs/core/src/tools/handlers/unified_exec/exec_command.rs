@@ -315,7 +315,7 @@ impl ExecCommandHandler {
         .map_err(FunctionCallError::RespondToModel)?;
         let resolved_shell = resolved_exec_command_shell(environment.as_ref(), || {
             Some((
-                resolved_command.shell_type,
+                resolved_command.shell.shell.shell_type,
                 resolved_command.command.first()?.clone(),
             ))
         });
@@ -331,7 +331,6 @@ impl ExecCommandHandler {
             ));
         }
         let command = resolved_command.command;
-        let shell_type = resolved_command.shell_type;
         let ExecCommandArgs {
             mut tty,
             yield_time_ms,
@@ -371,13 +370,12 @@ impl ExecCommandHandler {
             turn_environment.sandbox_context(/*additional_permissions*/ None);
         let permission_context = file_system_sandbox_policy_context_for_cwd(&sandbox_context, &cwd);
         let effective_additional_permissions = apply_granted_turn_permissions(
-            context.session.as_ref(),
+            &context.step_context,
             turn_environment,
             &cwd,
             sandbox_permissions,
             additional_permissions,
-        )
-        .await;
+        );
         let additional_permissions_allowed = exec_permission_approvals_enabled
             || (session.features().enabled(Feature::RequestPermissionsTool)
                 && effective_additional_permissions.permissions_preapproved);
@@ -463,7 +461,7 @@ impl ExecCommandHandler {
         let process_id = manager.allocate_process_id().await;
         let request = ExecCommandRequest {
             command,
-            shell_type,
+            shell: resolved_command.shell,
             hook_command: hook_command.clone(),
             process_id,
             yield_time_ms,

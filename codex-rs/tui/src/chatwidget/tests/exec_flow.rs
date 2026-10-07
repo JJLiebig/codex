@@ -1507,6 +1507,7 @@ async fn bang_shell_enter_while_task_running_submits_run_user_shell_command() {
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
         forked_from_id: None,
@@ -1524,7 +1525,6 @@ async fn bang_shell_enter_while_task_running_submits_run_user_shell_command() {
         instruction_source_paths: Vec::new(),
         reasoning_effort: Some(ReasoningEffortConfig::default()),
         collaboration_mode: None,
-        personality: None,
         message_history: None,
         network_proxy: None,
         rollout_path: Some(rollout_file.path().to_path_buf()),

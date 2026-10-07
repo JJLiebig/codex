@@ -1,6 +1,6 @@
 ---
 source: tui/src/startup_draft_tests.rs
-assertion_line: 859
+assertion_line: 861
 expression: frames
 ---
 before account picker: hidden (0x0 viewport)
@@ -9,8 +9,6 @@ after account picker:
 
   >_ OpenAI Codex (v<VERSION>)
      loading
-
-  Pull up a prompt.
 
 
 › Ask Codex to do anything

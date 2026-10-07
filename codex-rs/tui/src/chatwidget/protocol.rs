@@ -55,6 +55,20 @@ impl ChatWidget {
                     self.on_background_completion_status(&notification.status);
                 }
             }
+            ServerNotification::McpServerOauthLoginCompleted(notification) => {
+                if notification.success {
+                    self.add_info_message(
+                        format!("Signed in to {}.", notification.name),
+                        /*hint*/ None,
+                    );
+                } else {
+                    self.add_error_message(
+                        notification
+                            .error
+                            .unwrap_or_else(|| "MCP sign-in failed.".to_string()),
+                    );
+                }
+            }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
@@ -362,6 +376,7 @@ impl ChatWidget {
             | ServerNotification::ThreadStarted(_)
             | ServerNotification::ThreadReverted(_)
             | ServerNotification::ThreadQueueChanged(_)
+            | ServerNotification::ThreadPredictionUpdated(_)
             | ServerNotification::ThreadArchived(_)
             | ServerNotification::ThreadDeleted(_)
             | ServerNotification::ThreadUnarchived(_)
@@ -374,7 +389,6 @@ impl ChatWidget {
             | ServerNotification::McpServerEventStream(_)
             | ServerNotification::FileChangePatchUpdated(_)
             | ServerNotification::McpToolCallProgress(_)
-            | ServerNotification::McpServerOauthLoginCompleted(_)
             | ServerNotification::AppListUpdated(_)
             | ServerNotification::EnvironmentConnected(_)
             | ServerNotification::EnvironmentDisconnected(_)
