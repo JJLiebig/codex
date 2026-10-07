@@ -54,6 +54,12 @@ add local requirements but must not weaken these rules.
   Review only when the tool can target the fork-authored commits or exact conflict/seam diff;
   otherwise use the bounded conflict audit and focused validation.
 
+## Tag releases immediately
+
+- After authorized release changes are merged, create and push the release tag immediately.
+- NEVER wait for main-branch cache warming before tagging. Main cache warming is not a release
+  gate; the tag-triggered workflow validates, builds, and publishes the release.
+
 ## Maintain the fork ledger
 
 - Keep `CODEX_PLUS_PLUS_LEDGER.md` as the authoritative map of maintained fork capabilities.

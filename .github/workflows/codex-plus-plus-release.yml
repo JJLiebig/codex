@@ -12,29 +12,14 @@ on:
         required: true
         type: string
   push:
-    branches:
-      - main
     tags:
       - "codex-plus-plus-v*"
-    paths:
-      - ".github/actions/setup-msvc-env/**"
-      - ".github/actions/setup-rusty-v8/**"
-      - ".github/scripts/install-musl-build-tools.sh"
-      - ".github/workflows/codex-plus-plus-release.yml"
-      - ".github/workflows/codex-plus-plus-build.yml"
-      - ".github/actions/publish-codex-plus-plus-platform/**"
-      - "codex-rs/**"
-      - "scripts/build_codex_plus_plus.py"
-      - "scripts/build_codex_package.py"
-      - "scripts/codex_package/**"
-      - ".github/scripts/build-windows-voice.ps1"
-      - "third_party/voice/**"
 
 permissions: {}
 
 concurrency:
   group: codex-plus-plus-release-${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
-  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+  cancel-in-progress: false
 
 env:
   CODEX_REPO_ROOT: ${{ github.workspace }}
@@ -43,7 +28,6 @@ env:
 
 jobs:
   prepare:
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/codex-plus-plus-v')
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -128,156 +112,6 @@ jobs:
             scripts/build_codex_plus_plus.py \
             scripts/codex_package/codex_plus_plus/source_mtime_cache.py \
             scripts/codex_package/codex_plus_plus/release.py
-
-  warm-build-cache:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: windows-latest
-            target: x86_64-pc-windows-msvc
-          - runner: macos-15
-            target: aarch64-apple-darwin
-          - runner: ubuntu-24.04
-            target: x86_64-unknown-linux-musl
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-    env:
-      AWS_LC_SYS_NO_JITTER_ENTROPY: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '1' || '' }}
-      AWS_LC_SYS_NO_JITTER_ENTROPY_x86_64_unknown_linux_musl: ${{ matrix.target == 'x86_64-unknown-linux-musl' && '1' || '' }}
-      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-      LIBSQLITE3_FLAGS: ${{ matrix.target == 'x86_64-pc-windows-msvc' && 'SQLITE_DISABLE_INTRINSIC' || '' }}
-      SOURCE_MTIME_STATE: codex-rs/target/codex-plus-plus-source-mtimes-${{ matrix.target }}.json
-      TARGET: ${{ matrix.target }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
-
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Remove runner-provided Rust toolchain
-        shell: bash
-        run: rustup toolchain uninstall stable
-
-      - name: Configure LLVM linker
-        if: runner.os == 'Windows'
-        uses: ./.github/actions/setup-msvc-env
-        with:
-          target: ${{ matrix.target }}
-
-      - name: Resolve release build cache identity
-        id: release-cache
-        shell: bash
-        run: |
-          set -euo pipefail
-          tree="$(git rev-parse 'HEAD^{tree}')"
-          image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}"
-          toolchain="${{ hashFiles('codex-rs/rust-toolchain.toml') }}"
-          build_inputs="${{ hashFiles('.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/install-musl-build-tools.sh', '.github/workflows/codex-plus-plus-release.yml', '.github/workflows/codex-plus-plus-build.yml') }}"
-          prefix="codex-plus-plus-release-v4-${TARGET}-${image}-${toolchain}-${build_inputs}"
-          echo "key=${prefix}-${tree}" >> "$GITHUB_OUTPUT"
-          echo "prefix=${prefix}-" >> "$GITHUB_OUTPUT"
-          echo "tree=${tree}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Codex++ release build cache
-        id: restore-build-cache
-        continue-on-error: true
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: ${{ steps.release-cache.outputs.key }}
-          restore-keys: |
-            ${{ steps.release-cache.outputs.prefix }}
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ runner.temp }}/codex-package
-            codex-rs/target/release
-            codex-rs/target/${{ matrix.target }}/release
-            codex-rs/target/.rustc_info.json
-            ${{ env.SOURCE_MTIME_STATE }}
-
-      - name: Regenerate v8 after cache restore
-        working-directory: codex-rs
-        shell: bash
-        run: |
-          cargo clean -p v8 --target "$TARGET" --profile release
-          rm -rf "target/${TARGET}/release/gn_out"
-
-      - name: Install Zig
-        if: runner.os == 'Linux'
-        uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
-        with:
-          version: 0.14.0
-          use-cache: false
-
-      - name: Install musl build tools
-        if: runner.os == 'Linux'
-        shell: bash
-        run: |
-          if [[ -f /etc/apt/apt-mirrors.txt ]]; then
-            sudo sed -i '\|azure\.archive\.ubuntu\.com|d' /etc/apt/apt-mirrors.txt
-            grep -qE '^[[:space:]]*https?://' /etc/apt/apt-mirrors.txt || { echo "No apt mirror remains" >&2; exit 1; }
-          fi
-          bash .github/scripts/install-musl-build-tools.sh
-
-      - name: Configure rusty_v8 artifact overrides and verify checksums
-        uses: ./.github/actions/setup-rusty-v8
-        with:
-          target: ${{ matrix.target }}
-
-      - name: Build bundled bwrap
-        if: runner.os == 'Linux'
-        working-directory: codex-rs
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build --target "$TARGET" --profile release --bin bwrap
-          bwrap="target/${TARGET}/release/bwrap"
-          digest="$(sha256sum "$bwrap" | awk '{print $1}')"
-          echo "BWRAP=${GITHUB_WORKSPACE}/codex-rs/${bwrap}" >> "$GITHUB_ENV"
-          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
-
-      - name: Warm full-release build
-        shell: bash
-        run: |
-          package_args=(
-            --cargo-profile release
-            --target "$TARGET"
-            --package-dir "dist/cache-package-${TARGET}"
-            --force
-          )
-          if [[ -n "${BWRAP:-}" ]]; then
-            package_args+=(--bwrap-bin "$BWRAP")
-          fi
-          python scripts/build_codex_plus_plus.py \
-            --suffix cache \
-            --build-cache-state "$SOURCE_MTIME_STATE" \
-            -- \
-            "${package_args[@]}"
-
-      - name: Save Codex++ release build cache
-        if: steps.restore-build-cache.outputs.cache-hit != 'true'
-        continue-on-error: true
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: ${{ steps.release-cache.outputs.key }}
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ runner.temp }}/codex-package
-            codex-rs/target/release
-            codex-rs/target/${{ matrix.target }}/release
-            codex-rs/target/.rustc_info.json
-            ${{ env.SOURCE_MTIME_STATE }}
 
   build-windows:
     needs: prepare
