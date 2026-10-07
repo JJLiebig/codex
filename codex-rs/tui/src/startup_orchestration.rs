@@ -527,7 +527,10 @@ pub(super) async fn run_main_inner(
                 strict_config,
             ))
             .await?;
-        startup_draft.apply_config(&config);
+        startup_draft.apply_settings(
+            &crate::local_settings::LocalSettings::from(&config),
+            config.cwd.as_path(),
+        );
     } else if !workload_identity_selected {
         cloud_config_bundle = startup_draft
             .run_until(cloud_config_bundle_loader_for_storage(

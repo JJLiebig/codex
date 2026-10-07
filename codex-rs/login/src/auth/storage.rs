@@ -1,5 +1,7 @@
 use chrono::DateTime;
 use chrono::Utc;
+#[cfg(test)]
+use codex_otel::auth_storage::Operation;
 use serde::Deserialize;
 use serde::Serialize;
 use sha2::Digest;

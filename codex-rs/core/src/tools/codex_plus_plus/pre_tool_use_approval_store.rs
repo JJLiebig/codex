@@ -77,7 +77,7 @@ pub(crate) fn reviewed_exec_command_shell(
     resolved_exec_command_shell(environment, || {
         let resolved_command = get_command(args, shell, shell_mode, allow_login_shell).ok()?;
         Some((
-            resolved_command.shell_type,
+            resolved_command.shell.shell.shell_type,
             resolved_command.command.first()?.clone(),
         ))
     })

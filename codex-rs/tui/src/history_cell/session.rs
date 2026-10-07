@@ -344,46 +344,6 @@ impl SessionHeaderHistoryCell {
 }
 
 impl HistoryCell for SessionHeaderHistoryCell {
-    fn compact_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        if self.greeting.get().is_none() {
-            return self.display_hyperlink_lines(width);
-        }
-        let width = usize::from(width);
-        let mut lines = vec![
-            Line::default(),
-            Line::from(vec![
-                "  ".into(),
-                ">_ ".fg(accent_color()),
-                "OpenAI Codex".bold(),
-                format!(" (v{})", self.version).dim(),
-            ]),
-            Line::from(vec![
-                "     ".into(),
-                self.format_directory(Some(width.saturating_sub(/*rhs*/ 5)))
-                    .dim(),
-            ]),
-        ];
-        if self.yolo_mode {
-            lines.push(Line::from(vec![
-                "  permissions: ".dim(),
-                "YOLO mode".magenta().bold(),
-            ]));
-        }
-        if let Some(greeting) = self.greeting.get() {
-            // The tip/help that follows has its own normal composite separator.
-            lines.extend([
-                Line::default(),
-                Line::from(vec!["  ".into(), greeting.phrase.fg(accent_color())]),
-            ]);
-        }
-        plain_hyperlink_lines(
-            lines
-                .into_iter()
-                .map(|line| truncate_line_with_ellipsis_if_overflow(line, width))
-                .collect(),
-        )
-    }
-
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let width = usize::from(width);
         let mut title = vec!["  ".into()];

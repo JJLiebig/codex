@@ -617,6 +617,7 @@ fn direct_keyring_auth_storage_delete_propagates_marker_clear_failure() -> anyho
     let storage = DirectKeyringAuthStorage::new(
         codex_home.path().to_path_buf(),
         Arc::new(MockKeyringStore::default()),
+        AuthCredentialsStoreMode::Keyring,
     );
     let auth_file = get_auth_file(codex_home.path());
     std::fs::write(&auth_file, "fallback")?;
@@ -896,4 +897,3 @@ mod policy;
 
 #[path = "storage_error_tests.rs"]
 mod errors;
-

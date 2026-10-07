@@ -315,7 +315,7 @@ impl ExecCommandHandler {
         .map_err(FunctionCallError::RespondToModel)?;
         let resolved_shell = resolved_exec_command_shell(environment.as_ref(), || {
             Some((
-                resolved_command.shell_type,
+                resolved_command.shell.shell.shell_type,
                 resolved_command.command.first()?.clone(),
             ))
         });
