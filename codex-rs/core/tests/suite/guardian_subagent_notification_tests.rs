@@ -166,6 +166,8 @@ async fn guardian_circuit_breaker_notifies_parent(action: CircuitBreakAction) ->
         (
             TurnAbortReason::Interrupted,
             (action == CircuitBreakAction::Strict).then_some(ErrorEvent {
+                inference_attribution: None,
+                usage_limit_observed_at_ns: None,
                 message: warning.clone(),
                 codex_error_info: Some(CodexErrorInfo::TooManyDenials),
                 misalignment: None,
