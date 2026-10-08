@@ -14,6 +14,9 @@ use super::THREAD_HISTORY_MIGRATOR;
 use super::repair_legacy_recency_migration_version;
 use super::runtime_migrator_for_pool;
 
+#[path = "codex_plus_plus/thread_history_migration_tests.rs"]
+mod fork_thread_history;
+
 #[tokio::test]
 async fn new_migrations_use_the_released_platform_checksum() {
     let pool = SqlitePoolOptions::new()

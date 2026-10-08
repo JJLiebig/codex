@@ -231,7 +231,7 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
                 );
             }
         }
-        if previous == current {
+        if previous == current && hash == Some(current) {
             crate::session::tests::update_turn_settings_for_test(
                 Arc::get_mut(&mut turn).unwrap(),
                 |settings| {
@@ -301,8 +301,16 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
             Some(current)
         );
         let followup = requests[1].to_string();
-        assert_eq!(followup.matches(SUMMARY).count(), 1);
-        assert_eq!(followup.matches(PENDING).count(), 1);
+        assert_eq!(
+            followup.matches(SUMMARY).count(),
+            1,
+            "{previous} -> {current}; hash={hash:?}; handoff={handoff}"
+        );
+        assert_eq!(
+            followup.matches(PENDING).count(),
+            1,
+            "{previous} -> {current}; hash={hash:?}; handoff={handoff}"
+        );
         if handoff {
             assert!(!followup.contains(OPAQUE));
             assert!(!followup.contains(CLAUDE_OPAQUE));

@@ -704,8 +704,7 @@ async fn background_completion_progress_instructions(setting: Option<bool>) -> R
     )
     .await;
     harness.submit("Say done.").await?;
-    let request = mock.single_request().body_json();
-    let instructions = request["instructions"].as_str().expect("instructions");
+    let instructions = mock.single_request().instructions_text();
     if setting == Some(false) {
         assert_eq!(instructions, original);
     } else {

@@ -333,7 +333,7 @@ INSERT INTO thread_turns (
     started_at,
     completed_at,
     duration_ms
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(thread_id, turn_id) DO UPDATE SET
     root_turn_id = COALESCE(thread_turns.root_turn_id, excluded.root_turn_id),
     rollout_end_ordinal = excluded.rollout_end_ordinal,

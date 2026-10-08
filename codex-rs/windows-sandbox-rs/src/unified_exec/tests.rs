@@ -61,8 +61,6 @@ const DIRECT_OUTPUT_BURST_BYTES: usize =
 
 const ASSERT_NO_CONSOLE: &str = r#"Add-Type -ErrorAction Stop 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'; if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { throw 'piped sandbox process unexpectedly has a console' };"#;
 
-const ASSERT_NO_CONSOLE: &str = r#"Add-Type -ErrorAction Stop 'using System; using System.Runtime.InteropServices; public class ConsoleProbe { [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow(); }'; if ([ConsoleProbe]::GetConsoleWindow() -ne [IntPtr]::Zero) { throw 'piped sandbox process unexpectedly has a console' };"#;
-
 fn legacy_process_test_guard() -> MutexGuard<'static, ()> {
     LEGACY_PROCESS_TEST_LOCK
         .lock()
@@ -253,10 +251,7 @@ fn current_user_runner_isolates_console_and_preserves_descendants() {
                 as usize;
         let parent_pid = std::env::var("CODEX_PARENT_PID").unwrap().parse().unwrap();
         assert!(count <= console_pids.len() && !console_pids[..count].contains(&parent_pid));
-        assert_eq!(
-            unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() },
-            0
-        );
+        assert!(unsafe { windows_sys::Win32::System::Console::GetConsoleWindow() }.is_null());
         {
             let mut stdout = std::io::stdout().lock();
             stdout
