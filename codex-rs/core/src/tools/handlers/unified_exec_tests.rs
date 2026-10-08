@@ -600,7 +600,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
                 environment_id: "remote".to_string(),
                 cwd: remote_cwd.clone(),
                 workspace_roots: vec![remote_cwd.clone()],
-                selected_capability_roots: Vec::new(),
+                selected_capability_roots: Default::default(),
                 config: EnvironmentConfigState::Ready(environment_config),
             },
             EnvironmentConfigOrigin::Thread,
