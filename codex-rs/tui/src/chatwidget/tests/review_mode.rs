@@ -392,6 +392,8 @@ async fn failed_turn_completion_preserves_queued_review_start() {
                 AppServerTurnStatus::Failed,
                 /*duration_ms*/ None,
                 Some(AppServerTurnError {
+                    usage_limit_observed_at_ns: None,
+                    inference_attribution: None,
                     message: ERROR.to_string(),
                     codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
                     additional_details: None,

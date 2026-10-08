@@ -359,7 +359,7 @@ impl ConnectionPool {
         if let Some(metrics) = self.config.metrics.as_deref() {
             let transport = match &connection {
                 Connection::Websocket(_) => "websocket",
-                Connection::Http(_) => "http",
+                Connection::Http { .. } => "http",
             };
             for (stage, duration) in [
                 ("admission", admitted.duration_since(started)),

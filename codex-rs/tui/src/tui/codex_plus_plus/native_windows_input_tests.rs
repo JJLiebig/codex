@@ -220,7 +220,7 @@ fn recovery_does_not_wait_for_a_competing_reader() -> Result<()> {
             reader_thread_id,
         )
     };
-    assert_ne!(reader_thread, 0);
+    assert!(!reader_thread.is_null());
     let mut io_pending = 0;
     let read_is_pending = (0..100).any(|_| {
         assert_ne!(

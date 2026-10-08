@@ -3,12 +3,11 @@
 use super::GenericDisplayRow;
 use super::SelectionDescriptionLayout;
 use super::build_full_line;
-use super::selection_row_layout::description_span;
+use super::super::selection_row_layout::description_span;
 use super::should_wrap_name_in_column;
 use super::wrap_indent;
 use crate::terminal_hyperlinks::HyperlinkLine;
 use crate::width::display_width;
-use ratatui::style::Stylize;
 use ratatui::text::Line;
 use ratatui::text::Span;
 

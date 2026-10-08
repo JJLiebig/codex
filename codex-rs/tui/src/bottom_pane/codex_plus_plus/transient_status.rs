@@ -1,4 +1,4 @@
-use super::super::*;
+use super::*;
 
 impl BottomPane {
     pub(crate) fn as_renderable_with_status_override<'a>(
