@@ -699,7 +699,7 @@ pub fn main() -> Result<()> {
         }
         true
     } else {
-        terminate_job_or_process(&job, pi.hProcess, log_dir);
+        terminate_job_or_process(&job, &NonOwningProcessHandle(pi.hProcess), log_dir);
         true
     };
 

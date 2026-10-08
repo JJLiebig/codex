@@ -13,7 +13,6 @@ use codex_utils_pty::JobObject;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::os::windows::io::AsRawHandle;
-use std::os::windows::io::BorrowedHandle;
 use std::os::windows::io::OwnedHandle;
 use std::path::Path;
 use std::ptr;

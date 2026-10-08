@@ -230,8 +230,8 @@ impl RunnerTransport {
 }
 
 fn runner_output_pipe() -> Result<(File, File)> {
-    let mut read = 0;
-    let mut write = 0;
+    let mut read = ptr::null_mut();
+    let mut write = ptr::null_mut();
     if unsafe { CreatePipe(&mut read, &mut write, ptr::null_mut(), 0) } == 0 {
         return Err(std::io::Error::last_os_error()).context("CreatePipe failed for runner output");
     }
