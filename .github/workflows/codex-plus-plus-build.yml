@@ -103,6 +103,7 @@ jobs:
           import os
           from pathlib import Path
           import re
+          import shutil
           import statistics
           import subprocess
           import sys
@@ -184,9 +185,21 @@ jobs:
               with (OUT / f'{name}.log').open('w', encoding='utf-8') as log:
                   process = subprocess.Popen([str(arg) for arg in command], cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
                   peak = samples = 0
+                  next_progress = started + 60
                   while process.poll() is None:
-                      peak = max(peak, memory_sample(process.pid))
+                      rss = memory_sample(process.pid)
+                      peak = max(peak, rss)
                       samples += 1
+                      if time.perf_counter() >= next_progress:
+                          progress = {'phase': name, 'elapsed_seconds': round(time.perf_counter() - started), 'tree_rss_bytes': rss, 'peak_tree_rss_bytes': peak, 'disk_free_bytes': shutil.disk_usage(ROOT).free}
+                          meminfo = Path('/proc/meminfo')
+                          if meminfo.exists():
+                              progress['linux_memory'] = [line for line in meminfo.read_text().splitlines() if line.startswith(('MemTotal:', 'MemAvailable:', 'SwapTotal:', 'SwapFree:'))]
+                          print(json.dumps(progress), flush=True)
+                          with (OUT / f'{name}.log').open('rb') as progress_log:
+                              progress_log.seek(max(0, progress_log.seek(0, 2) - 1500))
+                              print(progress_log.read().decode('utf-8', errors='replace'), flush=True)
+                          next_progress = time.perf_counter() + 60
                       time.sleep(0.5)
               result = {'name': name, 'exit_code': process.returncode, 'seconds': time.perf_counter() - started, 'sampled_peak_tree_rss_bytes': peak, 'memory_samples': samples, 'log': f'{name}.log'}
               print(json.dumps(result), flush=True)
@@ -235,6 +248,7 @@ jobs:
                   build = {'codegen_units': units, 'phases': phases, 'seconds': sum(phase['seconds'] for phase in phases), 'sampled_peak_tree_rss_bytes': max(phase['sampled_peak_tree_rss_bytes'] for phase in phases), 'exit_code': result['exit_code']}
                   DATA['builds'].append(build)
                   save()
+                  print(json.dumps(build), flush=True)
                   assert result['exit_code'] == 0
                   package_dir = OUT / f'package-{units}'
                   manifest = json.loads((package_dir / 'codex-package.json').read_text())
@@ -246,6 +260,7 @@ jobs:
                   subprocess.run(['tar', '-czf', archive, '-C', package_dir, '.'], check=True)
                   packages[units] = (package_dir, executable, archive)
                   save()
+                  print(json.dumps(build), flush=True)
               sys.path[:0] = [str(ROOT / 'sdk/python/src'), str(ROOT / 'sdk/python/tests'), str(ROOT / 'scripts/codex_package/smoke_tests')]
               from fixtures import SmokePackage, responses_server
               from test_codex_package import test_app_server_runs_code_mode_through_python_sdk, test_cli_public_commands
