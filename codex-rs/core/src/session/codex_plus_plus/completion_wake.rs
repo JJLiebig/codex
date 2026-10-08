@@ -44,12 +44,12 @@ pub(super) fn turn_diff_tracker(
 
 pub(super) async fn track_initial_analytics(
     sess: &Arc<Session>,
-    turn_context: &Arc<TurnContext>,
+    step_context: &Arc<StepContext>,
     input: &[TurnInput],
     is_continuation: bool,
 ) {
     if !is_continuation {
-        track_turn_resolved_config_analytics(sess, turn_context, input).await;
+        track_turn_resolved_config_analytics(sess, step_context, input).await;
     }
 }
 

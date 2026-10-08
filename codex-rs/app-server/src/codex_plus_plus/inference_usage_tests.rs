@@ -41,6 +41,7 @@ async fn canonical_usage_and_completion_preserve_source_without_fabricating_usag
             thread,
             "turn".into(),
             TurnCompleteEvent {
+                root_turn_id: None,
                 inference_attribution: attribution.clone(),
                 turn_id: "turn".into(),
                 last_agent_message: None,

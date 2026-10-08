@@ -50,9 +50,10 @@ impl LocalCompactionMode {
 pub(crate) async fn maybe_run_readable_handoff(
     sess: &Arc<Session>,
     source: &Arc<TurnContext>,
-    destination: &Arc<TurnContext>,
+    replacement_step_context: &Arc<StepContext>,
     usage_limit_account_attempts: &mut HashSet<String>,
 ) -> CodexResult<bool> {
+    let destination = &replacement_step_context.turn;
     if !source.provider.info().is_cli_proxy() || !destination.provider.info().is_cli_proxy() {
         return Ok(false);
     }
@@ -80,10 +81,15 @@ pub(crate) async fn maybe_run_readable_handoff(
     if !crosses_family {
         return Ok(false);
     }
+    let world_state = Arc::new(
+        sess.build_world_state_for_step(&replacement_step_context, /*new_window*/ true)
+            .await?,
+    );
     let _profile_guard = destination.turn_timing_state.begin_compaction();
     run_compact_task_inner(
         Arc::clone(sess),
         Arc::clone(source),
+        Arc::clone(replacement_step_context),
         vec![UserInput::Text {
             text: source
                 .config
@@ -93,11 +99,14 @@ pub(crate) async fn maybe_run_readable_handoff(
                 .into(),
             text_elements: Vec::new(),
         }],
+        world_state,
+        CompactionTurnMetadata::new(
+            CompactionTrigger::Auto,
+            CompactionReason::CompHashChanged,
+            CompactionImplementation::Responses,
+            CompactionPhase::PreTurn,
+        ),
         Some(usage_limit_account_attempts),
-        InitialContextInjection::DoNotInject,
-        CompactionTrigger::Auto,
-        CompactionReason::CompHashChanged,
-        CompactionPhase::PreTurn,
         LocalCompactionMode::ReadableHandoff,
     )
     .await?;

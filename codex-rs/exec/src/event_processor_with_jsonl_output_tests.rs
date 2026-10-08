@@ -36,6 +36,7 @@ fn failed_turn_does_not_overwrite_output_last_message_file() {
             turn: codex_app_server_protocol::Turn {
                 inference_attribution: None,
                 id: "turn-1".to_string(),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
                 status: TurnStatus::Failed,

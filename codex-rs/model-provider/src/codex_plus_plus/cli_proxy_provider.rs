@@ -29,13 +29,13 @@ use sha2::Sha256;
 use super::cli_proxy_runtime::CliProxyRuntime;
 use super::cli_proxy_runtime::RuntimeEndpoint;
 use crate::BearerAuthProvider;
+use crate::ProviderCapabilities;
+use crate::RemoteCompactionSupport;
 use crate::auth::ProviderAuthScope;
 use crate::auth::ResolvedProviderAuth;
 use crate::provider::ModelProvider;
 use crate::provider::ModelProviderFuture;
 use crate::provider::ProviderAccountResult;
-use crate::provider::ProviderCapabilities;
-use crate::provider::RemoteCompactionSupport;
 use crate::provider::SharedModelProvider;
 
 // Ten account copies of the current 392,476-byte rich catalogue fit with growth headroom.

@@ -19,6 +19,7 @@ fn turn_started_notification(thread_id: ThreadId, turn_id: &str) -> ServerNotifi
         turn: Turn {
             inference_attribution: None,
             id: turn_id.to_string(),
+            root_turn_id: None,
             items_view: TurnItemsView::Full,
             items: Vec::new(),
             status: TurnStatus::InProgress,

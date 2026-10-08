@@ -30,6 +30,10 @@ use strum_macros::EnumDiscriminants;
 use thiserror::Error;
 use tokio::task::JoinError;
 
+#[path = "agent_error.rs"]
+mod agent;
+pub use agent::AgentErrorContext;
+
 pub type Result<T> = std::result::Result<T, CodexErr>;
 
 #[path = "codex_plus_plus/attributed_error.rs"]
@@ -78,12 +82,14 @@ pub struct CodexErr {
     retry_after: Option<RetryAfter>,
     usage_limit_observed_at_ns: Option<i64>,
     inference_attribution: Option<Box<crate::inference_attribution::InferenceAttribution>>,
+    agent_context: Option<AgentErrorContext>,
 }
 
 /// The semantic category and diagnostic payload for a [`CodexErr`].
 #[derive(Error, Debug, EnumDiscriminants)]
 #[strum_discriminants(name(CodexErrKind))]
-#[strum_discriminants(derive(serde::Serialize))]
+#[strum_discriminants(derive(serde::Serialize, strum_macros::IntoStaticStr))]
+#[strum_discriminants(strum(serialize_all = "snake_case"))]
 #[strum_discriminants(serde(rename_all = "snake_case"))]
 #[strum_discriminants(doc = "The payload-free semantic category used for analytics.")]
 pub enum CodexErrorDetails {
@@ -246,6 +252,7 @@ impl From<CodexErrorDetails> for CodexErr {
             retry_after: None,
             usage_limit_observed_at_ns: None,
             inference_attribution: None,
+            agent_context: None,
         }
     }
 }
@@ -312,6 +319,7 @@ macro_rules! codex_err_unit_constructors {
                 retry_after: None,
                 usage_limit_observed_at_ns: None,
                 inference_attribution: None,
+                agent_context: None,
             };
         )*
     };
