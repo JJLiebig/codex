@@ -223,7 +223,7 @@ jobs:
                   if zsh is not None:
                       package_args += ['--zsh-bin', zsh]
                   if spec.is_linux:
-                      result = measured(f'cgu-{units}-bwrap', ['cargo', 'build', '--locked', '--offline', '--target', TARGET, '--profile', 'release', '--bin', 'bwrap'], variant_env, ROOT / 'codex-rs')
+                      result = measured(f'cgu-{units}-bwrap', ['cargo', 'build', '--locked', '--target', TARGET, '--profile', 'release', '--bin', 'bwrap'], variant_env, ROOT / 'codex-rs')
                       phases.append(result)
                       assert result['exit_code'] == 0
                       bwrap = ROOT / 'codex-rs/target' / TARGET / 'release/bwrap'
