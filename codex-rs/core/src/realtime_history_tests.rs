@@ -140,7 +140,6 @@ fn interrupted_turn_is_not_associated_with_a_new_voice_session(
         },
     ));
     let aborted = EventMsg::TurnAborted(TurnAbortedEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id: aborted_turn_id.map(str::to_string),
         reason: TurnAbortReason::Interrupted,
@@ -177,7 +176,6 @@ fn interrupted_turn_is_not_associated_with_a_new_voice_session(
 fn interrupted_turn_keeps_its_existing_voice_session_for_late_artifacts() {
     let mut state = started_state();
     state.observe(&EventMsg::TurnAborted(TurnAbortedEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id: Some("turn-1".to_string()),
         reason: TurnAbortReason::Interrupted,

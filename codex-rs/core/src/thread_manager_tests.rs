@@ -2794,7 +2794,6 @@ fn interrupted_fork_snapshot_appends_interrupt_boundary() {
             RolloutItem::ResponseItem(user_msg("hello").into()),
             RolloutItem::ResponseItem(contextual_user_interrupted_marker().into()),
             RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: None,
                 started_at: None,
@@ -2821,7 +2820,6 @@ fn interrupted_fork_snapshot_appends_interrupt_boundary() {
         serde_json::to_value(vec![
             RolloutItem::ResponseItem(contextual_user_interrupted_marker().into()),
             RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: None,
                 started_at: None,
@@ -2855,7 +2853,6 @@ fn disabled_interrupted_fork_snapshot_appends_only_interrupt_event() {
         serde_json::to_value(vec![
             RolloutItem::ResponseItem(user_msg("hello").into()),
             RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: None,
                 started_at: None,
@@ -2881,7 +2878,6 @@ fn disabled_interrupted_fork_snapshot_appends_only_interrupt_event() {
         .expect("serialize disabled interrupted empty fork history"),
         serde_json::to_value(vec![RolloutItem::EventMsg(EventMsg::TurnAborted(
             TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: None,
                 started_at: None,
@@ -2902,7 +2898,6 @@ fn interrupted_snapshot_is_not_mid_turn() {
         RolloutItem::ResponseItem(assistant_msg("partial").into()),
         RolloutItem::ResponseItem(contextual_user_interrupted_marker().into()),
         RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: Some("turn-1".to_string()),
             started_at: None,
@@ -3088,7 +3083,6 @@ async fn interrupted_fork_snapshot_does_not_synthesize_turn_id_for_legacy_histor
     .expect("serialize interrupted marker");
     let interrupted_abort_json = serde_json::to_value(RolloutItem::EventMsg(
         EventMsg::TurnAborted(TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: expected_turn_id,
             started_at: None,
@@ -3215,7 +3209,6 @@ async fn interrupted_fork_snapshot_preserves_explicit_turn_id() {
         matches!(
             item,
             RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: Some(turn_id),
                 started_at: None,

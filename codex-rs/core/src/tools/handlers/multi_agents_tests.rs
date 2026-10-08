@@ -2151,7 +2151,6 @@ async fn multi_agent_v2_interrupted_turn_does_not_notify_parent() {
         .send_event(
             aborted_turn.as_ref(),
             EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: Some(aborted_turn.sub_id.clone()),
                 started_at: None,

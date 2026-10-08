@@ -75,7 +75,6 @@ fn turn_complete(turn_id: &str) -> RolloutItem {
 
 fn turn_aborted(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id: Some(turn_id.to_string()),
         started_at: None,

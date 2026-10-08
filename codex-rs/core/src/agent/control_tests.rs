@@ -632,7 +632,6 @@ async fn on_event_updates_status_from_error() {
 #[tokio::test]
 async fn on_event_updates_status_from_turn_aborted() {
     let status = agent_status_from_event(&EventMsg::TurnAborted(TurnAbortedEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id: Some("turn-1".to_string()),
         started_at: None,

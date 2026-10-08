@@ -2224,7 +2224,6 @@ mod tests {
 
     fn turn_aborted_event(turn_id: &str) -> TurnAbortedEvent {
         TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: Some(turn_id.to_string()),
             started_at: None,

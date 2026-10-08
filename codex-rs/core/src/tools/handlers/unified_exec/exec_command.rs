@@ -580,11 +580,11 @@ impl CoreToolRuntime for ExecCommandHandler {
         args.login.get_or_insert_default();
         let environment_args: ExecCommandEnvironmentArgs = parse_arguments(arguments).ok()?;
         let turn_environment = resolve_tool_environment(
-            &invocation.step_context.environments,
+            &invocation.step_context,
             environment_args.environment_id.as_deref(),
+            "unified exec is unavailable in this session",
         )
-        .ok()
-        .flatten()?;
+        .ok()?;
         let cwd = environment_args
             .workdir
             .as_deref()

@@ -51,7 +51,6 @@ async fn forward_events_filters_private_events_before_blocked_send_is_cancelled(
         .send(Event {
             id: "full".to_string(),
             msg: EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: Some("turn-1".to_string()),
                 started_at: None,

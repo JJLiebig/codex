@@ -55,6 +55,9 @@ use uuid::Uuid;
 #[path = "turn_input_tests.rs"]
 mod tests;
 
+#[path = "codex_plus_plus/pending_work.rs"]
+mod pending_work;
+
 /// Why input is starting a turn; shared by admission and input delivery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TurnStartKind {
@@ -660,34 +663,15 @@ impl Session {
         }
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "The admission lock keeps the previous turn stable while capturing its attribution."
-    )]
     pub(crate) async fn reserve_pending_work_turn(
         &self,
-    ) -> Option<(Arc<tokio::sync::Mutex<TurnState>>, TurnStartOptions)> {
-        let mut active_turn = self.active_turn.lock().await;
-        if active_turn.is_some() {
-            return None;
-        }
-        let needs_new_turn = self.input_queue.has_trigger_turn_mailbox_items().await;
-        if !needs_new_turn && !self.has_outstanding_durable_sleep() {
-            return None;
-        }
-        let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-        let previous_options = if needs_new_turn {
-            Default::default()
-        } else {
-            self.state
-                .lock()
-                .await
-                .turn_attribution
-                .as_ref()
-                .map(codex_history::TurnAttribution::start_options)
-                .unwrap_or_default()
-        };
-        Some((Arc::clone(&active_turn.turn_state), previous_options))
+    ) -> Option<(
+        Arc<tokio::sync::Mutex<TurnState>>,
+        TurnStartOptions,
+        Option<u64>,
+        Vec<TurnInput>,
+    )> {
+        pending_work::reserve(self).await
     }
 
     pub(crate) async fn route_realtime_text_input(

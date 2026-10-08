@@ -2722,7 +2722,6 @@ fn append_interrupted_boundary(
     interrupted_marker: InterruptedTurnHistoryMarker,
 ) -> InitialHistory {
     let aborted_event = RolloutItem::EventMsg(EventMsg::TurnAborted(TurnAbortedEvent {
-        inference_attribution: None,
         root_turn_id,
         turn_id,
         reason: TurnAbortReason::Interrupted,

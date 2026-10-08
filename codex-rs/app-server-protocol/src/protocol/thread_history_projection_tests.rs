@@ -213,7 +213,6 @@ fn projects_optional_completed_item_lifecycle_timestamps() {
 fn ignores_legacy_abort_without_turn_id_and_context_only_records() {
     let aborted = project(RolloutItem::EventMsg(EventMsg::TurnAborted(
         TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: None,
             reason: TurnAbortReason::Interrupted,
@@ -253,7 +252,6 @@ fn ignores_legacy_abort_without_turn_id_and_context_only_records() {
 fn projects_identified_turn_aborts() {
     let changes = project(RolloutItem::EventMsg(EventMsg::TurnAborted(
         TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: Some("root-turn".into()),
             turn_id: Some("turn-1".to_string()),
             reason: TurnAbortReason::Interrupted,

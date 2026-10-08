@@ -198,7 +198,6 @@ fn turn_aborted_event(turn_id: &str) -> Event {
     Event {
         id: turn_id.to_string(),
         msg: EventMsg::TurnAborted(TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: Some(turn_id.to_string()),
             started_at: None,

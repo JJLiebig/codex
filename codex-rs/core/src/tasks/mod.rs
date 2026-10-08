@@ -454,61 +454,14 @@ impl Session {
     ///
     /// The turn is created only when the session is idle and mailbox mail either requests a turn
     /// or can wake an outstanding durable sleep.
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "capture pending-work attribution atomically with its active reservation"
-    )]
     pub(crate) async fn maybe_start_turn_for_pending_work_with_sub_id(
         self: &Arc<Self>,
         sub_id: String,
     ) {
-        let mailbox_ready = self.input_queue.has_pending_mailbox_items().await
-            && (self.input_queue.has_trigger_turn_mailbox_items().await
-                || self.has_outstanding_durable_sleep());
-        if !self
-            .services
-            .unified_exec_manager
-            .completion_wake
-            .has_ready()
-            && !mailbox_ready
-        {
+        let Some((turn_state, previous_options, completion_claim, completions)) =
+            self.reserve_pending_work_turn().await
+        else {
             return;
-        }
-
-        let (turn_state, previous_options, completion_claim, completions) = {
-            let mut active_turn = self.active_turn.lock().await;
-            if active_turn.is_some() {
-                return;
-            }
-            let claimed_completion = self
-                .services
-                .unified_exec_manager
-                .completion_wake
-                .claim_input(self.is_interrupted());
-            if claimed_completion.is_none() && !mailbox_ready {
-                return;
-            }
-            let (completion_claim, completions) = claimed_completion
-                .map(|(claim, input)| (Some(claim), input))
-                .unwrap_or_default();
-            let previous_options = if self.input_queue.has_trigger_turn_mailbox_items().await {
-                Default::default()
-            } else {
-                self.state
-                    .lock()
-                    .await
-                    .turn_attribution
-                    .as_ref()
-                    .map(codex_history::TurnAttribution::start_options)
-                    .unwrap_or_default()
-            };
-            let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
-            (
-                Arc::clone(&active_turn.turn_state),
-                previous_options,
-                completion_claim,
-                completions,
-            )
         };
 
         self.services
@@ -891,7 +844,6 @@ impl Session {
             self.emit_turn_abort_lifecycle(reason.clone(), turn_context.extension_data.as_ref())
                 .await;
             EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: Some(turn_context.root_turn_id()),
                 turn_id: Some(turn_context.sub_id.clone()),
                 reason,
@@ -1078,7 +1030,6 @@ impl Session {
         self.emit_turn_abort_lifecycle(reason.clone(), task.turn_context.extension_data.as_ref())
             .await;
         let event = EventMsg::TurnAborted(TurnAbortedEvent {
-            inference_attribution: None,
             root_turn_id: Some(task.turn_context.root_turn_id()),
             turn_id: Some(task.turn_context.sub_id.clone()),
             reason,

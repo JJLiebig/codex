@@ -2835,7 +2835,6 @@ mod tests {
                 questions: None,
             }),
             EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: Some("turn-1".into()),
                 started_at: None,
@@ -4573,7 +4572,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnAborted(TurnAbortedEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: Some("turn-a".into()),
                 started_at: None,

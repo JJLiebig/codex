@@ -816,7 +816,6 @@ async fn interrupting_regular_turn_waiting_on_startup_prewarm_emits_turn_aborted
         .expect("expected turn aborted event")
         .expect("channel open");
     let EventMsg::TurnAborted(TurnAbortedEvent {
-        inference_attribution: None,
         root_turn_id,
         turn_id,
         reason,
