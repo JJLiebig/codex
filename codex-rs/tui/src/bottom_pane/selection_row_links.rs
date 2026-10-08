@@ -1,9 +1,9 @@
 //! Preserve complete hyperlink destinations through selection-row wrapping and clipping.
 
+use super::super::selection_row_layout::description_span;
 use super::GenericDisplayRow;
 use super::SelectionDescriptionLayout;
 use super::build_full_line;
-use super::super::selection_row_layout::description_span;
 use super::should_wrap_name_in_column;
 use super::wrap_indent;
 use crate::terminal_hyperlinks::HyperlinkLine;
