@@ -40,6 +40,16 @@ async fn program_status_follows_live_outcomes_and_ignores_replayed_completion() 
         assert_eq!(status.state, expected);
         reports.push(status);
     }
+    for replay in [ReplayKind::ResumeInitialMessages, ReplayKind::ThreadSnapshot] {
+        chat.handle_server_notification(ServerNotification::TurnCompleted(TurnCompletedNotification {
+            thread_id: "thread".into(),
+            turn: app_server_turn("old-failure", TurnStatus::Failed, /*duration_ms*/ None, Some(AppServerTurnError {
+                message: "PRIVATE HISTORICAL ERROR".into(), codex_error_info: None, additional_details: None,
+                inference_attribution: None, usage_limit_observed_at_ns: None, misalignment: None,
+            })),
+        }), Some(replay));
+        assert_eq!(chat.current_program_status().state, State::Idle);
+    }
     chat.record_program_status_completion(&TurnStatus::Completed, /*from_replay*/ true);
     assert_eq!(chat.current_program_status().state, State::Idle);
     insta::assert_debug_snapshot!(reports);

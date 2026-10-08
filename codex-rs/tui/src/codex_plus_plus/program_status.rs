@@ -143,13 +143,18 @@ pub(crate) fn probe_query() -> &'static [u8] {
 }
 
 pub(crate) fn probe_complete(input: &[u8]) -> bool {
-    !auto_probe() || detected_support(input).is_some()
+    !auto_probe() || sentinel_received(input)
 }
 
 pub(crate) fn finish_probe(input: &[u8]) {
     if auto_probe() {
         SUPPORTED.store(detected_support(input) == Some(true), Ordering::Relaxed);
     }
+}
+
+// Even after support is confirmed, consume the query's trailing DA before returning input.
+fn sentinel_received(input: &[u8]) -> bool {
+    response_ranges(input).iter().any(|range| !input[range.clone()].starts_with(PREFIX))
 }
 
 fn detected_support(input: &[u8]) -> Option<bool> {

@@ -10,7 +10,10 @@ fn program_status_negotiation_preserves_paste_and_obeys_da_order() {
         let mut input = b"typed\x1b[200~\x1b]7501;?\x07\x1b[?1c\x1b[201~".to_vec();
         assert_eq!(detected_support(&input), None);
         input.extend_from_slice(reply);
+        assert_eq!(detected_support(&input), Some(true));
+        assert!(!sentinel_received(&input));
         input.extend_from_slice(b"\x1b[?64;1c");
+        assert!(sentinel_received(&input));
         assert_eq!(detected_support(&input), Some(true));
         let ranges = response_ranges(&input);
         assert_eq!(ranges.len(), 2);
