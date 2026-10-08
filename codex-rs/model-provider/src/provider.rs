@@ -8,7 +8,6 @@ use codex_api::ApiError;
 use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_api::TransportError;
-use codex_api::is_azure_responses_provider;
 use codex_http_client::HttpClient;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;

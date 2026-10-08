@@ -1901,7 +1901,7 @@ WHERE thread_id = ? AND turn_id = ?
                     "turn-2",
                     agent_message("partial-2", MessagePhase::PartialAnswer),
                 ),
-                turn_completed("turn-2"),
+                completion,
             ],
         })
         .await
