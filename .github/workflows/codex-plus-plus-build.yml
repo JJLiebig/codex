@@ -3,6 +3,7 @@ name: Codex++ platform build
 on:
   workflow_call:
     inputs:
+      source_sha: {required: true, type: string}
       version: {required: true, type: string}
       runner: {required: true, type: string}
       target: {required: true, type: string}
@@ -19,6 +20,7 @@ env:
 jobs:
   app:
     runs-on: ${{ inputs.runner }}
+    timeout-minutes: 360
     permissions:
       contents: read
     env:
@@ -27,13 +29,14 @@ jobs:
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       TARGET: ${{ inputs.target }}
       VERSION: ${{ inputs.version }}
-      STABLE_GIT_COMMIT: ${{ github.sha }}
+      STABLE_GIT_COMMIT: ${{ inputs.source_sha }}
       ARCHIVE_SUFFIX: ${{ inputs.archive_suffix }}
       LIBSQLITE3_FLAGS: ${{ inputs.target == 'x86_64-pc-windows-msvc' && 'SQLITE_DISABLE_INTRINSIC' || '' }}
       SOURCE_MTIME_STATE: codex-rs/target/codex-plus-plus-source-mtimes-${{ inputs.target }}.json
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: ${{ inputs.source_sha }}
           persist-credentials: false
 
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
@@ -53,44 +56,6 @@ jobs:
         uses: ./.github/actions/setup-msvc-env
         with:
           target: ${{ inputs.target }}
-
-      - name: Resolve release build cache identity
-        id: release-cache
-        shell: bash
-        run: |
-          set -euo pipefail
-          tree="$(git rev-parse 'HEAD^{tree}')"
-          image="${ImageOS:-${RUNNER_OS}}-${ImageVersion:-unknown}"
-          toolchain="${{ hashFiles('codex-rs/rust-toolchain.toml') }}"
-          build_inputs="${{ hashFiles('.github/actions/setup-msvc-env/**', '.github/actions/setup-rusty-v8/**', '.github/scripts/install-musl-build-tools.sh', '.github/workflows/codex-plus-plus-release.yml', '.github/workflows/codex-plus-plus-build.yml') }}"
-          prefix="codex-plus-plus-release-v4-${TARGET}-${image}-${toolchain}-${build_inputs}"
-          echo "key=${prefix}-${tree}" >> "$GITHUB_OUTPUT"
-          echo "prefix=${prefix}-" >> "$GITHUB_OUTPUT"
-          echo "tree=${tree}" >> "$GITHUB_OUTPUT"
-
-      - name: Restore Codex++ release build cache
-        id: restore-build-cache
-        continue-on-error: true
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          key: ${{ steps.release-cache.outputs.key }}
-          restore-keys: |
-            ${{ steps.release-cache.outputs.prefix }}
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ${{ runner.temp }}/codex-package
-            codex-rs/target/release
-            codex-rs/target/${{ inputs.target }}/release
-            codex-rs/target/.rustc_info.json
-            ${{ env.SOURCE_MTIME_STATE }}
-
-      - name: Regenerate v8 after cache restore
-        working-directory: codex-rs
-        shell: bash
-        run: |
-          cargo clean -p v8 --target "$TARGET" --profile release
-          rm -rf "target/${TARGET}/release/gn_out"
 
       - name: Install Zig
         if: runner.os == 'Linux'
@@ -114,270 +79,253 @@ jobs:
         with:
           target: ${{ inputs.target }}
 
-      - name: Build bundled bwrap
-        if: runner.os == 'Linux'
-        working-directory: codex-rs
-        shell: bash
-        run: |
-          set -euo pipefail
-          cargo build --target "$TARGET" --profile release --bin bwrap
-          bwrap="target/${TARGET}/release/bwrap"
-          digest="$(sha256sum "$bwrap" | awk '{print $1}')"
-          echo "BWRAP=${GITHUB_WORKSPACE}/codex-rs/${bwrap}" >> "$GITHUB_ENV"
-          echo "CODEX_BWRAP_SHA256=${digest}" >> "$GITHUB_ENV"
-
-      - name: Build package directory
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_args=(
-            --target "$TARGET"
-            --package-dir "dist/package-${TARGET}"
-            --force
-          )
-          if [[ -n "${BWRAP:-}" ]]; then
-            package_args+=(--bwrap-bin "$BWRAP")
-          fi
-          python scripts/build_codex_plus_plus.py \
-            --fork-version "$VERSION" \
-            --build-cache-state "$SOURCE_MTIME_STATE" \
-            -- \
-            --cargo-profile release \
-            "${package_args[@]}"
-
-      - name: Preserve package file modes for artifact transfer
-        shell: bash
-        run: tar -cf "dist/app-${TARGET}.tar" -C "dist/package-${TARGET}" .
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          name: codex-plus-plus-app-${{ inputs.target }}
-          path: dist/app-${{ inputs.target }}.tar
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
+          version: "0.11.3"
 
-  voice:
-    runs-on: ${{ inputs.runner }}
-    permissions:
-      contents: read
-      actions: read
-    env:
-      TARGET: ${{ inputs.target }}
-      STABLE_GIT_COMMIT: ${{ github.sha }}
-      CARGO_BUILD_JOBS: "4"
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
-
-      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
-        if: runner.os == 'Windows'
-        with:
-          targets: ${{ inputs.target }}
-
-      - name: Remove runner-provided Rust toolchain
-        if: runner.os == 'Windows'
-        shell: bash
-        run: rustup toolchain uninstall stable
-
-      - name: Configure LLVM linker
-        if: runner.os == 'Windows'
-        uses: ./.github/actions/setup-msvc-env
-        with:
-          target: ${{ inputs.target }}
-
-      - name: Resolve Windows native cache identity
-        if: runner.os == 'Windows'
-        id: native-key
-        shell: pwsh
-        run: |
-          $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
-          $cmake = (Get-Command cmake.exe -ErrorAction Stop).Source
-          $identity = @(
-            $env:ImageOS, $env:ImageVersion, $env:VCToolsInstallDir,
-            $env:WindowsSDKVersion, $env:UCRTVersion,
-            (Get-FileHash -LiteralPath $compiler -Algorithm SHA256).Hash,
-            (Get-FileHash -LiteralPath $cmake -Algorithm SHA256).Hash
-          ) -join '|'
-          $digest = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant()
-          "name=codex-plus-plus-voice-native-v1-${{ inputs.target }}-$digest-${{ hashFiles('third_party/voice/**', '.github/scripts/build-windows-voice.ps1') }}" >> $env:GITHUB_OUTPUT
-
-      - name: Find retained Windows native libraries
-        if: runner.os == 'Windows'
-        id: native-cache
-        continue-on-error: true
+      - name: Compare clean release app builds
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          CACHE_NAME: ${{ steps.native-key.outputs.name }}
-        run: python scripts/codex_package/codex_plus_plus/voice_cache.py
-
-      - name: Download retained Windows native libraries
-        if: runner.os == 'Windows' && steps.native-cache.outputs.run-id != ''
-        id: download-native
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ steps.native-key.outputs.name }}
-          run-id: ${{ steps.native-cache.outputs.run-id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/voice-native-cache
-
-      - name: Restore retained native prefix
-        if: runner.os == 'Windows' && steps.download-native.outcome == 'success'
-        shell: bash
+          CARGO_BUILD_JOBS: "4"
+          RUST_TEST_THREADS: "4"
+          RUSTC_WRAPPER: ""
+          CARGO_BUILD_RUSTC_WRAPPER: ""
+          CARGO_INCREMENTAL: "0"
         run: |
           set -euo pipefail
-          temporary="$(cygpath -u "$RUNNER_TEMP")"
-          mkdir -p "${temporary}/codex-plus-plus-voice"
-          tar -xf "${temporary}/voice-native-cache/native-voice-cache.tar" \
-            -C "${temporary}/codex-plus-plus-voice"
+          cat > "$RUNNER_TEMP/codegen_trial.py" <<'PY'
+          import concurrent.futures
+          import ctypes
+          from ctypes import wintypes
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import statistics
+          import subprocess
+          import sys
+          import time
+          import traceback
 
-      - name: Build Windows voice
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $work = Join-Path $env:RUNNER_TEMP 'codex-plus-plus-voice'
-          $reuse = '${{ steps.download-native.outcome }}' -eq 'success'
-          & .github/scripts/build-windows-voice.ps1 -Output $work -ReuseNativeBuild:$reuse
-          if ($LASTEXITCODE -ne 0) { throw 'Voice build failed' }
+          ROOT = Path(os.environ['CODEX_REPO_ROOT'])
+          OUT = ROOT / 'dist/codegen-trial'
+          OUT.mkdir(parents=True, exist_ok=True)
+          TARGET = os.environ['TARGET']
+          WINDOWS = os.name == 'nt'
+          DATA = {'source_sha': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip(), 'workflow_sha': os.environ['GITHUB_SHA'], 'runner': {key: os.environ.get(key) for key in ['RUNNER_OS', 'RUNNER_ARCH', 'RUNNER_NAME', 'ImageOS', 'ImageVersion']}, 'target': TARGET, 'version': os.environ['VERSION'], 'jobs': 4, 'lto': 'thin', 'compiler_cache': 'disabled', 'build_order': [4, 1], 'builds': [], 'tests': [], 'benchmarks': []}
 
-      - name: Retain completed Windows native prefix
-        if: runner.os == 'Windows' && steps.download-native.outcome != 'success'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          tar -cf dist/native-voice-cache.tar \
-            -C "$(cygpath -u "$RUNNER_TEMP")/codex-plus-plus-voice" native/prefix native/built.json
+          if WINDOWS:
+              class Entry(ctypes.Structure):
+                  _fields_ = [('size', wintypes.DWORD), ('usage', wintypes.DWORD), ('pid', wintypes.DWORD), ('heap', ctypes.c_size_t), ('module', wintypes.DWORD), ('threads', wintypes.DWORD), ('parent', wintypes.DWORD), ('priority', wintypes.LONG), ('flags', wintypes.DWORD), ('exe', wintypes.WCHAR * 260)]
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: runner.os == 'Windows' && steps.download-native.outcome != 'success'
-        continue-on-error: true
-        with:
-          name: ${{ steps.native-key.outputs.name }}
-          path: dist/native-voice-cache.tar
-          if-no-files-found: error
-          compression-level: 6
-          retention-days: 90
+              class Memory(ctypes.Structure):
+                  _fields_ = [('size', wintypes.DWORD), ('faults', wintypes.DWORD)] + [(name, ctypes.c_size_t) for name in ['peak', 'rss', 'peak_paged', 'paged', 'peak_nonpaged', 'nonpaged', 'pagefile', 'peak_pagefile']]
 
-      - name: Set up Bazel for native voice
-        if: runner.os != 'Windows'
-        uses: bazel-contrib/setup-bazel@c5acdfb288317d0b5c0bbd7a396a3dc868bb0f86 # 0.19.0
-        with:
-          bazelisk-version: 1.28.1
+              kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+              psapi = ctypes.WinDLL('psapi', use_last_error=True)
+              kernel.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
+              kernel.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
+              kernel.Process32FirstW.argtypes = kernel.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.POINTER(Entry)]
+              kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+              kernel.OpenProcess.restype = wintypes.HANDLE
+              kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+              psapi.GetProcessMemoryInfo.argtypes = [wintypes.HANDLE, ctypes.POINTER(Memory), wintypes.DWORD]
 
-      - name: Build Unix voice
-        if: runner.os != 'Windows'
-        shell: bash
-        run: |
-          set -euo pipefail
-          bazel build -c opt --jobs=4 \
-            //codex-rs/voice-host:codex-voice-host //third_party/voice:native_runtime
-          if [[ "$RUNNER_OS" == "macOS" ]]; then
-            runtime_name=macos_aarch64
-          else
-            runtime_name=linux_x86_64
-          fi
-          voice_target="${TARGET%-musl}"
-          if [[ "$TARGET" == *-musl ]]; then voice_target="${voice_target}-gnu"; fi
-          work="${RUNNER_TEMP}/codex-plus-plus-voice"
-          mkdir -p "$work"
-          python third_party/voice/release_runtime.py stage \
-            --target "$voice_target" \
-            --source "bazel-bin/third_party/voice/native_runtime_${runtime_name}" \
-            --output "$work/runtime"
-          cp bazel-bin/codex-rs/voice-host/codex-voice-host "$work/codex-voice-host"
-          chmod 0755 "$work/codex-voice-host"
-          python third_party/voice/release_runtime.py seal \
-            --target "$voice_target" --output "$work/runtime"
 
-      - name: Preserve voice file modes for artifact transfer
-        shell: bash
-        run: |
-          set -euo pipefail
-          helper=codex-voice-host
-          work="${RUNNER_TEMP}/codex-plus-plus-voice"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            helper+=.exe
-            work="$(cygpath -u "$RUNNER_TEMP")/codex-plus-plus-voice"
-          fi
-          mkdir -p dist
-          tar -cf "dist/voice-${TARGET}.tar" \
-            -C "$work" "$helper" runtime
+          def memory_sample(root_pid):
+              rows = {}
+              if WINDOWS:
+                  snapshot = kernel.CreateToolhelp32Snapshot(2, 0)
+                  if snapshot == ctypes.c_void_p(-1).value:
+                      raise ctypes.WinError(ctypes.get_last_error())
+                  entry = Entry()
+                  entry.size = ctypes.sizeof(entry)
+                  try:
+                      found = kernel.Process32FirstW(snapshot, ctypes.byref(entry))
+                      while found:
+                          rows[entry.pid] = [entry.parent, 0]
+                          found = kernel.Process32NextW(snapshot, ctypes.byref(entry))
+                  finally:
+                      kernel.CloseHandle(snapshot)
+              else:
+                  for line in subprocess.check_output(['ps', '-axo', 'pid=,ppid=,rss='], text=True).splitlines():
+                      pid, parent, rss = map(int, line.split())
+                      rows[pid] = [parent, rss * 1024]
+              owned = {root_pid}
+              while True:
+                  expanded = owned | {pid for pid, (parent, _) in rows.items() if parent in owned}
+                  if expanded == owned:
+                      break
+                  owned = expanded
+              if WINDOWS:
+                  for pid in owned:
+                      handle = kernel.OpenProcess(0x410, False, pid)
+                      if not handle:
+                          continue
+                      try:
+                          counters = Memory()
+                          counters.size = ctypes.sizeof(counters)
+                          if psapi.GetProcessMemoryInfo(handle, ctypes.byref(counters), counters.size):
+                              rows.setdefault(pid, [0, 0])[1] = counters.rss
+                      finally:
+                          kernel.CloseHandle(handle)
+              return sum(rows.get(pid, [0, 0])[1] for pid in owned)
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codex-plus-plus-voice-${{ inputs.target }}
-          path: dist/voice-${{ inputs.target }}.tar
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
 
-  build:
-    needs: [app, voice]
-    runs-on: ${{ inputs.runner }}
-    permissions:
-      contents: read
-    env:
-      TARGET: ${{ inputs.target }}
-      VERSION: ${{ inputs.version }}
-      ARCHIVE_SUFFIX: ${{ inputs.archive_suffix }}
-      STABLE_GIT_COMMIT: ${{ github.sha }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
+          def save():
+              (OUT / 'results.json').write_text(json.dumps(DATA, indent=2), encoding='utf-8')
 
-      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
-        with:
-          python-version: "3.12"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codex-plus-plus-app-${{ inputs.target }}
-          path: dist
+          def measured(name, command, env, cwd=ROOT):
+              print(f'::group::{name}', flush=True)
+              started = time.perf_counter()
+              with (OUT / f'{name}.log').open('w', encoding='utf-8') as log:
+                  process = subprocess.Popen([str(arg) for arg in command], cwd=cwd, env=env, stdout=log, stderr=subprocess.STDOUT)
+                  peak = samples = 0
+                  while process.poll() is None:
+                      peak = max(peak, memory_sample(process.pid))
+                      samples += 1
+                      time.sleep(0.5)
+              result = {'name': name, 'exit_code': process.returncode, 'seconds': time.perf_counter() - started, 'sampled_peak_tree_rss_bytes': peak, 'memory_samples': samples, 'log': f'{name}.log'}
+              print(json.dumps(result), flush=True)
+              print((OUT / result['log']).read_text(encoding='utf-8', errors='replace')[-4000:], flush=True)
+              print('::endgroup::', flush=True)
+              return result
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: codex-plus-plus-voice-${{ inputs.target }}
-          path: dist
 
-      - name: Assemble and verify package
-        shell: bash
-        run: |
-          set -euo pipefail
-          work="${RUNNER_TEMP}/codex-plus-plus-voice"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then
-            work="$(cygpath -u "$RUNNER_TEMP")/codex-plus-plus-voice"
-          fi
-          mkdir -p "dist/package-${TARGET}" "$work"
-          tar -xf "dist/app-${TARGET}.tar" -C "dist/package-${TARGET}"
-          tar -xf "dist/voice-${TARGET}.tar" -C "$work"
-          python scripts/codex_package/codex_plus_plus/voice.py package \
-            --work "$work" --commit "$STABLE_GIT_COMMIT" \
-            --app "dist/package-${TARGET}" --output "dist/voice-package-${TARGET}" \
-            --archive "dist/codex-plus-plus-${VERSION}-${TARGET}.${ARCHIVE_SUFFIX}"
+          def main():
+              assert memory_sample(os.getpid()) > 0, 'memory monitor self-check'
+              env = dict(os.environ)
+              env.update(CARGO_BUILD_JOBS='4', RUST_TEST_THREADS='4', CARGO_INCREMENTAL='0', RUSTC_WRAPPER='', CARGO_BUILD_RUSTC_WRAPPER='', PYTHONDONTWRITEBYTECODE='1')
+              DATA['rustc'] = subprocess.check_output(['rustc', '-Vv'], env=env, cwd=ROOT / 'codex-rs', text=True)
+              sys.path.insert(0, str(ROOT / 'scripts'))
+              from codex_package.targets import TARGET_SPECS
+              from codex_package.ripgrep import resolve_rg_bin
+              from codex_package.zsh import resolve_zsh_bin
+              spec = TARGET_SPECS[TARGET]
+              rg = resolve_rg_bin(spec, None)
+              zsh = resolve_zsh_bin(spec, None, zsh_bin=None)
+              subprocess.run(['cargo', 'fetch', '--locked', '--target', TARGET], cwd=ROOT / 'codex-rs', env=env, check=True)
+              helper_commands = [('package-version-tests', ['python', ROOT / 'scripts/codex_package/test_build_codex_plus_plus.py']), ('cargo-helper-tests', ['python', '-m', 'unittest', 'discover', '-s', ROOT / 'scripts/codex_package', '-p', 'test_cargo.py']), ('mtime-tests', ['python', ROOT / 'scripts/codex_package/tests/test_source_mtime_cache.py'])]
+              with concurrent.futures.ThreadPoolExecutor(max_workers=3) as pool:
+                  tasks = [pool.submit(measured, name, command, env) for name, command in helper_commands]
+                  DATA['tests'] += [task.result() for task in tasks]
+              save()
+              packages = {}
+              for units in [4, 1]:
+                  variant_env = dict(env)
+                  variant_env['CARGO_PROFILE_RELEASE_CODEGEN_UNITS'] = str(units)
+                  subprocess.run(['cargo', 'clean'], cwd=ROOT / 'codex-rs', env=variant_env, check=True)
+                  phases = []
+                  package_args = ['--target', TARGET, '--package-dir', OUT / f'package-{units}', '--rg-bin', rg]
+                  if zsh is not None:
+                      package_args += ['--zsh-bin', zsh]
+                  if spec.is_linux:
+                      result = measured(f'cgu-{units}-bwrap', ['cargo', 'build', '--locked', '--offline', '--target', TARGET, '--profile', 'release', '--bin', 'bwrap'], variant_env, ROOT / 'codex-rs')
+                      phases.append(result)
+                      assert result['exit_code'] == 0
+                      bwrap = ROOT / 'codex-rs/target' / TARGET / 'release/bwrap'
+                      variant_env['CODEX_BWRAP_SHA256'] = hashlib.sha256(bwrap.read_bytes()).hexdigest()
+                      package_args += ['--bwrap-bin', bwrap]
+                  command = ['python', ROOT / 'scripts/build_codex_plus_plus.py', '--fork-version', env['VERSION'], '--', '--cargo-profile', 'release', *package_args]
+                  result = measured(f'cgu-{units}-app-package', command, variant_env)
+                  phases.append(result)
+                  build = {'codegen_units': units, 'phases': phases, 'seconds': sum(phase['seconds'] for phase in phases), 'sampled_peak_tree_rss_bytes': max(phase['sampled_peak_tree_rss_bytes'] for phase in phases), 'exit_code': result['exit_code']}
+                  DATA['builds'].append(build)
+                  save()
+                  assert result['exit_code'] == 0
+                  package_dir = OUT / f'package-{units}'
+                  manifest = json.loads((package_dir / 'codex-package.json').read_text())
+                  executable = package_dir / manifest['entrypoint']
+                  build['binaries'] = {str(path.relative_to(package_dir)): path.stat().st_size for path in package_dir.rglob('*') if path.is_file() and (path.parent.name == 'bin' or (spec.is_windows and path.suffix == '.exe') or path.name == 'bwrap')}
+                  build['cli_bytes'] = executable.stat().st_size
+                  build['package_bytes'] = sum(path.stat().st_size for path in package_dir.rglob('*') if path.is_file())
+                  archive = OUT / f'package-{units}.tar.gz'
+                  subprocess.run(['tar', '-czf', archive, '-C', package_dir, '.'], check=True)
+                  packages[units] = (package_dir, executable, archive)
+                  save()
+              sys.path[:0] = [str(ROOT / 'sdk/python/src'), str(ROOT / 'sdk/python/tests'), str(ROOT / 'scripts/codex_package/smoke_tests')]
+              from fixtures import SmokePackage, responses_server
+              from test_codex_package import test_app_server_runs_code_mode_through_python_sdk, test_cli_public_commands
+              smoke_packages = {}
+              for units, (_, _, archive) in packages.items():
+                  directory = OUT / f'sdk-smoke-{units}'
+                  directory.mkdir()
+                  if WINDOWS:
+                      for path in [directory.parent, directory]:
+                          subprocess.run(['icacls', str(path), '/grant', '*S-1-1-0:(OI)(CI)(RX)'], capture_output=True, check=True)
+                  # The existing fixture accepts archives; this trial exercises only its CLI entrypoint.
+                  package = SmokePackage.from_archives(directory, TARGET, archive, archive, 'gzip')
+                  smoke_packages[units] = package
+                  for arguments, expected in [(('--help',), 'Usage:'), (('--version',), None), (('features', 'list'), 'code_mode'), (('completion', 'bash'), 'codex')]:
+                      test_cli_public_commands(package, arguments, expected)
+                      DATA['tests'].append({'name': f'cgu-{units}-public-{arguments[0]}', 'exit_code': 0})
+                  server = responses_server.__wrapped__(package)
+                  try:
+                      test_app_server_runs_code_mode_through_python_sdk(package, next(server), 'codex')
+                      DATA['tests'].append({'name': f'cgu-{units}-sdk-code-mode', 'exit_code': 0})
+                  except Exception as error:
+                      DATA['tests'].append({'name': f'cgu-{units}-sdk-code-mode', 'exit_code': 1, 'error': f'{type(error).__name__}: {error}'})
+                      traceback.print_exc()
+                  finally:
+                      server.close()
+                  save()
+              for name, args, pairs in [('version', ['--version'], 40), ('help', ['--help'], 40), ('features', ['features', 'list'], 30), ('completion', ['completion', 'bash'], 30), ('schema', ['app-server', 'generate-json-schema'], 15)]:
+                  samples = {4: [], 1: []}
+                  expected = None
+                  for index in range(pairs + 3):
+                      for units in ([4, 1] if index % 2 == 0 else [1, 4]):
+                          package = smoke_packages[units]
+                          command = [str(package.cli), *args]
+                          if name == 'schema':
+                              schema_dir = OUT / f'schema-{units}'
+                              schema_dir.mkdir(exist_ok=True)
+                              command += ['--out', str(schema_dir)]
+                          started = time.perf_counter()
+                          completed = subprocess.run(command, cwd=OUT, env=package.environment, capture_output=True, check=True, timeout=120)
+                          elapsed = time.perf_counter() - started
+                          actual = ({str(path.relative_to(schema_dir)): hashlib.sha256(path.read_bytes()).hexdigest() for path in schema_dir.rglob('*.json')} if name == 'schema' else completed.stdout)
+                          assert actual
+                          if expected is None:
+                              expected = actual
+                          assert actual == expected, f'output mismatch: {name}, CGU={units}'
+                          if index >= 3:
+                              samples[units].append(elapsed)
+                  result = {'name': name, 'pairs': pairs, 'outputs_equal': True, 'median_ms': {str(units): statistics.median(values) * 1000 for units, values in samples.items()}, 'samples_seconds': {str(units): values for units, values in samples.items()}}
+                  if name == 'schema':
+                      result['schema_files'] = len(expected)
+                  DATA['benchmarks'].append(result)
+                  save()
+              DATA['complete'] = True
+              save()
+              with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+                  summary.write(f'## {TARGET}: clean release app builds\n\n| CGU | Build + package seconds | Sampled tree RSS GiB | CLI MiB |\n|---|---:|---:|---:|\n')
+                  for build in DATA['builds']:
+                      summary.write(f"| {build['codegen_units']} | {build['seconds']:.1f} | {build['sampled_peak_tree_rss_bytes'] / 2**30:.2f} | {build['cli_bytes'] / 2**20:.2f} |\n")
+                  summary.write('\nDownloads warmed; no compiled cache. Voice, signing, publishing, and warm release-cache performance excluded.\n')
+              assert all(test['exit_code'] == 0 for test in DATA['tests']), 'one or more checks failed; inspect results.json'
 
-      - name: Smoke package
-        shell: bash
-        env:
-          EXECUTABLE: ${{ inputs.executable }}
-        run: |
-          set -euo pipefail
-          executable="dist/voice-package-${TARGET}/${EXECUTABLE}"
-          [[ "$("$executable" --version)" == "codex-cli ${VERSION}" ]]
 
-      - name: Stage release assets
+          try:
+              main()
+          except Exception as error:
+              DATA['error'] = f'{type(error).__name__}: {error}'
+              save()
+              raise
+          PY
+          uv run --frozen --project scripts/codex_package/smoke_tests python "$RUNNER_TEMP/codegen_trial.py"
+
+      - name: Upload comparison evidence
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: codex-plus-plus-native-${{ inputs.target }}
-          path: dist/codex-plus-plus-${{ env.VERSION }}-${{ inputs.target }}.${{ inputs.archive_suffix }}
-          if-no-files-found: error
+          name: codegen-comparison-${{ inputs.target }}
+          path: |
+            dist/codegen-trial/results.json
+            dist/codegen-trial/*.log
+            dist/codegen-trial/package-*.tar.gz
+          if-no-files-found: warn
           compression-level: 0
-          retention-days: 1
+          retention-days: 7
