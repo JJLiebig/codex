@@ -161,6 +161,11 @@ pub(crate) trait BottomPaneView: Renderable {
     /// Views that return `true` surface an "Action Required" terminal title
     /// instead of the normal working spinner so terminal tabs clearly show that
     /// Codex needs user input.
+    fn program_status_kind(&self) -> Option<crate::codex_plus_plus::program_status::Kind> {
+        self.terminal_title_requires_action()
+            .then_some(crate::codex_plus_plus::program_status::Kind::Question)
+    }
+
     fn terminal_title_requires_action(&self) -> bool {
         false
     }

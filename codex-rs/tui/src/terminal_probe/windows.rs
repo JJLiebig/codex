@@ -85,10 +85,13 @@ fn query_osc_default_colors(
     timeout: Duration,
 ) -> io::Result<Option<DefaultColors>> {
     let deadline = Instant::now() + timeout;
-    write_all(output, b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\")?;
+    let mut query = b"\x1b]10;?\x1b\\\x1b]11;?\x1b\\".to_vec();
+    query.extend_from_slice(crate::codex_plus_plus::program_status::probe_query());
+    write_all(output, &query)?;
 
     let mut replay = ConsoleInputReplay::new(input);
     let result = replay.read_until(deadline);
+    crate::codex_plus_plus::program_status::finish_probe(&replay.input.bytes);
     let replay_result = replay.replay();
     replay_result?;
     result
@@ -130,7 +133,12 @@ impl BufferedConsoleInput {
 
     fn preserved_records(&self) -> Vec<INPUT_RECORD> {
         let mut omitted = vec![false; self.records.len()];
-        for response in terminal_color_response_ranges(&self.bytes) {
+        for response in terminal_color_response_ranges(&self.bytes)
+            .into_iter()
+            .chain(crate::codex_plus_plus::program_status::response_ranges(
+                &self.bytes,
+            ))
+        {
             for byte_index in response {
                 let record_index = self.byte_record_indices[byte_index];
                 omitted[record_index] = true;
@@ -164,7 +172,9 @@ impl ConsoleInputReplay {
 
     fn read_until(&mut self, deadline: Instant) -> io::Result<Option<DefaultColors>> {
         loop {
-            if let Some(colors) = terminal_default_colors(&self.input.bytes) {
+            if let Some(colors) = terminal_default_colors(&self.input.bytes)
+                && crate::codex_plus_plus::program_status::probe_complete(&self.input.bytes)
+            {
                 return Ok(Some(colors));
             }
             if self.input.records.len() >= MAX_WINDOWS_PROBE_RECORDS {

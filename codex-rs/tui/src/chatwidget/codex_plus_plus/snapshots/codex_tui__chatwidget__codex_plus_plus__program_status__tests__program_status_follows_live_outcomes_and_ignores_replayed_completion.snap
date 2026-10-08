@@ -1,0 +1,53 @@
+---
+source: tui/src/chatwidget/codex_plus_plus/program_status_tests.rs
+expression: reports
+---
+[
+    Status {
+        state: Idle,
+        kind: None,
+        message: None,
+    },
+    Status {
+        state: Working,
+        kind: None,
+        message: Some(
+            "Session",
+        ),
+    },
+    Status {
+        state: Blocked,
+        kind: Some(
+            Question,
+        ),
+        message: Some(
+            "Input required",
+        ),
+    },
+    Status {
+        state: Working,
+        kind: None,
+        message: Some(
+            "Session",
+        ),
+    },
+    Status {
+        state: Done,
+        kind: None,
+        message: Some(
+            "Session",
+        ),
+    },
+    Status {
+        state: Error,
+        kind: None,
+        message: Some(
+            "Run failed",
+        ),
+    },
+    Status {
+        state: Idle,
+        kind: None,
+        message: None,
+    },
+]
