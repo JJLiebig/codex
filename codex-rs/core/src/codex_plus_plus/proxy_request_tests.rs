@@ -78,10 +78,19 @@ async fn owned_compaction_failures_preserve_source_in_terminal_event() -> anyhow
         let context = Arc::get_mut(&mut turn).unwrap();
         context.provider = provider;
         context.auth_manager = Some(fixture.manager.clone());
+        let step_context = session
+            .capture_step_context(turn.clone(), &tokio_util::sync::CancellationToken::new())
+            .await?;
+        let world_state = Arc::new(
+            session
+                .build_world_state_for_step(&step_context, /*new_window*/ true)
+                .await?,
+        );
         let result = if remote {
-            crate::compact_remote_v2::run_remote_compact_task(session, turn.clone()).await
+            crate::compact_remote_v2::run_remote_compact_task(session, step_context, world_state)
+                .await
         } else {
-            crate::compact::run_compact_task(session, turn.clone(), Vec::new()).await
+            crate::compact::run_compact_task(session, step_context, world_state, Vec::new()).await
         };
         assert_eq!(
             result.unwrap_err().inference_attribution().cloned(),
