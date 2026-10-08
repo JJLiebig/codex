@@ -82,7 +82,7 @@ pub(crate) async fn maybe_run_readable_handoff(
         return Ok(false);
     }
     let world_state = Arc::new(
-        sess.build_world_state_for_step(&replacement_step_context, /*new_window*/ true)
+        sess.build_world_state_for_step(replacement_step_context, /*new_window*/ true)
             .await?,
     );
     let _profile_guard = destination.turn_timing_state.begin_compaction();
