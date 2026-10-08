@@ -1,5 +1,6 @@
 use super::*;
 use crate::chatwidget::tests::*;
+use codex_app_server_protocol::AsyncUserInputQuestion;
 use pretty_assertions::assert_eq;
 
 #[tokio::test]
@@ -40,14 +41,29 @@ async fn program_status_follows_live_outcomes_and_ignores_replayed_completion() 
         assert_eq!(status.state, expected);
         reports.push(status);
     }
-    for replay in [ReplayKind::ResumeInitialMessages, ReplayKind::ThreadSnapshot] {
-        chat.handle_server_notification(ServerNotification::TurnCompleted(TurnCompletedNotification {
-            thread_id: "thread".into(),
-            turn: app_server_turn("old-failure", TurnStatus::Failed, /*duration_ms*/ None, Some(AppServerTurnError {
-                message: "PRIVATE HISTORICAL ERROR".into(), codex_error_info: None, additional_details: None,
-                inference_attribution: None, usage_limit_observed_at_ns: None, misalignment: None,
-            })),
-        }), Some(replay));
+    for replay in [
+        ReplayKind::ResumeInitialMessages,
+        ReplayKind::ThreadSnapshot,
+    ] {
+        chat.handle_server_notification(
+            ServerNotification::TurnCompleted(TurnCompletedNotification {
+                thread_id: "thread".into(),
+                turn: app_server_turn(
+                    "old-failure",
+                    TurnStatus::Failed,
+                    /*duration_ms*/ None,
+                    Some(AppServerTurnError {
+                        message: "PRIVATE HISTORICAL ERROR".into(),
+                        codex_error_info: None,
+                        additional_details: None,
+                        inference_attribution: None,
+                        usage_limit_observed_at_ns: None,
+                        misalignment: None,
+                    }),
+                ),
+            }),
+            Some(replay),
+        );
         assert_eq!(chat.current_program_status().state, State::Idle);
     }
     chat.record_program_status_completion(&TurnStatus::Completed, /*from_replay*/ true);
@@ -74,7 +90,7 @@ async fn program_status_reports_actual_approval_and_resumes_work() {
         additional_permissions: None,
         available_decisions: None,
     };
-    handle_exec_approval_request(&mut chat, "request", request);
+    chat.on_exec_approval_request("request".into(), request);
     assert_eq!(
         chat.current_program_status(),
         Status {

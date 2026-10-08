@@ -154,7 +154,9 @@ pub(crate) fn finish_probe(input: &[u8]) {
 
 // Even after support is confirmed, consume the query's trailing DA before returning input.
 fn sentinel_received(input: &[u8]) -> bool {
-    response_ranges(input).iter().any(|range| !input[range.clone()].starts_with(PREFIX))
+    response_ranges(input)
+        .iter()
+        .any(|range| !input[range.clone()].starts_with(PREFIX))
 }
 
 fn detected_support(input: &[u8]) -> Option<bool> {
@@ -170,14 +172,17 @@ pub(crate) fn response_ranges(input: &[u8]) -> Vec<Range<usize>> {
     while cursor < input.len() {
         let rest = &input[cursor..];
         if rest.starts_with(b"\x1b[200~") {
-            let Some(end) = rest.windows(6).position(|bytes| bytes == b"\x1b[201~") else {
+            let Some(end) = rest
+                .windows(/*size*/ 6)
+                .position(|bytes| bytes == b"\x1b[201~")
+            else {
                 break;
             };
             cursor += end + 6;
             continue;
         }
         let end = if rest.starts_with(PREFIX) {
-            let bounded = &rest[PREFIX.len()..rest.len().min(4096)];
+            let bounded = &rest[PREFIX.len()..rest.len().min(/*other*/ 4096)];
             bounded
                 .iter()
                 .position(|byte| matches!(*byte, 7 | 27))
@@ -195,8 +200,8 @@ pub(crate) fn response_ranges(input: &[u8]) -> Vec<Range<usize>> {
         } else if rest.starts_with(b"\x1b[?") {
             rest.iter()
                 .enumerate()
-                .skip(3)
-                .take(64)
+                .skip(/*n*/ 3)
+                .take(/*n*/ 64)
                 .find(|(_, byte)| !byte.is_ascii_digit() && **byte != b';')
                 .and_then(|(i, byte)| (*byte == b'c').then_some(i + 1))
         } else {

@@ -28,7 +28,7 @@ fn program_status_messages_are_safe_bounded_utf8() {
     let status = Status {
         state: State::Blocked,
         kind: Some(Kind::Permission),
-        message: Some(format!("\x1b\x07\u{009c}\n{}", "🦀".repeat(700))),
+        message: Some(format!("\x1b\x07\u{009c}\n{}", "🦀".repeat(/*n*/ 700))),
     };
     let report = status.encode();
     assert!(report.len() < 4096);
@@ -67,6 +67,6 @@ fn program_status_writes_changes_and_republishes_after_handoff() {
         .unwrap();
     assert_eq!(
         String::from_utf8(output).unwrap(),
-        "\x1b]7501;state=working:app=codex:msg=U2Vzc2lvbg==\x1b\\".repeat(2)
+        "\x1b]7501;state=working:app=codex:msg=U2Vzc2lvbg==\x1b\\".repeat(/*n*/ 2)
     );
 }

@@ -378,7 +378,10 @@ impl ChatWidget {
     }
 
     fn on_error(&mut self, message: String) {
-        self.record_program_status_completion(&TurnStatus::Failed, self.thread_usage.replaying_turn_completion);
+        self.record_program_status_completion(
+            &TurnStatus::Failed,
+            self.thread_usage.replaying_turn_completion,
+        );
         self.input_queue.submit_pending_steers_after_interrupt = false;
         self.finalize_turn();
         self.add_to_history(history_cell::new_error_event(message));
