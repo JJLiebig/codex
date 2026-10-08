@@ -203,13 +203,21 @@ fn recovery_does_not_wait_for_a_competing_reader() -> Result<()> {
 
     let (reader_ready_tx, reader_ready_rx) = mpsc::channel();
     let (reader_done_tx, reader_done_rx) = mpsc::channel();
+    let reader_handle = unsafe { std::os::windows::io::BorrowedHandle::borrow_raw(handle) };
     let competing_reader = thread::spawn(move || {
         let mut record = unsafe { std::mem::zeroed() };
         let mut read = 0;
         reader_ready_tx
             .send(unsafe { GetCurrentThreadId() })
             .unwrap();
-        unsafe { ReadConsoleInputW(handle, &mut record, 1, &mut read) };
+        unsafe {
+            ReadConsoleInputW(
+                std::os::windows::io::AsRawHandle::as_raw_handle(&reader_handle),
+                &mut record,
+                1,
+                &mut read,
+            )
+        };
         reader_done_tx.send(()).unwrap();
     });
     let reader_thread_id = reader_ready_rx.recv().unwrap();

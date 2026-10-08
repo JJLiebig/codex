@@ -6,6 +6,9 @@ impl BottomPane {
         options: ComposerRenderOptions<'a>,
         status_override: Option<String>,
     ) -> RenderableItem<'a> {
+        if status_override.is_none() {
+            return self.backdrop_with_options(options);
+        }
         let views = if self.centered_dialog().is_some() {
             &self.view_stack[..self.view_stack.len() - 1]
         } else {
