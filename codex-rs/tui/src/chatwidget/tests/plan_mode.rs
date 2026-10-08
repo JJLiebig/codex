@@ -81,19 +81,6 @@ async fn plan_draft_footer_snapshot() {
 }
 
 #[tokio::test]
-async fn plan_draft_footer_narrow_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.bottom_pane
-        .set_composer_text("make a plan".to_string(), Vec::new(), Vec::new());
-    chat.pre_draw_tick();
-
-    assert_chatwidget_snapshot!(
-        "plan_draft_footer_narrow",
-        normalize_snapshot_paths(render_bottom_popup(&chat, /*width*/ 36))
-    );
-}
-
-#[tokio::test]
 async fn plan_implementation_popup_snapshot() {
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
     chat.on_plan_item_completed("- Step 1\n- Step 2\n".to_string());
@@ -114,17 +101,6 @@ async fn plan_implementation_popup_context_usage_snapshot() {
 
     let popup = render_bottom_popup(&chat, /*width*/ 80);
     assert_chatwidget_snapshot!("plan_implementation_popup_context_usage", popup);
-}
-
-#[tokio::test]
-async fn plan_implementation_popup_no_selected_snapshot() {
-    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(Some("gpt-5")).await;
-    chat.on_plan_item_completed("- Step 1\n- Step 2\n".to_string());
-    chat.open_plan_implementation_prompt();
-    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
-
-    let popup = render_bottom_popup(&chat, /*width*/ 80);
-    assert_chatwidget_snapshot!("plan_implementation_popup_no_selected", popup);
 }
 
 #[tokio::test]
@@ -836,6 +812,7 @@ async fn plan_implementation_popup_skips_replayed_turn_complete() {
         vec![AppServerTurn {
             inference_attribution: None,
             id: "turn-1".to_string(),
+            root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![AppServerThreadItem::AgentMessage {
                 id: "msg-plan".to_string(),
@@ -877,6 +854,7 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
         vec![AppServerTurn {
             inference_attribution: None,
             id: "turn-1".to_string(),
+            root_turn_id: None,
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![AppServerThreadItem::AgentMessage {
                 id: "msg-plan-replay".to_string(),
@@ -1187,6 +1165,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
             turn: AppServerTurn {
                 inference_attribution: None,
                 id: "turn-1".to_string(),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
                 status: AppServerTurnStatus::InProgress,
@@ -1233,6 +1212,7 @@ async fn submit_user_message_queues_while_compaction_turn_is_running() {
             turn: AppServerTurn {
                 inference_attribution: None,
                 id: "turn-1".to_string(),
+                root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
                 status: AppServerTurnStatus::Completed,

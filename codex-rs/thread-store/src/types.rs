@@ -459,6 +459,8 @@ pub struct StoredTurn {
     pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// Turn id.
     pub turn_id: String,
+    /// Causal root recorded for this turn. Older projected turns may not have one.
+    pub root_turn_id: Option<String>,
     /// Projected app-server item snapshots associated with this turn, according to `items_view`.
     pub items: Vec<StoredThreadItem>,
     /// Amount of item detail included in `items`.

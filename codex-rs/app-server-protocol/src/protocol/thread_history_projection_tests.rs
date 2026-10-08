@@ -26,6 +26,7 @@ use crate::protocol::v2::TurnError;
 fn projects_turn_lifecycle_without_prior_builder_state() {
     let started = project(RolloutItem::EventMsg(EventMsg::TurnStarted(
         TurnStartedEvent {
+            turn_attribution: None,
             turn_id: "turn-1".to_string(),
             root_turn_id: Some("root-turn".into()),
             trace_id: None,
@@ -37,6 +38,7 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
     let completed = project(RolloutItem::EventMsg(EventMsg::TurnComplete(
         TurnCompleteEvent {
             inference_attribution: None,
+            root_turn_id: Some("root-turn".into()),
             turn_id: "turn-1".to_string(),
             last_agent_message: None,
             error: None,
@@ -61,7 +63,7 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
             changed_turns: vec![ThreadHistoryTurnMetadata {
                 inference_attribution: None,
                 turn_id: "turn-1".to_string(),
-                root_turn_id: None,
+                root_turn_id: Some("root-turn".into()),
                 status: TurnStatus::Completed,
                 error: None,
                 started_at: Some(10),
@@ -88,6 +90,7 @@ fn projects_failed_turn_completion_as_snapshot() {
     let changes = project(RolloutItem::EventMsg(EventMsg::TurnComplete(
         TurnCompleteEvent {
             inference_attribution: None,
+            root_turn_id: None,
             turn_id: "turn-1".to_string(),
             last_agent_message: None,
             error: Some(error),
@@ -210,6 +213,7 @@ fn projects_optional_completed_item_lifecycle_timestamps() {
 fn ignores_legacy_abort_without_turn_id_and_context_only_records() {
     let aborted = project(RolloutItem::EventMsg(EventMsg::TurnAborted(
         TurnAbortedEvent {
+            root_turn_id: None,
             turn_id: None,
             reason: TurnAbortReason::Interrupted,
             error: None,
@@ -248,6 +252,7 @@ fn ignores_legacy_abort_without_turn_id_and_context_only_records() {
 fn projects_identified_turn_aborts() {
     let changes = project(RolloutItem::EventMsg(EventMsg::TurnAborted(
         TurnAbortedEvent {
+            root_turn_id: Some("root-turn".into()),
             turn_id: Some("turn-1".to_string()),
             reason: TurnAbortReason::Interrupted,
             error: None,
@@ -263,7 +268,7 @@ fn projects_identified_turn_aborts() {
             changed_turns: vec![ThreadHistoryTurnMetadata {
                 inference_attribution: None,
                 turn_id: "turn-1".to_string(),
-                root_turn_id: None,
+                root_turn_id: Some("root-turn".into()),
                 status: TurnStatus::Interrupted,
                 error: None,
                 started_at: Some(10),

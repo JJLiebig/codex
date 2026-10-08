@@ -24,6 +24,7 @@ fn turn(id: &str, items: Vec<ThreadItem>) -> Turn {
     Turn {
         inference_attribution: None,
         id: id.to_string(),
+        root_turn_id: None,
         items,
         items_view: TurnItemsView::Full,
         status: TurnStatus::Completed,

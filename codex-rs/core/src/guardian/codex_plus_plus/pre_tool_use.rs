@@ -69,7 +69,10 @@ pub(crate) fn review(
                 turn.session_telemetry.clone(),
             )),
         }
-        .review(GuardianReviewReason::FreshRequired)
+        .review(
+            GuardianReviewReason::FreshRequired,
+            /*async_approval*/ None,
+        )
         .await
         .unwrap_or_else(|| {
             ReviewDecision::denied("automatic approval review did not return a decision")

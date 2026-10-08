@@ -127,6 +127,7 @@ fn finish_turn(
             turn: Turn {
                 inference_attribution: None,
                 id: turn_id.to_string(),
+                root_turn_id: None,
                 items,
                 items_view: TurnItemsView::Summary,
                 status,

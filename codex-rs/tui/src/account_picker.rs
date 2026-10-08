@@ -264,10 +264,13 @@ fn selection_item(candidate: &AccountPickerCandidate) -> SelectionItem {
         usage.join("  ")
     };
     SelectionItem {
-        name: candidate.email.clone(),
+        name: if candidate.is_default {
+            format!("{} (default)", candidate.email)
+        } else {
+            candidate.email.clone()
+        },
         description: Some(format!("Resets: {resets}  {usage}{blocked_until}{in_use}")),
         description_style: Some(Style::default()),
-        is_default: candidate.is_default,
         dismiss_on_select: true,
         search_value: Some(candidate.email.clone()),
         ..Default::default()

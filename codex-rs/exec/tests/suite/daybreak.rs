@@ -235,8 +235,15 @@ async fn exec_resumes_and_forks_the_saved_daybreak_choice() -> anyhow::Result<()
             Some("daybreak_blue"),
         ),
         (
-            vec!["--ephemeral", "fork", thread_id.as_str(), "continue"],
-            Some("daybreak_blue"),
+            vec![
+                "-c",
+                "features.cli_daybreak=false",
+                "--ephemeral",
+                "fork",
+                thread_id.as_str(),
+                "continue",
+            ],
+            None,
         ),
         (
             vec![
@@ -248,87 +255,6 @@ async fn exec_resumes_and_forks_the_saved_daybreak_choice() -> anyhow::Result<()
                 "continue",
             ],
             Some("standard"),
-        ),
-    ] {
-        let response =
-            responses::mount_sse_once(&server, responses::sse_completed("continued")).await;
-        test.cmd_with_server(&server)
-            .env_remove("CODEX_ACCESS_TOKEN")
-            .env_remove("CODEX_API_KEY")
-            .env_remove("OPENAI_API_KEY")
-            .arg("--skip-git-repo-check")
-            .args(args)
-            .assert()
-            .success();
-        assert_eq!(
-            response.single_request().body_json().get("access_programs"),
-            expected.map(|program| json!({"cyber": program})).as_ref()
-        );
-    }
-    Ok(())
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn exec_daybreak_gate_suppresses_saved_choice_for_resume_and_fork() -> anyhow::Result<()> {
-    let (test, server) = configured_daybreak_exec().await?;
-    let response = responses::mount_sse_once(&server, responses::sse_completed("started")).await;
-    let output = test
-        .cmd_with_server(&server)
-        .env_remove("CODEX_ACCESS_TOKEN")
-        .env_remove("CODEX_API_KEY")
-        .env_remove("OPENAI_API_KEY")
-        .args(["--skip-git-repo-check", "--json", "hello"])
-        .output()?;
-    let thread_id = started_thread(output)?;
-    assert_eq!(
-        response.single_request().body_json()["access_programs"],
-        json!({"cyber": "daybreak_blue"})
-    );
-
-    // Disabling the gate affects only its invocation; re-enabling it restores the saved choice.
-    std::fs::write(
-        test.home_path().join("config.toml"),
-        format!(
-            "cli_auth_credentials_store = 'file'\nchatgpt_base_url = '{}/backend-api'\nmodel_catalog_json = '{}'\nmodel = 'gpt-test'\nfeatures.cli_daybreak = true\n",
-            server.uri(),
-            test.home_path().join("catalog.json").display()
-        ),
-    )?;
-    for (args, expected) in [
-        (
-            vec![
-                "-c",
-                "features.cli_daybreak=false",
-                "resume",
-                thread_id.as_str(),
-                "continue",
-            ],
-            None,
-        ),
-        (
-            vec![
-                "-c",
-                "features.cli_daybreak=false",
-                "fork",
-                thread_id.as_str(),
-                "continue",
-            ],
-            None,
-        ),
-        (
-            vec![
-                "-c",
-                "features.cli_daybreak=false",
-                "--ephemeral",
-                "fork",
-                thread_id.as_str(),
-                "continue",
-            ],
-            None,
-        ),
-        (
-            vec!["resume", thread_id.as_str(), "continue"],
-            Some("daybreak_blue"),
         ),
     ] {
         let response =

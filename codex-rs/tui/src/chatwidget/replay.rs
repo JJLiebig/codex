@@ -128,6 +128,7 @@ impl ChatWidget {
             let Turn {
                 inference_attribution,
                 id: turn_id,
+                root_turn_id,
                 items_view: _,
                 items,
                 status,
@@ -227,6 +228,7 @@ impl ChatWidget {
                         turn: Turn {
                             inference_attribution,
                             id: turn_id,
+                            root_turn_id,
                             items_view: codex_app_server_protocol::TurnItemsView::NotLoaded,
                             items: Vec::new(),
                             status,

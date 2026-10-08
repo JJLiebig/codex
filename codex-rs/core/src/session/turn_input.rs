@@ -55,6 +55,9 @@ use uuid::Uuid;
 #[path = "turn_input_tests.rs"]
 mod tests;
 
+#[path = "codex_plus_plus/pending_work.rs"]
+mod pending_work;
+
 /// Why input is starting a turn; shared by admission and input delivery.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum TurnStartKind {
@@ -107,7 +110,10 @@ impl PreparedTurnInputSettings {
         {
             None
         } else {
-            let updates = thread_settings::prepare_update(thread_settings);
+            let updates = thread_settings::prepare_update(
+                thread_settings,
+                &session.services.selected_capability_roots,
+            );
             session
                 .preview_settings(&updates)
                 .await
@@ -138,6 +144,7 @@ impl PreparedTurnInputSettings {
             final_output_json_schema,
             service_tier,
             parent_turn_id,
+            initiating_agent_path,
             root_turn_id,
             cyber_access_program,
         } = self.start_options;
@@ -183,6 +190,11 @@ impl PreparedTurnInputSettings {
             thread_settings::emit_applied(session, submission_id, settings_snapshot).await;
         }
         if let Some(parent_turn_id) = parent_turn_id {
+            if let Some(initiating_agent_path) = initiating_agent_path {
+                turn_context
+                    .turn_metadata_state
+                    .set_initiating_agent_path(initiating_agent_path);
+            }
             turn_context
                 .turn_metadata_state
                 .set_parent_turn_id(parent_turn_id);
@@ -262,8 +274,9 @@ pub(super) async fn handle(
         }
     };
     // Link this request's trace to the accepted turn, which may have an older trace.
-    if let Ok(TurnInputSubmission::Started { turn_id } | TurnInputSubmission::Steered { turn_id }) =
-        &result
+    if let Ok(
+        TurnInputSubmission::Started { turn_id, .. } | TurnInputSubmission::Steered { turn_id, .. },
+    ) = &result
     {
         tracing::Span::current().record("turn.id", turn_id);
     }
@@ -288,10 +301,7 @@ pub(super) async fn handle_recovery(
     } = thread_settings.into();
     let request = TurnInputRequest::user_input(Vec::new())
         .with_thread_settings(thread_settings)
-        .on_start(TurnStartOptions {
-            turn_trigger: Some("retry".to_string()),
-            ..start_options
-        });
+        .on_start(start_options);
     let result = start_if_idle(
         session,
         WithTurnExtensionData {
@@ -303,7 +313,7 @@ pub(super) async fn handle_recovery(
         /*expected_previous_turn_id*/ None,
     )
     .await;
-    if let Ok(TurnInputSubmission::Started { turn_id }) = &result {
+    if let Ok(TurnInputSubmission::Started { turn_id, .. }) = &result {
         tracing::Span::current().record("turn.id", turn_id);
     }
     result
@@ -360,9 +370,12 @@ async fn start_or_steer(
         )
         .await
     {
-        Ok(turn_id) => {
+        Ok((turn_id, root_turn_id)) => {
             settings.apply_steered(session, submission_id).await?;
-            Ok(TurnInputSubmission::Steered { turn_id })
+            Ok(TurnInputSubmission::Steered {
+                turn_id,
+                root_turn_id,
+            })
         }
         Err(NotSubmittedReason::NoActiveTurn) => {
             // MAv1 sends explicit input to spawned agents as part of an existing
@@ -410,10 +423,11 @@ async fn start_or_steer(
                     .push(pending_turn_input(session, input, &turn_context.sub_id, origin).await);
             }
             session
-                .spawn_task(turn_context, task_input, RegularTask::new())
+                .spawn_task(Arc::clone(&turn_context), task_input, RegularTask::new())
                 .await;
             Ok(TurnInputSubmission::Started {
                 turn_id: submission_id,
+                root_turn_id: turn_context.root_turn_id(),
             })
         }
         Err(reason) => Ok(TurnInputSubmission::NotSubmitted { reason }),
@@ -572,10 +586,11 @@ async fn start_if_idle(
         }
     }
     session
-        .start_task(turn_context, task_input, RegularTask::new())
+        .start_task(Arc::clone(&turn_context), task_input, RegularTask::new())
         .await;
     Ok(TurnInputSubmission::Started {
         turn_id: submission_id,
+        root_turn_id: turn_context.root_turn_id(),
     })
 }
 
@@ -623,9 +638,12 @@ async fn steer(
         )
         .await
     {
-        Ok(turn_id) => {
+        Ok((turn_id, root_turn_id)) => {
             settings.apply_steered(session, submission_id).await?;
-            Ok(TurnInputSubmission::Steered { turn_id })
+            Ok(TurnInputSubmission::Steered {
+                turn_id,
+                root_turn_id,
+            })
         }
         Err(reason) => Ok(TurnInputSubmission::NotSubmitted { reason }),
     }
@@ -633,8 +651,27 @@ async fn steer(
 
 impl Session {
     /// Called under the active-turn lock before running any task or lifecycle callback.
-    pub(crate) async fn record_started_turn(&self, turn_id: &str) {
-        self.state.lock().await.last_started_turn_id = Some(turn_id.to_string());
+    pub(crate) async fn record_started_turn(
+        &self,
+        turn_id: &str,
+        attribution: Option<codex_history::TurnAttribution>,
+    ) {
+        let mut state = self.state.lock().await;
+        state.last_started_turn_id = Some(turn_id.to_owned());
+        if let Some(attribution) = attribution {
+            state.turn_attribution = Some(attribution);
+        }
+    }
+
+    pub(crate) async fn reserve_pending_work_turn(
+        &self,
+    ) -> Option<(
+        Arc<tokio::sync::Mutex<TurnState>>,
+        TurnStartOptions,
+        Option<u64>,
+        Vec<TurnInput>,
+    )> {
+        pending_work::reserve(self).await
     }
 
     pub(crate) async fn route_realtime_text_input(
@@ -712,7 +749,7 @@ impl Session {
         required_final_output_json_schema: Option<&Value>,
         responsesapi_client_metadata: Option<HashMap<String, String>>,
         origin: UserInputOrigin,
-    ) -> Result<String, NotSubmittedReason> {
+    ) -> Result<(String, String), NotSubmittedReason> {
         let mut active = self.active_turn.lock().await;
         let Some(active_turn) = active.as_mut() else {
             return Err(NotSubmittedReason::NoActiveTurn);
@@ -790,7 +827,10 @@ impl Session {
                 pending_input,
             )
             .await;
-        Ok(active_turn_id.clone())
+        Ok((
+            active_turn_id.clone(),
+            active_task.turn_context.root_turn_id(),
+        ))
     }
 }
 

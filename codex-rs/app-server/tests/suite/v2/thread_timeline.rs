@@ -98,6 +98,7 @@ async fn timeline_pages_mix_items_and_resolve_the_opening_realtime_session() -> 
                     content: RealtimeItemContent::RealtimeSessionStarted,
                 }),
                 RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+                    turn_attribution: None,
                     turn_id: "turn-1".to_string(),
                     root_turn_id: None,
                     trace_id: None,
@@ -129,6 +130,7 @@ async fn timeline_pages_mix_items_and_resolve_the_opening_realtime_session() -> 
                 }),
                 RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
                     inference_attribution: None,
+                    root_turn_id: None,
                     turn_id: "turn-1".to_string(),
                     last_agent_message: None,
                     error: None,

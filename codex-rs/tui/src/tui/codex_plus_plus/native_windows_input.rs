@@ -163,7 +163,7 @@ pub(in crate::tui) fn restore_native_windows_input_mode() -> Result<()> {
 #[cfg(windows)]
 fn windows_console_input_mode() -> Result<Option<(HANDLE, u32)>> {
     let handle = unsafe { GetStdHandle(STD_INPUT_HANDLE) };
-    if handle == INVALID_HANDLE_VALUE || handle == 0 {
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
         return Ok(None);
     }
 
