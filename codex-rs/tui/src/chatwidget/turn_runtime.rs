@@ -378,6 +378,7 @@ impl ChatWidget {
     }
 
     fn on_error(&mut self, message: String) {
+        self.program_status.resting = crate::codex_plus_plus::program_status::State::Error;
         self.input_queue.submit_pending_steers_after_interrupt = false;
         self.finalize_turn();
         self.add_to_history(history_cell::new_error_event(message));

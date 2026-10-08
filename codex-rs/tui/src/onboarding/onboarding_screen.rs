@@ -590,8 +590,10 @@ async fn run_onboarding_screen_inner(
     let tui_events = tui.event_stream();
     tokio::pin!(tui_events);
     let mut trust_step_was_active = onboarding_screen.is_trust_step_active();
+    let mut program_status = crate::codex_plus_plus::program_status::Reporter::default();
 
     while !onboarding_screen.is_done() {
+        program_status.publish(onboarding_screen.program_status());
         tokio::select! {
             event = tui_events.next() => {
                 if let Some(event) = event {
@@ -742,6 +744,11 @@ async fn run_onboarding_screen_inner(
             },
         )?;
     }
+    program_status.publish(crate::codex_plus_plus::program_status::Status {
+        state: crate::codex_plus_plus::program_status::State::Idle,
+        kind: None,
+        message: None,
+    });
     Ok(OnboardingResult {
         directory_trust_persisted,
         should_exit: onboarding_screen.should_exit(),
@@ -1040,3 +1047,6 @@ mod tests {
         );
     }
 }
+
+#[path = "codex_plus_plus/program_status.rs"]
+mod program_status;

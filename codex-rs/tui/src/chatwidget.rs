@@ -653,6 +653,7 @@ pub(crate) struct ChatWidget {
     // Preserves reasoning-summary part boundaries for transcript-only recording.
     reasoning_summary_parts: Vec<String>,
     status_state: StatusState,
+    program_status: crate::codex_plus_plus::program_status::Reporter,
     review: ReviewState,
     // Active hook runs render in a dedicated live cell so they can run alongside tools.
     active_hook_cell: Option<HookCell>,

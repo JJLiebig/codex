@@ -402,6 +402,7 @@ fn restore_common(
     keyboard_restore: KeyboardRestore,
     handoff: TerminalHandoff,
 ) -> Result<()> {
+    crate::codex_plus_plus::program_status::clear();
     let mut first_error = ensure_virtual_terminal_processing().err();
 
     let screen_result = match handoff {

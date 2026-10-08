@@ -219,6 +219,7 @@ impl ChatWidget {
             reasoning_header: None,
             reasoning_summary_parts: Vec::new(),
             status_state: StatusState::default(),
+            program_status: Default::default(),
             review: ReviewState::default(),
             active_hook_cell: None,
             pet_http_client,

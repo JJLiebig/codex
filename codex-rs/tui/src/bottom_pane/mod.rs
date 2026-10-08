@@ -4006,3 +4006,6 @@ mod tests {
         assert_eq!(lower_view_handle_calls.get(), 0);
     }
 }
+
+#[path = "codex_plus_plus/program_status.rs"]
+mod program_status;

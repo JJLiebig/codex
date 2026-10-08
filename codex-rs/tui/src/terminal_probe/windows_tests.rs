@@ -62,6 +62,7 @@ fn preserves_typeahead_records_and_modifier_state_around_color_responses() {
     );
     input.push(before);
     push_ascii(&mut input, b"\x1b]10;rgb:5555/5757/5353\x1b\\");
+    push_ascii(&mut input, b"\x1b]7501;?:future=yes\x1b\\\x1b[?64;1c");
     input.push(after);
     push_ascii(&mut input, b"\x1b]11;rgb:ffff/ffff/ffff\x07");
 

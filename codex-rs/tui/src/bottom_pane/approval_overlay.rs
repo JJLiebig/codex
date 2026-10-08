@@ -617,6 +617,10 @@ impl BottomPaneView for ApprovalOverlay {
         self.dismiss_resolved_request(request)
     }
 
+    fn program_status_kind(&self) -> Option<crate::codex_plus_plus::program_status::Kind> {
+        Some(crate::codex_plus_plus::program_status::Kind::Permission)
+    }
+
     fn terminal_title_requires_action(&self) -> bool {
         true
     }
