@@ -120,7 +120,7 @@ fn maps_five_hour_and_weekly_windows_to_picker_usage() {
             credits: None,
             individual_limit: None,
             spend_control_reached: None,
-            plan_type: None,
+            plan_type: Some(codex_protocol::account::PlanType::Pro),
             rate_limit_reached_type: None,
         }],
         rate_limit_reset_credits: Some(codex_backend_client::RateLimitResetCreditsSummary {
@@ -135,6 +135,7 @@ fn maps_five_hour_and_weekly_windows_to_picker_usage() {
     assert_eq!(
         account_usage(&response),
         AccountUsage {
+            plan_type: Some(codex_protocol::account::PlanType::Pro),
             available_resets: Some(2),
             primary_window_minutes: Some(300),
             five_hour_reset_at: Some(1_749_950_000),
@@ -170,6 +171,7 @@ fn maps_weekly_only_primary_window_to_weekly_picker_usage() {
     assert_eq!(
         account_usage_from_snapshot(&snapshot),
         AccountUsage {
+            plan_type: None,
             available_resets: None,
             primary_window_minutes: None,
             five_hour_reset_at: None,
@@ -186,6 +188,7 @@ fn maps_weekly_only_primary_window_to_weekly_picker_usage() {
 #[test]
 fn exhausted_until_uses_the_later_exhausted_window_reset() {
     let usage = AccountUsage {
+        plan_type: None,
         available_resets: None,
         primary_window_minutes: Some(300),
         five_hour_reset_at: Some(1_749_950_000),
@@ -229,6 +232,7 @@ fn rounded_zero_remaining_does_not_mark_window_exhausted() {
     assert_eq!(
         account_usage(&response),
         AccountUsage {
+            plan_type: None,
             available_resets: None,
             primary_window_minutes: Some(300),
             five_hour_reset_at: Some(1_749_950_000),

@@ -312,6 +312,7 @@ pub(super) fn account_picker_candidate(
     account_picker::AccountPickerCandidate {
         id: candidate.id.to_string(),
         email: candidate.display_label.clone(),
+        plan_type: usage.and_then(|usage| usage.plan_type),
         available_resets: usage.and_then(|usage| usage.available_resets),
         primary_window_label: crate::chatwidget::limit_label_for_window(
             usage.and_then(|usage| usage.primary_window_minutes),

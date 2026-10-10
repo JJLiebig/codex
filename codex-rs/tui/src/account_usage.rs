@@ -28,6 +28,7 @@ mod cooldown;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AccountUsage {
+    pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
     pub(crate) available_resets: Option<i64>,
     pub(crate) primary_window_minutes: Option<i64>,
     pub(crate) five_hour_reset_at: Option<i64>,
@@ -250,6 +251,7 @@ fn account_usage_from_snapshot(snapshot: &RateLimitSnapshot) -> AccountUsage {
         (primary, secondary)
     };
     AccountUsage {
+        plan_type: snapshot.plan_type,
         available_resets: None,
         primary_window_minutes: five_hour.and_then(|window| window.window_minutes),
         five_hour_reset_at: five_hour.and_then(|window| window.resets_at),

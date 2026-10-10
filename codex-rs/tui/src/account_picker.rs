@@ -31,6 +31,7 @@ const STARTUP_AUTO_PICK_AFTER: Duration = Duration::from_secs(15);
 pub(crate) struct AccountPickerCandidate {
     pub(crate) id: String,
     pub(crate) email: String,
+    pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
     pub(crate) available_resets: Option<i64>,
     pub(crate) primary_window_label: String,
     pub(crate) five_hour_reset: Option<String>,
@@ -234,6 +235,15 @@ fn selection_params(
 }
 
 fn selection_item(candidate: &AccountPickerCandidate) -> SelectionItem {
+    let tier = candidate
+        .plan_type
+        .filter(|plan| *plan != codex_protocol::account::PlanType::Unknown)
+        .map_or_else(String::new, |plan| {
+            format!(
+                "{}  ",
+                crate::subscription::SubscriptionDisplay::Status.label(plan)
+            )
+        });
     let resets = candidate
         .available_resets
         .map_or_else(|| "-".to_string(), |count| count.to_string());
@@ -269,7 +279,9 @@ fn selection_item(candidate: &AccountPickerCandidate) -> SelectionItem {
         } else {
             candidate.email.clone()
         },
-        description: Some(format!("Resets: {resets}  {usage}{blocked_until}{in_use}")),
+        description: Some(format!(
+            "{tier}Resets: {resets}  {usage}{blocked_until}{in_use}"
+        )),
         description_style: Some(Style::default()),
         dismiss_on_select: true,
         search_value: Some(candidate.email.clone()),
