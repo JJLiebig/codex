@@ -12,6 +12,7 @@ fn candidates() -> Vec<AccountPickerCandidate> {
         AccountPickerCandidate {
             id: "acct_a".to_string(),
             email: "first@example.com".to_string(),
+            plan_type: Some(codex_protocol::account::PlanType::Plus),
             available_resets: Some(0),
             primary_window_label: "5h".to_string(),
             five_hour_reset: Some("Jul 10 17:00".to_string()),
@@ -29,6 +30,7 @@ fn candidates() -> Vec<AccountPickerCandidate> {
         AccountPickerCandidate {
             id: "acct_b".to_string(),
             email: "best@example.com".to_string(),
+            plan_type: Some(codex_protocol::account::PlanType::Pro),
             available_resets: Some(2),
             primary_window_label: "5h".to_string(),
             five_hour_reset: Some("Jul 10 18:00".to_string()),
@@ -46,6 +48,7 @@ fn candidates() -> Vec<AccountPickerCandidate> {
         AccountPickerCandidate {
             id: "acct_c".to_string(),
             email: "unknown@example.com".to_string(),
+            plan_type: None,
             available_resets: None,
             primary_window_label: "5h".to_string(),
             five_hour_reset: None,
@@ -70,19 +73,25 @@ fn account_picker_snapshot() {
     let mut weekly_only = rows[1].clone();
     weekly_only.id = "acct_weekly".to_string();
     weekly_only.email = "weekly@example.com".to_string();
+    weekly_only.plan_type = Some(codex_protocol::account::PlanType::ProLite);
     weekly_only.five_hour_reset = None;
     weekly_only.five_hour_usage_left_percent = None;
     weekly_only.weekly_reset = Some("Jul 15 12:00".to_string());
     weekly_only.weekly_usage_left_percent = Some(84);
     weekly_only.is_default = false;
     rows.push(weekly_only);
+    let mut pro_max = rows[1].clone();
+    pro_max.email = "max@example.com".to_string();
+    pro_max.plan_type = Some(codex_protocol::account::PlanType::ProMax);
+    pro_max.is_default = false;
+    rows.push(pro_max);
     let view = new_view(
         &rows,
         /*selected_idx*/ 1,
         /*seconds_remaining*/ Some(15),
     );
     let mut terminal =
-        Terminal::new(VT100Backend::new(/*width*/ 100, /*height*/ 10)).expect("terminal");
+        Terminal::new(VT100Backend::new(/*width*/ 120, /*height*/ 11)).expect("terminal");
     terminal
         .draw(|frame| view.render(frame.area(), frame.buffer_mut()))
         .expect("render account picker");
@@ -91,7 +100,7 @@ fn account_picker_snapshot() {
         .backend()
         .vt100()
         .screen()
-        .cell(/*row*/ 3, /*col*/ 33)
+        .cell(/*row*/ 3, /*col*/ 39)
         .expect("first usage description");
     assert_eq!(usage.contents(), "R");
     assert!(!usage.dim());
@@ -216,12 +225,15 @@ async fn manual_mode_waits_for_selection() {
 
 #[test]
 fn row_description_uses_one_unknown_for_missing_usage_data() {
-    let item = selection_item(&candidates()[2]);
-
-    assert_eq!(
-        item.description.as_deref(),
-        Some("Resets: -  Usage unknown")
-    );
+    for plan_type in [None, Some(codex_protocol::account::PlanType::Unknown)] {
+        let mut candidate = candidates()[2].clone();
+        candidate.plan_type = plan_type;
+        let item = selection_item(&candidate);
+        assert_eq!(
+            item.description.as_deref(),
+            Some("Resets: -  Usage unknown")
+        );
+    }
 }
 
 #[test]

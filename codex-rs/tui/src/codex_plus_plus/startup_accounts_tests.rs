@@ -17,6 +17,7 @@ fn picker_candidate(id: &str, is_current: bool) -> account_picker::AccountPicker
     account_picker::AccountPickerCandidate {
         id: id.to_string(),
         email: format!("{id}@example.com"),
+        plan_type: None,
         available_resets: None,
         primary_window_label: "5h".to_string(),
         five_hour_reset: None,
@@ -182,6 +183,7 @@ fn picker_shows_local_reset_times_and_available_credits() {
             .unwrap()
             .timestamp();
         let usage = account_usage::AccountUsage {
+            plan_type: Some(codex_protocol::account::PlanType::ProMax),
             available_resets: Some(2),
             five_hour_reset_at: Some(timestamp),
             weekly_reset_at: Some(timestamp),
@@ -200,6 +202,10 @@ fn picker_shows_local_reset_times_and_available_credits() {
                 candidate.available_resets
             ),
             (Some(expected), Some(expected), Some(2)),
+        );
+        assert_eq!(
+            candidate.plan_type,
+            Some(codex_protocol::account::PlanType::ProMax)
         );
     }
 }
