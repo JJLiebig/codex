@@ -1,6 +1,7 @@
 //! Codex++ settings exposed through fork slash commands.
 
 mod accounts;
+mod cache_deadline;
 mod dcg;
 
 use std::sync::Arc;
@@ -242,6 +243,13 @@ fn codex_plus_plus_settings_params(
         selection,
         weekly_supported,
     ));
+    items.push(SelectionItem {
+        name: "Auto-compact before cache expiry".to_string(),
+        description: Some("Choose when to compact before each model's cache expires.".to_string()),
+        actions: vec![Box::new(|tx| tx.send(AppEvent::OpenCacheDeadlineModels))],
+        dismiss_on_select: true,
+        ..Default::default()
+    });
     SelectionViewParams {
         title: Some("Codex++ Settings".to_string()),
         subtitle: Some("Select the settings to enable.".to_string()),
