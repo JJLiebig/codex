@@ -422,10 +422,11 @@ impl App {
             if started.blocks_direct_input {
                 self.agent_navigation.mark_parent_owned(id);
             }
+            let prompt_cache = self.prompt_cache_for_thread(id).await;
             let channel = ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY);
             {
                 let mut store = channel.store.lock().await;
-                store.prompt_cache = self.prompt_cache_for_thread(id).await;
+                store.prompt_cache = prompt_cache;
                 store.set_session(started.session, started.turns);
                 store.input_state = input.clone();
             }
