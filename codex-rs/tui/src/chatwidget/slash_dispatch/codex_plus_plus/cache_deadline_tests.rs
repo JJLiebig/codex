@@ -93,6 +93,26 @@ async fn cache_deadline_model_picker_and_custom_prompt_keep_model_identity() {
         KeyCode::Char('u'),
         crossterm::event::KeyModifiers::CONTROL,
     ));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Char('1')));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Char('h')));
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    let AppEvent::InsertHistoryCell(error) = events.try_recv().unwrap() else {
+        panic!("expected known cache lifetime error")
+    };
+    insta::assert_snapshot!(
+        "cache_deadline_custom_error",
+        error
+            .display_lines(84)
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    chat.open_cache_deadline_custom("gpt-6.1-sol".into());
+    chat.handle_key_event(KeyEvent::new(
+        KeyCode::Char('u'),
+        crossterm::event::KeyModifiers::CONTROL,
+    ));
     chat.handle_key_event(KeyEvent::from(KeyCode::Char('3')));
     chat.handle_key_event(KeyEvent::from(KeyCode::Char('s')));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));

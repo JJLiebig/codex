@@ -68,6 +68,16 @@ impl ChatWidget {
             duration_label(seconds),
             Some("Compacts once when idle or before the next response.".to_string()),
             Box::new(move |text| match parse_duration(&text) {
+                Some(seconds)
+                    if codex_config::cache_deadline_known_lifetime(&model)
+                        .is_some_and(|ttl| seconds >= ttl.as_secs()) =>
+                {
+                    tx.send(AppEvent::InsertHistoryCell(Box::new(
+                        history_cell::new_error_event(
+                            "Astra / Sol intervals must be under 60m. Try 55m.".to_string(),
+                        ),
+                    )))
+                }
                 Some(seconds) => tx.send(AppEvent::PersistCacheDeadline {
                     model: model.clone(),
                     seconds,

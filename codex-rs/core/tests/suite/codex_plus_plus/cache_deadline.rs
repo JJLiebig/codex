@@ -19,14 +19,19 @@ use std::sync::Arc;
 use std::time::Duration;
 use test_case::test_case;
 
+#[test_case(3300, 3300; "default waits for active tool")]
+#[test_case(1800, 2400; "custom interval stays fresh until known expiry")]
 #[tokio::test]
-async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary() -> Result<()> {
+async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary(
+    interval: u64,
+    elapsed: u64,
+) -> Result<()> {
     use codex_protocol::config_types::CollaborationMode;
     use codex_protocol::config_types::ModeKind;
     use codex_protocol::config_types::Settings;
     use codex_protocol::request_user_input::RequestUserInputAnswer;
     use codex_protocol::request_user_input::RequestUserInputResponse;
-    let harness = harness(3300).await?;
+    let harness = harness(interval).await?;
     let arguments = json!({"questions": [{"id": "choice", "header": "Choose", "question": "Continue?",
         "options": [{"label": "Yes", "description": "Continue"}, {"label": "No", "description": "Stop"}]}]}).to_string();
     let mock = responses::mount_sse_sequence(
@@ -53,7 +58,7 @@ async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary
                 collaboration_mode: Some(CollaborationMode {
                     mode: ModeKind::Plan,
                     settings: Settings {
-                        model: "gpt-5.4".to_string(),
+                        model: "gpt-6-astra".to_string(),
                         reasoning_effort: None,
                         developer_instructions: None,
                     },
@@ -69,7 +74,7 @@ async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary
     else {
         unreachable!()
     };
-    advance(3300).await;
+    advance(elapsed).await;
     assert_eq!(
         mock.requests().len(),
         1,
@@ -120,7 +125,7 @@ fn builder(seconds: u64) -> TestCodexBuilder {
     extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
     test_codex()
         .with_extensions(Arc::new(extensions.build()))
-        .with_model("gpt-5.4")
+        .with_model("gpt-6-astra")
         .with_session_source(SessionSource::Cli)
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
@@ -133,7 +138,7 @@ fn builder(seconds: u64) -> TestCodexBuilder {
                     toml::from_str(&if seconds == 0 {
                         String::new()
                     } else {
-                        format!("[cache_deadline_compact_seconds]\n'gpt-5.4' = {seconds}")
+                        format!("[cache_deadline_compact_seconds]\n'gpt-6-astra' = {seconds}")
                     })
                     .unwrap(),
                 )
@@ -249,9 +254,15 @@ async fn cache_deadline_compacts_once_and_foreground_rearms(fail: bool) -> Resul
 #[test_case("off"; "missing deadline stays off")]
 #[test_case("overdue"; "resume after expiry drops stale deadline")]
 #[test_case("model"; "model changes disarm deadline")]
+#[test_case("too_late"; "known expired interval stays off")]
 #[tokio::test]
 async fn cache_deadline_does_not_compact_stale_or_disabled_context(case: &str) -> Result<()> {
-    let harness = harness(if case == "off" { 0 } else { 3300 }).await?;
+    let harness = harness(match case {
+        "off" => 0,
+        "too_late" => 3600,
+        _ => 3300,
+    })
+    .await?;
     let mock =
         responses::mount_sse_sequence(harness.server(), vec![reply("first"), reply("next")]).await;
     prompt(&harness, "retain original history").await?;
@@ -265,7 +276,12 @@ async fn cache_deadline_does_not_compact_stale_or_disabled_context(case: &str) -
             })
             .await?;
     }
-    advance(if case == "overdue" { 3601 } else { 3300 }).await;
+    advance(if matches!(case, "overdue" | "too_late") {
+        3601
+    } else {
+        3300
+    })
+    .await;
     prompt(&harness, "continue").await?;
     let requests = mock.requests();
     assert_eq!(requests.len(), 2);

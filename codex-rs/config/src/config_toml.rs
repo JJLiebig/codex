@@ -312,6 +312,7 @@ pub struct ConfigToml {
     pub disable_unnecessary_updates: Option<bool>,
     /// Seconds after foreground inference before one automatic compaction, by exact model ID.
     /// Missing models or zero disable the deadline; timers are not restored when reopening threads.
+    /// Astra/Sol intervals must be below their tested 3600-second lifetime; larger values are ignored.
     pub cache_deadline_compact_seconds: Option<BTreeMap<String, u64>>,
     /// How Codex++ presents routine tool activity in the main TUI conversation.
     pub codex_plus_plus_tool_activity: Option<ToolActivityPresentation>,

@@ -5,6 +5,7 @@ use super::step_context::StepContext;
 use super::turn_context::TurnContext;
 use crate::client::ModelClientSession;
 use crate::state::ActiveTurn;
+use crate::state::MailboxDeliveryPhase;
 use crate::state::TaskKind;
 use crate::tasks::SessionTask;
 use crate::tasks::SessionTaskResult;
@@ -24,8 +25,8 @@ use tokio::sync::Notify;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
-// Astra/Sol's tested 60-minute lifetime leaves five minutes after the 55-minute default.
-const EXPIRY_MARGIN: Duration = Duration::from_secs(5 * 60);
+// Unknown model lifetimes are not inferred: skip maintenance more than five minutes late.
+const MAX_LATENESS: Duration = Duration::from_secs(5 * 60);
 
 struct Deadline {
     due: Instant,
@@ -116,13 +117,16 @@ pub(super) async fn record_foreground(session: &Session, step: &StepContext, req
     let Some(due) = now.checked_add(interval) else {
         return;
     };
-    let Some(expires) = due.checked_add(EXPIRY_MARGIN) else {
+    let Some(fresh_for) =
+        codex_config::cache_deadline_known_lifetime(&step.settings.model_info.slug)
+            .or_else(|| interval.checked_add(MAX_LATENESS))
+    else {
         return;
     };
-    let Some(wall_expires) = SystemTime::now()
-        .checked_add(interval)
-        .and_then(|due| due.checked_add(EXPIRY_MARGIN))
-    else {
+    let Some(expires) = now.checked_add(fresh_for) else {
+        return;
+    };
+    let Some(wall_expires) = SystemTime::now().checked_add(fresh_for) else {
         return;
     };
     let window = session.current_window_id().await;
@@ -240,10 +244,26 @@ pub(super) async fn start_if_idle(
         session.clear_reserved_idle_turn(&reservation).await;
         return;
     }
+    reservation
+        .lock()
+        .await
+        .set_mailbox_delivery_phase(MailboxDeliveryPhase::NextTurn);
     context.extension_data.insert(CacheDeadlineTask);
     session
         .start_task(context, Vec::new(), CacheDeadlineTask)
         .await;
+}
+
+// Mail arriving during admission belongs to a regular turn, never to optional maintenance.
+pub(crate) async fn starting_mailbox_input(
+    session: &Session,
+    context: &TurnContext,
+) -> Vec<super::TurnInput> {
+    if context.extension_data.get::<CacheDeadlineTask>().is_some() {
+        Vec::new()
+    } else {
+        session.input_queue.drain_mailbox_input_items().await.0
+    }
 }
 
 /// Foreground submissions can cancel this optional maintenance through normal task cancellation.
@@ -287,6 +307,9 @@ impl SessionTask for CacheDeadlineTask {
         cancellation: CancellationToken,
     ) -> SessionTaskResult {
         session.emit_turn_started(&context, TaskKind::Compact).await;
+        if session.input_queue.has_pending_mailbox_items().await {
+            return Ok(None);
+        }
         let step = session.capture_step_context(context, &cancellation).await?;
         super::turn::run_auto_compact(
             &session,
@@ -301,3 +324,7 @@ impl SessionTask for CacheDeadlineTask {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+#[path = "cache_deadline_tests.rs"]
+mod tests;

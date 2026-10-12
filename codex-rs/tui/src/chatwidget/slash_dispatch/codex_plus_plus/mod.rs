@@ -240,13 +240,16 @@ fn codex_plus_plus_settings_params(
         "Disable unnecessary updates to save tokens",
         "Report meaningful progress instead of timed status updates.",
         Arc::clone(&selection.quiet_updates),
-        selection,
+        selection.clone(),
         weekly_supported,
     ));
     items.push(SelectionItem {
         name: "Auto-compact before cache expiry".to_string(),
         description: Some("Choose when to compact before each model's cache expires.".to_string()),
-        actions: vec![Box::new(|tx| tx.send(AppEvent::OpenCacheDeadlineModels))],
+        actions: vec![
+            settings_save_action(selection, weekly_supported),
+            Box::new(|tx| tx.send(AppEvent::OpenCacheDeadlineModels)),
+        ],
         dismiss_on_select: true,
         ..Default::default()
     });
@@ -274,39 +277,45 @@ fn settings_item(
             is_on: toggle.load(Ordering::Relaxed),
             action: Box::new(move |is_on, _tx| toggle_action.store(is_on, Ordering::Relaxed)),
         }),
-        actions: vec![Box::new(move |tx| {
-            let automatic = if selection.automatic.load(Ordering::Relaxed) {
-                AutomaticOn
-            } else {
-                AutomaticOff
-            };
-            tx.send(AppEvent::PersistCodexPlusPlusSettings {
-                disable_unnecessary_updates: selection.quiet_updates.load(Ordering::Relaxed),
-                automatic_account_selection: automatic,
-                weekly_usage_window_auto_start: save_weekly.then(|| {
-                    if selection.weekly.load(Ordering::Relaxed) {
-                        WeeklyOn
-                    } else {
-                        WeeklyOff
-                    }
-                }),
-                auto_redeem_resets: save_weekly.then(|| selection.selected_auto_redeem()),
-                model_capacity_retry_mode: if selection.capacity_indefinite.load(Ordering::Relaxed)
-                {
-                    CapacityIndefinite
-                } else {
-                    CapacityBounded
-                },
-                tool_activity: if selection.compact_tool_activity.load(Ordering::Relaxed) {
-                    ActivityCompact
-                } else {
-                    ActivityFull
-                },
-            });
-        })],
+        actions: vec![settings_save_action(selection, save_weekly)],
         dismiss_on_select: true,
         ..Default::default()
     }
+}
+
+fn settings_save_action(
+    selection: SettingsSelection,
+    save_weekly: bool,
+) -> crate::bottom_pane::SelectionAction {
+    Box::new(move |tx| {
+        let automatic = if selection.automatic.load(Ordering::Relaxed) {
+            AutomaticOn
+        } else {
+            AutomaticOff
+        };
+        tx.send(AppEvent::PersistCodexPlusPlusSettings {
+            disable_unnecessary_updates: selection.quiet_updates.load(Ordering::Relaxed),
+            automatic_account_selection: automatic,
+            weekly_usage_window_auto_start: save_weekly.then(|| {
+                if selection.weekly.load(Ordering::Relaxed) {
+                    WeeklyOn
+                } else {
+                    WeeklyOff
+                }
+            }),
+            auto_redeem_resets: save_weekly.then(|| selection.selected_auto_redeem()),
+            model_capacity_retry_mode: if selection.capacity_indefinite.load(Ordering::Relaxed) {
+                CapacityIndefinite
+            } else {
+                CapacityBounded
+            },
+            tool_activity: if selection.compact_tool_activity.load(Ordering::Relaxed) {
+                ActivityCompact
+            } else {
+                ActivityFull
+            },
+        });
+    })
 }
 
 fn settings_hint_line(list_keymap: &ListKeymap) -> Line<'static> {
