@@ -705,6 +705,7 @@ impl App {
         self.schedule_recap_check(thread_id, now);
 
         self.render_thread_snapshot(tui, app_server, thread_id, snapshot, !is_replay_only)?;
+        self.attach_prompt_cache(thread_id).await;
         if is_replay_only
             && self
                 .thread_event_channels
@@ -740,7 +741,6 @@ impl App {
             /*initial_user_message*/ None,
         );
         self.replace_chat_widget(ChatWidget::new_with_app_event(init));
-        self.attach_prompt_cache(thread_id).await;
         self.chat_widget
             .set_task_mentions_enabled(app_server.task_tools_available(thread_id));
         self.chat_widget

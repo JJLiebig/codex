@@ -20,3 +20,7 @@ impl ChatWidget {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "prompt_cache_tests.rs"]
+mod tests;

@@ -425,6 +425,7 @@ impl App {
             let channel = ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY);
             {
                 let mut store = channel.store.lock().await;
+                self.inherit_prompt_cache(id, &mut store).await;
                 store.set_session(started.session, started.turns);
                 store.input_state = input.clone();
             }
@@ -439,6 +440,7 @@ impl App {
             self.render_thread_snapshot(
                 tui, app_server, id, snapshot, /*resume_restored_queue*/ false,
             )?;
+            self.attach_prompt_cache(id).await;
             self.config = self.chat_widget.config_ref().clone();
             self.refresh_pending_thread_approvals().await;
             if self.thread_unavailable(id) && !self.chat_widget.is_external_writer_view() {
