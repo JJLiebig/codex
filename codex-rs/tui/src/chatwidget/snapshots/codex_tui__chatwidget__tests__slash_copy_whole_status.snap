@@ -1,6 +1,7 @@
 ---
 source: tui/src/chatwidget/tests/slash_commands.rs
-expression: "whole_status.replace(&directory,\n\"[[workspace]]\").replace(crate::version::CODEX_CLI_VERSION, \"VERSION\")"
+assertion_line: 1885
+expression: "whole_status.replace(&directory,\n\"[[workspace]]\").replace(crate::version::codex_cli_version(), \"VERSION\")"
 ---
 >_ OpenAI Codex (vVERSION)
 
@@ -17,4 +18,5 @@ expression: "whole_status.replace(&directory,\n\"[[workspace]]\").replace(crate:
   Session:             00000000-0000-0000-0000-000000000123
 
   Token usage:         0 total  (0 input + 0 output)
+  Cache:               Unknown (no reported cache usage this session)
   Limits:              data not available yet
