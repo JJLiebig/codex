@@ -215,12 +215,17 @@ async fn cache_deadline_compacts_once_and_foreground_rearms(fail: bool) -> Resul
     assert_eq!(mock.requests().len(), 1);
     advance(60).await;
     let mut errors = 0;
+    let mut maintenance_id = None;
     wait_for_event(&harness.test().codex, |event| {
         errors += usize::from(matches!(event, EventMsg::Error(_)));
+        if let EventMsg::TurnStarted(turn) = event {
+            maintenance_id = Some(turn.turn_id.clone());
+        }
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
     assert_eq!(errors, usize::from(fail), "native failure is reported once");
+    assert!(maintenance_id.unwrap().starts_with("auto-compact-"));
     ThreadIdle::wait(&harness.test().codex).await;
     let metadata: serde_json::Value =
         serde_json::from_str(&mock.requests()[1].header("x-codex-turn-metadata").unwrap())?;

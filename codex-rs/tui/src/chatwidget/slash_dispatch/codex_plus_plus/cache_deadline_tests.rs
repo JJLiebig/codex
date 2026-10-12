@@ -22,7 +22,16 @@ fn cache_deadline_picker_enables_and_disables_exact_model() {
             terminal
                 .draw(|frame| view.render(frame.area(), frame.buffer_mut()))
                 .unwrap();
-            insta::assert_snapshot!("cache_deadline_interval", terminal.backend().to_string());
+            insta::assert_snapshot!(
+                "cache_deadline_interval",
+                terminal
+                    .backend()
+                    .to_string()
+                    .lines()
+                    .map(str::trim_end)
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            );
         }
         view.handle_key_event(KeyEvent::from(key));
         view.handle_key_event(KeyEvent::from(KeyCode::Enter));

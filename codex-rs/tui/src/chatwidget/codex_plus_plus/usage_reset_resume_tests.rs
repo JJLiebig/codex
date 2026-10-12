@@ -96,6 +96,75 @@ async fn reset_resumes_live_failed_turn_once_with_available_matching_quota() {
 }
 
 #[tokio::test]
+async fn cache_deadline_failures_never_resume_after_owned_or_direct_reset() {
+    for attribution in [
+        None,
+        Some(InferenceAttribution::IntendedNative {
+            source: InferenceNativeSource::Root,
+            account_id: account().to_string(),
+            display_label: None,
+        }),
+    ] {
+        let (mut chat, _events, mut ops) = make_chatwidget_manual(/*model_override*/ None).await;
+        chat.thread_id = Some(ThreadId::new());
+        if attribution.is_some() {
+            chat.config.model_provider =
+                codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
+        }
+        let turn_id = "auto-compact-0";
+        handle_turn_started(&mut chat, turn_id);
+        let ServerNotification::Error(mut error) = failure(&chat) else {
+            unreachable!()
+        };
+        error.turn_id = turn_id.into();
+        error.error.inference_attribution = attribution.clone();
+        chat.handle_server_notification(
+            ServerNotification::Error(error.clone()),
+            /*replay_kind*/ None,
+        );
+        assert!(chat.usage_reset_wait.is_none());
+        let mut turn = crate::chatwidget::tests::app_server_turn(
+            turn_id,
+            TurnStatus::Failed,
+            /*duration_ms*/ None,
+            Some(error.error),
+        );
+        turn.completed_at = Some(1);
+        chat.handle_server_notification(
+            ServerNotification::TurnCompleted(
+                codex_app_server_protocol::TurnCompletedNotification {
+                    thread_id: error.thread_id,
+                    turn,
+                },
+            ),
+            /*replay_kind*/ None,
+        );
+        assert_eq!(
+            (
+                chat.usage_reset_turn(i64::MAX),
+                chat.owned_reset_target(/*completion*/ None)
+            ),
+            (None, None)
+        );
+        chat.resume_after_usage_reset(turn_id, &account(), i64::MAX, &quota());
+        assert_no_submit_op(&mut ops);
+
+        // Manual /compact retains its submitted turn ID and the existing recovery behavior.
+        handle_turn_started(&mut chat, "manual-request");
+        let ServerNotification::Error(mut manual) = failure(&chat) else {
+            unreachable!()
+        };
+        manual.turn_id = "manual-request".into();
+        manual.error.inference_attribution = attribution;
+        chat.handle_server_notification(
+            ServerNotification::Error(manual),
+            /*replay_kind*/ None,
+        );
+        assert!(chat.usage_reset_wait.is_some());
+    }
+}
+
+#[tokio::test]
 async fn reset_does_not_resume_replayed_cancelled_completed_or_superseded_work() {
     for action in [
         "replay", "cancel", "complete", "new-turn", "input", "account",

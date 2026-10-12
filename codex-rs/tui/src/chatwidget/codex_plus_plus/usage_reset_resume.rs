@@ -77,6 +77,10 @@ impl ChatWidget {
             _ => None,
         };
         if let Some((turn_id, completed_at, attribution)) = failed_turn {
+            // Core-generated maintenance IDs cannot auto-continue after a usage reset.
+            if turn_id.starts_with("auto-compact-") {
+                return;
+            }
             if matches!(
                 attribution,
                 Some(InferenceAttribution::Claude | InferenceAttribution::Unknown)
