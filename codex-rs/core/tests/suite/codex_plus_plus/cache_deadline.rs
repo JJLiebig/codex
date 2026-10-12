@@ -214,10 +214,13 @@ async fn cache_deadline_compacts_once_and_foreground_rearms(fail: bool) -> Resul
     advance(54 * 60).await;
     assert_eq!(mock.requests().len(), 1);
     advance(60).await;
+    let mut errors = 0;
     wait_for_event(&harness.test().codex, |event| {
+        errors += usize::from(matches!(event, EventMsg::Error(_)));
         matches!(event, EventMsg::TurnComplete(_))
     })
     .await;
+    assert_eq!(errors, usize::from(fail), "native failure is reported once");
     ThreadIdle::wait(&harness.test().codex).await;
     let metadata: serde_json::Value =
         serde_json::from_str(&mock.requests()[1].header("x-codex-turn-metadata").unwrap())?;
@@ -308,9 +311,14 @@ async fn cache_deadline_foreground_cancels_idle_compaction_without_losing_histor
     wiremock::Mock::given(wiremock::matchers::method("POST"))
         .and(wiremock::matchers::path("/v1/responses"))
         .respond_with(move |request: &wiremock::Request| {
-            if request.body_json::<serde_json::Value>().unwrap()["input"]
-                .to_string()
-                .contains("compaction_trigger")
+            if request
+                .headers
+                .get("x-codex-turn-metadata")
+                .is_some_and(|value| {
+                    value
+                        .to_str()
+                        .is_ok_and(|metadata| metadata.contains("cache_deadline"))
+                })
             {
                 notify.notify_one();
                 responses::sse_response(compacted()).set_delay(Duration::from_secs(60))
@@ -323,11 +331,56 @@ async fn cache_deadline_foreground_cancels_idle_compaction_without_losing_histor
     advance(3300).await;
     tokio::time::timeout(Duration::from_secs(10), requested.notified()).await?;
     prompt(&harness, "foreground wins").await?;
-    let requests = harness.server().received_requests().await.unwrap();
-    let last = requests.last().unwrap().body_json::<serde_json::Value>()?;
+    let requests = responses::received_responses_requests(harness.server()).await;
+    let last = requests.last().unwrap().body_json();
     assert!(last["input"].to_string().contains("preserve this message"));
     assert!(last["input"].to_string().contains("foreground wins"));
     assert_eq!(mock.requests().len(), 1);
+    harness.test().codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[test_case("usage_limit_reached"; "weekly reset wait is preserved")]
+#[test_case("misalignment_policy_violation"; "precaution acknowledgement is preserved")]
+#[tokio::test]
+async fn cache_deadline_terminal_error_preserves_recovery_until_foreground_resumes(
+    code: &str,
+) -> Result<()> {
+    let harness = harness(3300).await?;
+    let mock = responses::mount_sse_sequence(
+        harness.server(),
+        vec![
+            reply("first"),
+            responses::sse_failed("failed", code, "foreground needs recovery"),
+            reply("resumed"),
+            compacted(),
+        ],
+    )
+    .await;
+    prompt(&harness, "retain original history").await?;
+    prompt(&harness, "failed foreground turn").await?;
+    advance(3300).await;
+    assert_eq!(
+        mock.requests().len(),
+        2,
+        "maintenance must not supersede pending recovery"
+    );
+    prompt(&harness, "acknowledged foreground resume").await?;
+    assert!(
+        mock.requests()[2].body_json()["input"]
+            .to_string()
+            .contains("retain original history")
+    );
+    advance(3300).await;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert_eq!(
+        mock.requests().len(),
+        4,
+        "successful foreground activity rearms maintenance"
+    );
     harness.test().codex.shutdown_and_wait().await?;
     Ok(())
 }

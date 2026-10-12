@@ -93,8 +93,7 @@ async fn cache_deadline_model_picker_and_custom_prompt_keep_model_identity() {
         KeyCode::Char('u'),
         crossterm::event::KeyModifiers::CONTROL,
     ));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Char('1')));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Char('h')));
+    chat.handle_paste("1h".to_string());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let AppEvent::InsertHistoryCell(error) = events.try_recv().unwrap() else {
         panic!("expected known cache lifetime error")
@@ -113,8 +112,7 @@ async fn cache_deadline_model_picker_and_custom_prompt_keep_model_identity() {
         KeyCode::Char('u'),
         crossterm::event::KeyModifiers::CONTROL,
     ));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Char('3')));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Char('s')));
+    chat.handle_paste("3s".to_string());
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let AppEvent::PersistCacheDeadline { model, seconds } = events.try_recv().unwrap() else {
         panic!("expected interval save")

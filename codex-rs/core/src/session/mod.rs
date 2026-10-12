@@ -2322,6 +2322,7 @@ impl Session {
                     .as_ref()
                     .is_some_and(CodexErrorInfo::affects_turn_status))
         {
+            self.cache_deadline.clear();
             turn_context
                 .terminal_error
                 .lock()

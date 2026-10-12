@@ -401,7 +401,10 @@ fn persistence_messages_snapshot() {
 fn quiet_updates_toggle_is_saved() {
     let (mut view, mut rx) = settings_view(AutomaticOn, WeeklyOn, CapacityBounded);
     view.handle_key_event(KeyEvent::from(KeyCode::End));
+    view.handle_key_event(KeyEvent::from(KeyCode::Up));
     view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+    // Opening the new submenu must save pending toggles just like the other manage actions.
+    view.handle_key_event(KeyEvent::from(KeyCode::Down));
     view.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_matches!(
         rx.try_recv(),
@@ -410,4 +413,5 @@ fn quiet_updates_toggle_is_saved() {
             ..
         })
     );
+    assert_matches!(rx.try_recv(), Ok(AppEvent::OpenCacheDeadlineModels));
 }

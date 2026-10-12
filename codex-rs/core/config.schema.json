@@ -6959,6 +6959,15 @@
     "browser_use": {
       "$ref": "#/definitions/BrowserUseConfigToml"
     },
+    "cache_deadline_compact_seconds": {
+      "additionalProperties": {
+        "format": "uint64",
+        "minimum": 0.0,
+        "type": "integer"
+      },
+      "description": "Seconds after foreground inference before one automatic compaction, by exact model ID. Missing models or zero disable the deadline; timers are not restored when reopening threads. Astra/Sol intervals must be below their tested 3600-second lifetime; larger values are ignored.",
+      "type": "object"
+    },
     "chatgpt_base_url": {
       "description": "Base URL for requests to ChatGPT (as opposed to the OpenAI API).",
       "type": "string"

@@ -1,5 +1,5 @@
 use super::*;
-use crate::bottom_pane::CustomPromptView;
+use crate::bottom_pane::custom_prompt_view::CustomPromptView;
 use codex_config::cache_deadline_compact_interval;
 
 impl ChatWidget {

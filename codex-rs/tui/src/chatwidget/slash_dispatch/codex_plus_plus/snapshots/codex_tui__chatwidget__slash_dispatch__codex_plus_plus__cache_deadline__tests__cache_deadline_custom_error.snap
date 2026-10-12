@@ -1,0 +1,5 @@
+---
+source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/cache_deadline_tests.rs
+expression: "error.display_lines(84).iter().map(ToString::to_string).collect::<Vec<_>>().join(\"\\n\")"
+---
+■ Astra / Sol intervals must be under 60m. Try 55m.

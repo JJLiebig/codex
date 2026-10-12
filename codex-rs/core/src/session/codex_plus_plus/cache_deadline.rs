@@ -14,7 +14,6 @@ use codex_analytics::CompactionPhase;
 use codex_analytics::CompactionReason;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::TurnAbortReason;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -47,7 +46,10 @@ pub(crate) struct CacheDeadline {
 
 impl CacheDeadline {
     pub(crate) fn clear(&self) {
-        *self.deadline.lock().unwrap() = None;
+        *self
+            .deadline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
         self.changed.notify_one();
     }
 
@@ -56,7 +58,7 @@ impl CacheDeadline {
         let due = self
             .deadline
             .lock()
-            .unwrap()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
             .as_ref()
             .filter(|deadline| deadline.wake_pending)
             .map(|deadline| deadline.due);
@@ -70,7 +72,10 @@ impl CacheDeadline {
     }
 
     fn due(&self) -> bool {
-        let mut guard = self.deadline.lock().unwrap();
+        let mut guard = self
+            .deadline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(deadline) = guard.as_mut() else {
             return false;
         };
@@ -95,9 +100,7 @@ pub(super) fn owner_generation(session: &Session) -> u64 {
 }
 
 pub(super) async fn record_foreground(session: &Session, step: &StepContext, request_owner: u64) {
-    if matches!(step.turn.session_source, SessionSource::Exec)
-        || step.turn.session_source.is_non_root_agent()
-    {
+    if step.turn.session_source.is_non_root_agent() {
         return;
     }
     // A concurrent account switch cannot label the previous account's request as fresh.
@@ -130,7 +133,11 @@ pub(super) async fn record_foreground(session: &Session, step: &StepContext, req
         return;
     };
     let window = session.current_window_id().await;
-    *session.cache_deadline.deadline.lock().unwrap() = Some(Deadline {
+    *session
+        .cache_deadline
+        .deadline
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Deadline {
         due,
         expires,
         wall_expires,
@@ -151,7 +158,11 @@ async fn take_due(session: &Session, model: &str) -> bool {
     let interval = codex_config::cache_deadline_compact_interval(&config.config_layer_stack, model);
     let window = session.current_window_id().await;
     let owner_generation = owner_generation(session);
-    let mut guard = session.cache_deadline.deadline.lock().unwrap();
+    let mut guard = session
+        .cache_deadline
+        .deadline
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     if guard
         .as_ref()
         .is_some_and(|deadline| Instant::now() < deadline.due)
@@ -203,7 +214,12 @@ pub(super) async fn prepare_idle(session: &Arc<Session>) -> Option<Arc<TurnConte
         return None;
     }
     if session.active_turn.lock().await.is_some() {
-        if let Some(deadline) = session.cache_deadline.deadline.lock().unwrap().as_mut()
+        if let Some(deadline) = session
+            .cache_deadline
+            .deadline
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_mut()
             && deadline.due <= Instant::now()
         {
             deadline.wake_pending = false;
@@ -310,8 +326,10 @@ impl SessionTask for CacheDeadlineTask {
         if session.input_queue.has_pending_mailbox_items().await {
             return Ok(None);
         }
-        let step = session.capture_step_context(context, &cancellation).await?;
-        super::turn::run_auto_compact(
+        let step = session
+            .capture_step_context(Arc::clone(&context), &cancellation)
+            .await?;
+        let result = super::turn::run_auto_compact(
             &session,
             Arc::clone(&step),
             step,
@@ -320,7 +338,24 @@ impl SessionTask for CacheDeadlineTask {
             CompactionReason::CacheDeadline,
             CompactionPhase::StandaloneTurn,
         )
-        .await?;
+        .await;
+        if let Err(error) = result {
+            if !matches!(error.details(), CodexErrorDetails::TurnAborted)
+                && context.terminal_error.lock().await.is_some()
+            {
+                // Native compaction already reported this failure through the turn's error event.
+                session
+                    .emit_turn_error_lifecycle(
+                        &context,
+                        error.to_codex_protocol_error(),
+                        error.details(),
+                    )
+                    .await;
+                tracing::warn!(%error, "cache deadline compaction failed");
+            } else {
+                return Err(error);
+            }
+        }
         Ok(None)
     }
 }
