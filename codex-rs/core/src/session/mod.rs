@@ -1,3 +1,5 @@
+#[path = "codex_plus_plus/cache_deadline.rs"]
+pub(crate) mod cache_deadline;
 pub(crate) mod startup;
 
 use crate::WithTurnExtensionData;
@@ -4057,6 +4059,7 @@ impl Session {
         world_state_baseline: WorldStateSnapshot,
         metadata: CompactedHistoryMetadata,
     ) {
+        self.cache_deadline.clear();
         for envelope in &mut items {
             Self::assign_missing_response_item_id(&mut envelope.item);
         }

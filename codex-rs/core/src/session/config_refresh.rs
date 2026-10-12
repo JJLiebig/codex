@@ -171,6 +171,7 @@ impl Session {
             (previous_config, new_config)
         };
         self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
+        self.cache_deadline.clear();
         self.schedule_mcp_prewarm();
         if !matches!(scope, RuntimeConfigRefresh::Mcp) {
             self.refresh_hooks(config).await;

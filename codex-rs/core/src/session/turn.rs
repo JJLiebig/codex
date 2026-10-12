@@ -555,6 +555,14 @@ pub(crate) async fn run_turn(
         )
         .await;
         let sampling_request_result: CodexResult<_> = async {
+            super::cache_deadline::at_sampling_boundary(
+                &sess,
+                &step_context,
+                client_session,
+                usage_limit_account_attempts,
+            )
+            .await?;
+            let window_id = sess.current_window_id().await;
             super::time_reminder::maybe_record_current_time_reminder(
                 sess.as_ref(),
                 turn_context.as_ref(),
@@ -1564,7 +1572,7 @@ async fn maybe_run_previous_model_inline_compact(
     skip_all,
     fields(reason = ?reason, phase = ?phase)
 )]
-async fn run_auto_compact(
+pub(super) async fn run_auto_compact(
     sess: &Arc<Session>,
     step_context: Arc<StepContext>,
     replacement_step_context: Arc<StepContext>,
@@ -2734,6 +2742,7 @@ async fn try_run_sampling_request(
         .reasoning_effort_for_request(&step_context.settings, super::RequestEffortUsage::Sampling)
         .await;
     client_session.begin_usage_limit_failover_tracking(usage_limit_account_attempts);
+    let cache_owner = super::cache_deadline::owner_generation(&sess);
     let stream = client_session
         .stream(
             prompt,
@@ -2756,6 +2765,7 @@ async fn try_run_sampling_request(
     )
     .await;
     let mut stream = stream?;
+    super::cache_deadline::record_foreground(&sess, &step_context, cache_owner).await;
     turn_context.begin_inference_request(client_session).await;
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted);

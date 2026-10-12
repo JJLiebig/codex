@@ -1,4 +1,6 @@
+mod cache_deadline;
 mod quiet_updates;
+pub use cache_deadline::cache_deadline_compact_interval;
 pub use quiet_updates::disable_unnecessary_updates;
 mod auto_redeem_resets;
 mod dcg_nux;

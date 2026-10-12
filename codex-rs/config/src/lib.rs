@@ -93,6 +93,7 @@ pub use codex_plus_plus::AutoRedeemResets;
 pub use codex_plus_plus::ModelCapacityRetryMode;
 pub use codex_plus_plus::ToolActivityPresentation;
 pub use codex_plus_plus::WeeklyUsageWindowAutoStart;
+pub use codex_plus_plus::cache_deadline_compact_interval;
 pub use codex_plus_plus::codex_plus_plus_dcg_nux_shown;
 pub use codex_plus_plus::disable_unnecessary_updates;
 pub use codex_protocol::config_types::ProfileV2Name;

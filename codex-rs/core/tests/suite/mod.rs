@@ -60,6 +60,8 @@ mod background_completion;
 mod bedrock_multi_agent;
 #[path = "bedrock_service_tier_tests.rs"]
 mod bedrock_service_tier;
+#[path = "codex_plus_plus/cache_deadline.rs"]
+mod cache_deadline;
 mod catalog_permission_messages;
 mod cli_stream;
 mod client;

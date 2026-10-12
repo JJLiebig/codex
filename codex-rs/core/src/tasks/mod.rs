@@ -904,6 +904,7 @@ impl Session {
         }
         if cleared_active_turn {
             self.maybe_start_turn_for_pending_work().await;
+            self.cache_deadline.changed.notify_one();
         }
     }
 
