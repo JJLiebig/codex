@@ -554,14 +554,18 @@ pub(crate) async fn run_turn(
             &mut explicitly_enabled_connectors,
         )
         .await;
+        if super::cache_deadline::at_sampling_boundary(
+            &sess,
+            &step_context,
+            client_session,
+            usage_limit_account_attempts,
+        )
+        .await?
+        .is_break()
+        {
+            return Ok(None);
+        }
         let sampling_request_result: CodexResult<_> = async {
-            super::cache_deadline::at_sampling_boundary(
-                &sess,
-                &step_context,
-                client_session,
-                usage_limit_account_attempts,
-            )
-            .await?;
             let window_id = sess.current_window_id().await;
             super::time_reminder::maybe_record_current_time_reminder(
                 sess.as_ref(),

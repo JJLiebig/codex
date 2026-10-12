@@ -12,11 +12,13 @@ use crate::tasks::SessionTaskResult;
 use async_channel::Receiver;
 use codex_analytics::CompactionPhase;
 use codex_analytics::CompactionReason;
+use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
 use std::collections::HashSet;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::Duration;
@@ -203,7 +205,7 @@ pub(super) async fn at_sampling_boundary(
     step: &Arc<StepContext>,
     client: &mut ModelClientSession,
     attempts: &mut HashSet<String>,
-) -> CodexResult<()> {
+) -> CodexResult<ControlFlow<()>> {
     if take_due(session, &step.settings.model_info.slug).await {
         let result = super::turn::run_auto_compact(
             session,
@@ -216,13 +218,11 @@ pub(super) async fn at_sampling_boundary(
         )
         .await;
         if let Err(error) = result {
-            if matches!(error.details(), CodexErrorDetails::TurnAborted) {
-                return Err(error);
-            }
-            tracing::warn!(%error, "cache deadline compaction failed; continuing foreground turn");
+            report_failure(session, &step.turn, error).await?;
+            return Ok(ControlFlow::Break(()));
         }
     }
-    Ok(())
+    Ok(ControlFlow::Continue(()))
 }
 
 // This future remains inside the submission select, so foreground input cancels slow discovery.
@@ -358,24 +358,28 @@ impl SessionTask for CacheDeadlineTask {
         )
         .await;
         if let Err(error) = result {
-            if !matches!(error.details(), CodexErrorDetails::TurnAborted)
-                && context.terminal_error.lock().await.is_some()
-            {
-                // Native compaction already reported this failure through the turn's error event.
-                session
-                    .emit_turn_error_lifecycle(
-                        &context,
-                        error.to_codex_protocol_error(),
-                        error.details(),
-                    )
-                    .await;
-                tracing::warn!(%error, "cache deadline compaction failed");
-            } else {
-                return Err(error);
-            }
+            report_failure(&session, &context, error).await?;
         }
         Ok(None)
     }
+}
+
+async fn report_failure(
+    session: &Session,
+    context: &TurnContext,
+    error: CodexErr,
+) -> CodexResult<()> {
+    if matches!(error.details(), CodexErrorDetails::TurnAborted)
+        || context.terminal_error.lock().await.is_none()
+    {
+        return Err(error);
+    }
+    // Native compaction already reported this terminal failure; end work without reporting twice.
+    session
+        .emit_turn_error_lifecycle(context, error.to_codex_protocol_error(), error.details())
+        .await;
+    tracing::warn!(%error, "cache deadline compaction failed");
+    Ok(())
 }
 
 #[cfg(test)]
