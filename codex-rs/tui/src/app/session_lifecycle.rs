@@ -458,6 +458,7 @@ impl App {
             }
         };
         self.agents_overview.activity.remove(&thread_id);
+        let prompt_cache = self.prompt_cache_for_thread(thread_id).await;
         let recap_progress =
             if live_attached && let Some(channel) = self.thread_event_channels.remove(&thread_id) {
                 let store = channel.store.lock().await;
@@ -477,6 +478,7 @@ impl App {
             }
         }
         let mut store = channel.store.lock().await;
+        store.prompt_cache = prompt_cache;
         store.set_session(session, turns);
         store.merge_recap_progress(recap_progress);
         store.rebase_buffer_after_session_refresh();

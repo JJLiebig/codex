@@ -33,15 +33,15 @@ async fn prompt_cache_reports_only_live_misses_and_token_weighted_status() {
     while let Ok(event) = events.try_recv() {
         if let AppEvent::InsertHistoryCell(cell) = event {
             rendered.extend(
-                cell.display_lines(100)
+                cell.display_lines(/*width*/ 100)
                     .iter()
                     .map(ToString::to_string)
                     .filter(|line| line.contains("Cache:")),
             );
         }
     }
-    let cold = completed(thread, "cold", 100, 0);
-    let hit = completed(thread, "hit", 900, 800);
+    let cold = completed(thread, "cold", /*input*/ 100, /*cached*/ 0);
+    let hit = completed(thread, "hit", /*input*/ 900, /*cached*/ 800);
     for notification in [cold.clone(), hit.clone(), cold, hit] {
         chat.handle_server_notification(notification, /*replay_kind*/ None);
     }
@@ -49,15 +49,23 @@ async fn prompt_cache_reports_only_live_misses_and_token_weighted_status() {
         ReplayKind::ResumeInitialMessages,
         ReplayKind::ThreadSnapshot,
     ] {
-        chat.handle_server_notification(completed(thread, "historical", 5000, 0), Some(replay));
+        chat.handle_server_notification(
+            completed(thread, "historical", /*input*/ 5000, /*cached*/ 0),
+            Some(replay),
+        );
     }
     chat.handle_server_notification(
-        completed(thread, "historical", 5000, 0),
+        completed(thread, "historical", /*input*/ 5000, /*cached*/ 0),
         /*replay_kind*/ None,
     );
     for notification in [
-        completed(ThreadId::new(), "foreign", 100, 0),
-        completed(thread, "empty", 0, 0),
+        completed(
+            ThreadId::new(),
+            "foreign",
+            /*input*/ 100,
+            /*cached*/ 0,
+        ),
+        completed(thread, "empty", /*input*/ 0, /*cached*/ 0),
     ] {
         chat.handle_server_notification(notification, /*replay_kind*/ None);
     }
@@ -67,7 +75,7 @@ async fn prompt_cache_reports_only_live_misses_and_token_weighted_status() {
     while let Ok(event) = events.try_recv() {
         if let AppEvent::InsertHistoryCell(cell) = event {
             rendered.extend(
-                cell.display_lines(100)
+                cell.display_lines(/*width*/ 100)
                     .iter()
                     .map(ToString::to_string)
                     .filter(|line| line.contains("Cache:") || line.contains("Prompt cache miss")),
@@ -100,7 +108,7 @@ fn prompt_cache_missing_usage_stays_unknown_and_never_becomes_a_miss() {
     ] {
         let cache = PromptCache::default();
         let ServerNotification::RawResponseCompleted(mut completion) =
-            completed(thread, "response", 100, 0)
+            completed(thread, "response", /*input*/ 100, /*cached*/ 0)
         else {
             unreachable!()
         };

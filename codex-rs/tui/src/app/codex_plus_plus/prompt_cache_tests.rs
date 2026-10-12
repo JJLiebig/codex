@@ -31,6 +31,7 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         "75.0% of reported input this session"
     );
     app.store_active_thread_receiver().await;
+    app.clear_active_thread().await;
     // The normal switch recreates the widget and later attaches the same per-thread store.
     let (replacement, _sender, _events, _ops) = make_chatwidget_manual_with_sender().await;
     app.replace_chat_widget(replacement);
@@ -41,6 +42,7 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         "Unknown (no reported cache usage this session)"
     );
     app.store_active_thread_receiver().await;
+    app.clear_active_thread().await;
     app.activate_thread_channel(first).await;
     app.ensure_thread_channel(first)
         .store
@@ -51,11 +53,17 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         app.chat_widget.prompt_cache.status(),
         "75.0% of reported input this session"
     );
-    let mut reconnected_store = super::super::ThreadEventStore::new(/*capacity*/ 8);
-    app.inherit_prompt_cache(first, &mut reconnected_store)
-        .await;
+    let reconnected_cache = app.prompt_cache_for_thread(first).await;
+    app.clear_active_thread().await;
+    app.thread_event_channels.remove(&first);
+    app.ensure_thread_channel(first)
+        .store
+        .lock()
+        .await
+        .prompt_cache = reconnected_cache;
+    app.activate_thread_channel(first).await;
     assert_eq!(
-        reconnected_store.prompt_cache.status(),
+        app.chat_widget.prompt_cache.status(),
         "75.0% of reported input this session"
     );
 }

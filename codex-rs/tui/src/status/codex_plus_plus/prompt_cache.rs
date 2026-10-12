@@ -24,7 +24,7 @@ impl StatusCache {
             .map(|value| {
                 let mut wrapped = crate::wrapping::word_wrap_lines(
                     [Line::from(value.clone())],
-                    crate::wrapping::RtOptions::new(value_width.max(1)),
+                    crate::wrapping::RtOptions::new(value_width.max(/*other*/ 1)),
                 )
                 .into_iter();
                 let mut lines = Vec::new();

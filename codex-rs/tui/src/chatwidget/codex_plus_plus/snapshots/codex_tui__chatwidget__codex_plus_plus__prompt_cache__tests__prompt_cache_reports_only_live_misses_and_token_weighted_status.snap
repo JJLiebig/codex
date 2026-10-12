@@ -1,0 +1,8 @@
+---
+source: tui/src/chatwidget/codex_plus_plus/prompt_cache_tests.rs
+assertion_line: 88
+expression: "rendered.join(\"\\n\")"
+---
+  Cache:               Unknown (no reported cache usage this session)
+• Prompt cache miss.
+  Cache:               80.0% of reported input this session

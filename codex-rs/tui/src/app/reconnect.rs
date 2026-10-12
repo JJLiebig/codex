@@ -425,7 +425,7 @@ impl App {
             let channel = ThreadEventChannel::new(THREAD_EVENT_CHANNEL_CAPACITY);
             {
                 let mut store = channel.store.lock().await;
-                self.inherit_prompt_cache(id, &mut store).await;
+                store.prompt_cache = self.prompt_cache_for_thread(id).await;
                 store.set_session(started.session, started.turns);
                 store.input_state = input.clone();
             }
