@@ -246,6 +246,8 @@ mod permission_shortcuts;
 mod pets;
 mod platform_actions;
 mod plugin_mentions;
+#[path = "app/codex_plus_plus/prompt_cache.rs"]
+mod prompt_cache;
 mod rate_limit_refresh;
 mod realtime_delivery;
 mod realtime_settings;

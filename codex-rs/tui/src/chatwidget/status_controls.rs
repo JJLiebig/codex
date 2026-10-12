@@ -265,6 +265,7 @@ impl ChatWidget {
             agents_summary,
             refreshing_rate_limits,
         );
+        handle.set_prompt_cache(self.prompt_cache.status());
         if let Some(request_id) = request_id.filter(|_| !self.has_inference_display()) {
             self.refreshing_status_outputs
                 .push((request_id, handle.clone()));

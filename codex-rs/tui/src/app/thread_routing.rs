@@ -90,6 +90,7 @@ impl App {
             return;
         }
         self.set_thread_active(thread_id, /*active*/ true).await;
+        self.attach_prompt_cache(thread_id).await;
         let receiver = if let Some(channel) = self.thread_event_channels.get_mut(&thread_id) {
             channel.receiver.take()
         } else {

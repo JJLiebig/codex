@@ -69,6 +69,9 @@ impl ChatWidget {
                     );
                 }
             }
+            ServerNotification::RawResponseCompleted(notification) => {
+                self.on_prompt_cache_completion(notification, replay_kind);
+            }
             ServerNotification::ThreadTokenUsageUpdated(notification) => {
                 self.set_token_info(Some(token_usage_info_from_app_server(
                     notification.token_usage,
@@ -382,7 +385,6 @@ impl ChatWidget {
             | ServerNotification::ThreadUnarchived(_)
             | ServerNotification::ThreadAttachmentUpdated(_)
             | ServerNotification::RawResponseItemCompleted(_)
-            | ServerNotification::RawResponseCompleted(_)
             | ServerNotification::CommandExecOutputDelta(_)
             | ServerNotification::ProcessOutputDelta(_)
             | ServerNotification::ProcessExited(_)

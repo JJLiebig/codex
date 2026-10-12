@@ -77,6 +77,7 @@ pub(super) struct ThreadEventStore {
     pub(super) buffered_agent_message_delta_bytes: usize,
     delegated_turns: VecDeque<String>,
     recap_progress: recap::RecapProgress,
+    pub(super) prompt_cache: crate::codex_plus_plus::prompt_cache::PromptCache,
 }
 
 impl ThreadEventStore {
@@ -122,6 +123,7 @@ impl ThreadEventStore {
             buffered_agent_message_delta_bytes: 0,
             delegated_turns: VecDeque::new(),
             recap_progress: recap::RecapProgress::default(),
+            prompt_cache: Default::default(),
         }
     }
 
@@ -181,6 +183,8 @@ impl ThreadEventStore {
     }
 
     fn push_notification_inner(&mut self, notification: Cow<'_, ServerNotification>) {
+        self.prompt_cache
+            .observe(notification.as_ref(), self.active);
         if let Some(session) = self.session.as_mut() {
             session.observe_completion_wait(notification.as_ref());
         }
@@ -283,6 +287,7 @@ impl ThreadEventStore {
         if matches!(
             notification.as_ref(),
             ServerNotification::RawResponseItemCompleted(_)
+                | ServerNotification::RawResponseCompleted(_)
                 | ServerNotification::FileChangePatchUpdated(_)
                 | ServerNotification::ServerRequestResolved(_)
                 | ServerNotification::McpToolCallProgress(_)

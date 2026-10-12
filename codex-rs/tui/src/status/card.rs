@@ -50,6 +50,9 @@ use crate::wrapping::word_wrap_lines;
 use std::sync::Arc;
 use std::sync::RwLock;
 
+#[path = "codex_plus_plus/prompt_cache.rs"]
+mod prompt_cache;
+
 const CHATGPT_USAGE_URL: &str = "https://chatgpt.com/settings/usage";
 
 #[derive(Debug, Clone)]
@@ -79,6 +82,10 @@ pub(crate) struct StatusHistoryHandle {
 }
 
 impl StatusHistoryHandle {
+    pub(crate) fn set_prompt_cache(&self, value: String) {
+        self.card.prompt_cache.set(value);
+    }
+
     pub(crate) fn copy_text(&self) -> String {
         self.card
             .content_lines(u16::MAX)
@@ -142,6 +149,7 @@ struct StatusHistoryCell {
     token_usage_available: bool,
     rate_limit_state: Arc<RwLock<StatusRateLimitState>>,
     thread_usage: StatusThreadUsage,
+    prompt_cache: prompt_cache::StatusCache,
 }
 
 #[cfg(test)]
@@ -407,6 +415,7 @@ impl StatusHistoryCell {
             agents_summary,
             rate_limit_state,
             thread_usage,
+            prompt_cache: Default::default(),
         }
     }
 
@@ -887,6 +896,7 @@ impl StatusHistoryCell {
             lines.push(formatter.line("Context window", spans));
         }
 
+        lines.extend(self.prompt_cache.lines(&formatter, value_width));
         lines.extend(self.rate_limit_lines(&rate_limit_state, available_width, &formatter));
         let thread_usage_lines = self.thread_usage.lines(&formatter, value_width);
         if !thread_usage_lines.is_empty() {

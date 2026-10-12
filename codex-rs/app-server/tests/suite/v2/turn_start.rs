@@ -1180,24 +1180,26 @@ async fn turn_start_sends_service_tier_id_to_model_request() -> Result<()> {
     Ok(())
 }
 
-#[test_case(None, None, None; "without_usage_metadata")]
-#[test_case(Some(json!({})), None, None; "without_amount")]
-#[test_case(Some(json!({ "amount": null })), None, None; "null_amount")]
-#[test_case(Some(json!({ "amount": "0" })), Some("0"), None; "zero_amount")]
+#[test_case(None, None, None, false; "without_usage_metadata")]
+#[test_case(Some(json!({})), None, None, false; "without_amount")]
+#[test_case(Some(json!({ "amount": null })), None, None, false; "null_amount")]
+#[test_case(Some(json!({ "amount": "0" })), Some("0"), None, false; "zero_amount")]
 #[test_case(
     Some(json!({ "amount": "0.12345678901234567890" })),
     Some("0.12345678901234567890"),
-    Some(json!({ "label": "example", "items": [0, null, true] }));
+    Some(json!({ "label": "example", "items": [0, null, true] })), false;
     "exact_amount"
 )]
-#[test_case(None, None, Some(json!(null)); "null_extra")]
-#[test_case(None, None, Some(json!(0)); "zero_extra")]
-#[test_case(None, None, Some(json!({ "label": "example" })); "nested_extra")]
+#[test_case(None, None, Some(json!(null)), false; "null_extra")]
+#[test_case(None, None, Some(json!(0)), false; "zero_extra")]
+#[test_case(None, None, Some(json!({ "label": "example" })), false; "nested_extra")]
+#[test_case(None, None, None, true; "resumed_without_raw_opt_in")]
 #[tokio::test]
 async fn turn_start_emits_raw_response_completed_with_upstream_usage(
     upstream_metadata: Option<Value>,
     expected_amount: Option<&str>,
     extra: Option<Value>,
+    resume: bool,
 ) -> Result<()> {
     let server = responses::start_mock_server().await;
     let mut completed = json!({
@@ -1239,12 +1241,18 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
         .build_initialized()
         .await?;
 
-    let ThreadStartResponse { thread, .. } = mcp
-        .start_thread(ThreadStartParams {
-            experimental_raw_events: true,
-            ..Default::default()
-        })
-        .await?;
+    let ThreadStartResponse { thread, .. } = mcp.start_thread(ThreadStartParams::default()).await?;
+
+    if resume {
+        let resume_id = mcp
+            .send_thread_resume_request(codex_app_server_protocol::ThreadResumeParams {
+                thread_id: thread.id.clone(),
+                ..Default::default()
+            })
+            .await?;
+        let _: codex_app_server_protocol::ThreadResumeResponse =
+            timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
+    }
 
     let TurnStartResponse { turn } = mcp
         .request(|request_id| ClientRequest::TurnStart {
