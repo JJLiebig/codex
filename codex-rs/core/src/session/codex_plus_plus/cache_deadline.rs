@@ -14,6 +14,7 @@ use codex_analytics::CompactionPhase;
 use codex_analytics::CompactionReason;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -101,6 +102,14 @@ pub(super) fn owner_generation(session: &Session) -> u64 {
 
 pub(super) async fn record_foreground(session: &Session, step: &StepContext, request_owner: u64) {
     if step.turn.session_source.is_non_root_agent() {
+        return;
+    }
+    if step.turn.config.ephemeral
+        && matches!(
+            session.state.lock().await.session_configuration.thread_source.as_ref(),
+            Some(ThreadSource::Feature(feature)) if feature == "thread_title"
+        )
+    {
         return;
     }
     // A concurrent account switch cannot label the previous account's request as fresh.

@@ -948,6 +948,7 @@ impl Session {
         turn_state: &Mutex<TurnState>,
         error: Option<ErrorEvent>,
     ) {
+        self.cache_deadline.clear();
         let sub_id = task.turn_context.sub_id.clone();
         if task.cancellation_token.is_cancelled() {
             self.emit_turn_abort_lifecycle(reason, task.turn_context.extension_data.as_ref())

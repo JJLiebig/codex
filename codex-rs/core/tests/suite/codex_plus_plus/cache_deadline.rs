@@ -307,6 +307,115 @@ async fn cache_deadline_does_not_compact_stale_or_disabled_context(case: &str) -
 }
 
 #[tokio::test]
+async fn cache_deadline_approval_cancel_disarms_until_foreground_inference() -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(builder(3300).with_config(|config| {
+        config.permissions.approval_policy = codex_config::Constrained::allow_any(
+            codex_protocol::protocol::AskForApproval::OnRequest,
+        );
+        config
+            .set_legacy_sandbox_policy(
+                codex_protocol::protocol::SandboxPolicy::new_workspace_write_policy(),
+            )
+            .unwrap();
+    }))
+    .await?;
+    let mock = responses::mount_sse_sequence(harness.server(), vec![
+        responses::sse(vec![responses::ev_function_call("approval", "exec_command", &json!({
+            "cmd": "echo approval", "sandbox_permissions": "require_escalated", "justification": "Confirm the test command"
+        }).to_string()), responses::ev_completed("tool")]),
+        reply("resumed"), compacted(),
+    ]).await;
+    harness
+        .test()
+        .codex
+        .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+            text: "Ask before running the command".into(),
+            text_elements: Vec::new(),
+        }]))
+        .await?;
+    let EventMsg::ExecApprovalRequest(approval) = wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::ExecApprovalRequest(_))
+    })
+    .await
+    else {
+        unreachable!()
+    };
+    advance(3300).await;
+    assert_eq!(mock.requests().len(), 1);
+    harness
+        .test()
+        .codex
+        .submit(Op::ExecApproval {
+            id: approval.effective_approval_id(),
+            turn_id: Some(approval.turn_id),
+            decision: codex_protocol::protocol::ReviewDecision::Abort,
+        })
+        .await?;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::TurnAborted(_))
+    })
+    .await;
+    advance(60).await;
+    assert_eq!(
+        mock.requests().len(),
+        1,
+        "Cancel must not start optional maintenance"
+    );
+    prompt(&harness, "A new foreground request").await?;
+    advance(3300).await;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert_eq!(mock.requests().len(), 3);
+    harness.test().codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn cache_deadline_does_not_arm_from_hidden_title_inference() -> Result<()> {
+    let harness = harness(3300).await?;
+    let mut options = harness.test().start_thread_options().await;
+    options.config.ephemeral = true;
+    options.thread_source = Some(codex_protocol::protocol::ThreadSource::Feature(
+        "thread_title".into(),
+    ));
+    let title = harness
+        .test()
+        .thread_manager
+        .start_thread(options)
+        .await?
+        .thread;
+    let mock =
+        responses::mount_sse_sequence(harness.server(), vec![reply("title"), reply("next")]).await;
+    for message in ["Generate a title", "Another title"] {
+        title
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![UserInput::Text {
+                text: message.into(),
+                text_elements: Vec::new(),
+            }]))
+            .await?;
+        wait_for_event(&title, |event| matches!(event, EventMsg::TurnComplete(_))).await;
+        ThreadIdle::wait(&title).await;
+        advance(3300).await;
+    }
+    let requests = mock.requests();
+    assert_eq!(requests.len(), 2);
+    for request in requests {
+        let metadata: serde_json::Value =
+            serde_json::from_str(&request.header("x-codex-turn-metadata").unwrap())?;
+        assert_eq!(metadata["thread_source"], "thread_title");
+        assert_eq!(
+            request.inputs_of_type("compaction_trigger"),
+            Vec::<serde_json::Value>::new()
+        );
+    }
+    title.shutdown_and_wait().await?;
+    harness.test().codex.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[tokio::test]
 async fn cache_deadline_foreground_cancels_idle_compaction_without_losing_history() -> Result<()> {
     let harness = harness(3300).await?;
     let requested = Arc::new(tokio::sync::Notify::new());
