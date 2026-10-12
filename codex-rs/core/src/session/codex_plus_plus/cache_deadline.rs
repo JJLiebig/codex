@@ -112,12 +112,22 @@ pub(super) async fn record_foreground(session: &Session, step: &StepContext, req
     {
         return;
     }
+    let config = session.get_config().await;
+    let window = session.current_window_id().await;
+    // Serialize ticket mutation with abort removing its owner, including late response completion.
+    let active = session.active_turn.lock().await;
+    if !active
+        .as_ref()
+        .and_then(|turn| turn.task.as_ref())
+        .is_some_and(|task| task.turn_context.sub_id == step.turn.sub_id)
+    {
+        return;
+    }
     // A concurrent account switch cannot label the previous account's request as fresh.
     if request_owner != owner_generation(session) {
         session.cache_deadline.clear();
         return;
     }
-    let config = session.get_config().await;
     let Some(interval) = codex_config::cache_deadline_compact_interval(
         &config.config_layer_stack,
         &step.settings.model_info.slug,
@@ -141,7 +151,6 @@ pub(super) async fn record_foreground(session: &Session, step: &StepContext, req
     let Some(wall_expires) = SystemTime::now().checked_add(fresh_for) else {
         return;
     };
-    let window = session.current_window_id().await;
     *session
         .cache_deadline
         .deadline

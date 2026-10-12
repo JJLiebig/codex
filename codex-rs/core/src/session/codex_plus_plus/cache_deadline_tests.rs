@@ -5,6 +5,92 @@ use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::turn_input::TurnStartOptions;
 use pretty_assertions::assert_eq;
 
+struct WaitingTask;
+impl SessionTask for WaitingTask {
+    fn kind(&self) -> TaskKind {
+        TaskKind::Compact
+    }
+    fn span_name(&self) -> &'static str {
+        "test.cache_deadline_admission"
+    }
+    async fn run(
+        self: Arc<Self>,
+        _session: Arc<Session>,
+        _context: Arc<TurnContext>,
+        _input: Vec<super::super::TurnInput>,
+        cancellation: CancellationToken,
+    ) -> SessionTaskResult {
+        cancellation.cancelled().await;
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn cache_deadline_late_cancelled_response_cannot_rearm_or_clear_its_successor() {
+    let (session, old, _events) =
+        crate::session::tests::make_session_and_context_with_auth_and_config_and_rx(
+            codex_login::CodexAuth::create_dummy_chatgpt_auth_for_testing(),
+            Vec::new(),
+            |config| {
+                config.model = Some("gpt-6-astra".into());
+                config.config_layer_stack = config
+                    .config_layer_stack
+                    .with_user_config(
+                        &config.codex_home.join("config.toml"),
+                        toml::from_str("[cache_deadline_compact_seconds]\ngpt-6-astra = 3300")
+                            .unwrap(),
+                    )
+                    .unwrap();
+            },
+        )
+        .await;
+    session
+        .start_task(Arc::clone(&old), Vec::new(), WaitingTask)
+        .await;
+    let old_step = session
+        .capture_step_context(old, &CancellationToken::new())
+        .await
+        .unwrap();
+    let owner = owner_generation(&session);
+    record_foreground(&session, &old_step, owner).await;
+    assert!(session.cache_deadline.deadline.lock().unwrap().is_some());
+    session.abort_all_tasks(TurnAbortReason::Interrupted).await;
+    // The old request finishes after the abort has detached its turn and cleared the ticket.
+    record_foreground(&session, &old_step, owner).await;
+    assert!(session.cache_deadline.deadline.lock().unwrap().is_none());
+    let next = session.new_default_turn().await;
+    session
+        .start_task(Arc::clone(&next), Vec::new(), WaitingTask)
+        .await;
+    let next_step = session
+        .capture_step_context(next, &CancellationToken::new())
+        .await
+        .unwrap();
+    record_foreground(&session, &next_step, owner).await;
+    let next_due = session
+        .cache_deadline
+        .deadline
+        .lock()
+        .unwrap()
+        .as_ref()
+        .unwrap()
+        .due;
+    // An old account's late completion must not clear the new turn's valid ticket either.
+    record_foreground(&session, &old_step, owner.wrapping_add(1)).await;
+    assert_eq!(
+        session
+            .cache_deadline
+            .deadline
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .due,
+        next_due
+    );
+    session.abort_all_tasks(TurnAbortReason::Replaced).await;
+}
+
 #[tokio::test]
 async fn cache_deadline_discards_suspend_expiry_even_when_monotonic_clock_stopped() {
     let timer = CacheDeadline::default();
@@ -24,25 +110,6 @@ async fn cache_deadline_discards_suspend_expiry_even_when_monotonic_clock_stoppe
 
 #[tokio::test]
 async fn cache_deadline_task_admission_preserves_racing_mail_and_its_start_options() {
-    struct WaitingTask;
-    impl SessionTask for WaitingTask {
-        fn kind(&self) -> TaskKind {
-            TaskKind::Compact
-        }
-        fn span_name(&self) -> &'static str {
-            "test.cache_deadline_admission"
-        }
-        async fn run(
-            self: Arc<Self>,
-            _session: Arc<Session>,
-            _context: Arc<TurnContext>,
-            _input: Vec<super::super::TurnInput>,
-            cancellation: CancellationToken,
-        ) -> SessionTaskResult {
-            cancellation.cancelled().await;
-            Ok(None)
-        }
-    }
     let (session, context, _events) = make_session_and_context_with_rx().await;
     context.extension_data.insert(CacheDeadlineTask);
     let mail = InterAgentCommunication::new(
