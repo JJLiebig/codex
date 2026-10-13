@@ -255,7 +255,10 @@ def publish(
             )
             awaiting[spec] = expected
         confirmation_started = time.monotonic()
-        confirmation_intervals = 20 * 60 // 5
+        confirmation_minutes = (
+            30 if any(tag == "win32-x64" for _, _, tag, _ in batch) else 20
+        )
+        confirmation_intervals = confirmation_minutes * 60 // 5
         for attempt in range(confirmation_intervals + 1):
             for spec, expected in list(awaiting.items()):
                 current = npm_view(spec, "dist.integrity")
