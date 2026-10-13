@@ -15,6 +15,7 @@ use codex_analytics::CompactionReason;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::error::Result as CodexResult;
+use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
 use std::collections::HashSet;
@@ -170,14 +171,16 @@ pub(super) async fn record_foreground(session: &Session, step: &StepContext, req
     session.cache_deadline.changed.notify_one();
 }
 
-async fn take_due(session: &Session, model: &str) -> bool {
+async fn take_due(session: &Session, model_info: &ModelInfo) -> bool {
     if !session.cache_deadline.due() {
         return false;
     }
     let config = session.get_config().await;
+    let model = model_info.slug.as_str();
     let interval = codex_config::cache_deadline_compact_interval(&config.config_layer_stack, model);
     let window = session.current_window_id().await;
     let owner_generation = owner_generation(session);
+    let context_tokens = session.get_total_token_usage().await;
     let mut guard = session
         .cache_deadline
         .deadline
@@ -197,6 +200,10 @@ async fn take_due(session: &Session, model: &str) -> bool {
             && Some(deadline.interval) == interval
             && Instant::now() < deadline.expires
             && SystemTime::now() < deadline.wall_expires
+            // Consume small-context deadlines too; only foreground inference rearms maintenance.
+            && model_info.usable_context_window().is_some_and(|limit| {
+                limit > 0 && i128::from(context_tokens) * 100 >= i128::from(limit) * 25
+            })
     })
 }
 
@@ -206,7 +213,7 @@ pub(super) async fn at_sampling_boundary(
     client: &mut ModelClientSession,
     attempts: &mut HashSet<String>,
 ) -> CodexResult<ControlFlow<()>> {
-    if take_due(session, &step.settings.model_info.slug).await {
+    if take_due(session, &step.settings.model_info).await {
         let result = super::turn::run_auto_compact(
             session,
             Arc::clone(step),
@@ -274,7 +281,7 @@ pub(super) async fn start_if_idle(
         let active = active.get_or_insert_with(ActiveTurn::default);
         Arc::clone(&active.turn_state)
     };
-    if !take_due(session, &context.model_info().slug).await {
+    if !take_due(session, &context.model_info()).await {
         session.clear_reserved_idle_turn(&reservation).await;
         return;
     }
