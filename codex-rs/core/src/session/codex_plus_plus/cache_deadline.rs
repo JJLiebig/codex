@@ -281,7 +281,7 @@ pub(super) async fn start_if_idle(
         let active = active.get_or_insert_with(ActiveTurn::default);
         Arc::clone(&active.turn_state)
     };
-    if !take_due(session, &context.model_info()).await {
+    if !take_due(session, context.model_info()).await {
         session.clear_reserved_idle_turn(&reservation).await;
         return;
     }
