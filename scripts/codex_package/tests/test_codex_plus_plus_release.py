@@ -261,7 +261,8 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                     return None
                 if spec in platform_specs:
                     self.assertEqual(published, platform_specs)
-                    if ticks < 20 * 60 // 5:
+                    processing_minutes = 26 if spec.endswith("-win32-x64") else 20
+                    if ticks < processing_minutes * 60 // 5:
                         return None
                     confirmed.add(spec)
                 return integrities[spec]
@@ -282,7 +283,7 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                 release.publish(VERSION, npm_dir)
 
             self.assertEqual(run.call_count, 4)
-            self.assertEqual(sleep.call_count, 20 * 60 // 5)
+            self.assertEqual(sleep.call_count, 26 * 60 // 5)
 
     def test_platform_confirmation_failure_does_not_publish_latest(self) -> None:
         for confirmation in (None, "sha512-conflict"):
