@@ -19,13 +19,15 @@ use std::sync::Arc;
 use std::time::Duration;
 use test_case::test_case;
 
-#[test_case(3300, 3300, None; "default waits for active tool")]
-#[test_case(1800, 2400, None; "custom interval stays fresh until known expiry")]
-#[test_case(3300, 3300, Some("usage_limit_reached"); "failure stops foreground and preserves history")]
+#[test_case(3300, 3300, 95_000, None; "default waits for active tool")]
+#[test_case(1800, 2400, 95_000, None; "custom interval stays fresh until known expiry")]
+#[test_case(3300, 3300, 0, None; "small context continues without compaction")]
+#[test_case(3300, 3300, 95_000, Some("usage_limit_reached"); "failure stops foreground and preserves history")]
 #[tokio::test]
 async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary(
     interval: u64,
     elapsed: u64,
+    context_tokens: i64,
     failure_code: Option<&str>,
 ) -> Result<()> {
     use codex_protocol::config_types::CollaborationMode;
@@ -39,13 +41,16 @@ async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary
     let mut replies = vec![
         responses::sse(vec![
             responses::ev_function_call("question", "request_user_input", &arguments),
-            responses::ev_completed("first"),
+            responses::ev_completed_with_tokens("first", context_tokens),
         ]),
         failure_code.map_or_else(compacted, |code| {
             responses::sse_failed("compact", code, "cannot compact")
         }),
         reply("after-tool"),
     ];
+    if context_tokens == 0 {
+        replies.remove(1);
+    }
     if failure_code.is_some() {
         replies.push(compacted());
     }
@@ -107,6 +112,16 @@ async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary
     })
     .await;
     assert_eq!(errors, usize::from(failure_code.is_some()));
+    if context_tokens == 0 {
+        assert_eq!(mock.requests().len(), 2);
+        assert!(
+            mock.requests()[1]
+                .inputs_of_type("compaction_trigger")
+                .is_empty()
+        );
+        harness.test().codex.shutdown_and_wait().await?;
+        return Ok(());
+    }
     if failure_code.is_some() {
         assert_eq!(
             mock.requests().len(),
@@ -160,6 +175,10 @@ fn builder(seconds: u64) -> TestCodexBuilder {
     test_codex()
         .with_extensions(Arc::new(extensions.build()))
         .with_model("gpt-6-astra")
+        .with_model_info_override("gpt-6-astra", |model| {
+            model.context_window = Some(400_000);
+            model.effective_context_window_percent = 95;
+        })
         .with_session_source(SessionSource::Cli)
         .with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing())
         .with_config(move |config| {
@@ -211,7 +230,7 @@ async fn advance(seconds: u64) {
 fn reply(id: &str) -> String {
     responses::sse(vec![
         responses::ev_assistant_message(id, "reply"),
-        responses::ev_completed(id),
+        responses::ev_completed_with_tokens(id, 95_000),
     ])
 }
 
@@ -223,6 +242,58 @@ fn compacted() -> String {
         }),
         responses::ev_completed("compact"),
     ])
+}
+
+#[tokio::test]
+async fn cache_deadline_skips_small_current_context_but_manual_compact_still_runs() -> Result<()> {
+    let harness = harness(3300).await?;
+    let small_reply = |id| {
+        responses::sse(vec![
+            responses::ev_assistant_message(id, "reply"),
+            responses::ev_completed_with_tokens(id, 94_999),
+        ])
+    };
+    let mock = responses::mount_sse_sequence(
+        harness.server(),
+        vec![
+            small_reply("first"),
+            small_reply("second"),
+            compacted(),
+            reply("large"),
+            compacted(),
+        ],
+    )
+    .await;
+    prompt(&harness, "retain small conversation").await?;
+    advance(3300).await;
+    prompt(&harness, "still below the minimum").await?;
+    assert_eq!(mock.requests().len(), 2);
+    assert!(
+        mock.requests()[1].body_json()["input"]
+            .to_string()
+            .contains("retain small conversation")
+    );
+    advance(3300).await;
+    // Cumulative usage exceeds the floor, but the current context remains one token below it.
+    harness.test().codex.submit(Op::Compact).await?;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    ThreadIdle::wait(&harness.test().codex).await;
+    assert_eq!(mock.requests().len(), 3);
+    let metadata: serde_json::Value =
+        serde_json::from_str(&mock.requests()[2].header("x-codex-turn-metadata").unwrap())?;
+    assert_eq!(metadata["compaction"]["trigger"], "manual");
+    prompt(&harness, "now exactly at the minimum").await?;
+    advance(3300).await;
+    wait_for_event(&harness.test().codex, |event| {
+        matches!(event, EventMsg::TurnComplete(_))
+    })
+    .await;
+    assert_eq!(mock.requests().len(), 5);
+    harness.test().codex.shutdown_and_wait().await?;
+    Ok(())
 }
 
 #[test_case(false; "successful checkpoint is reused")]
