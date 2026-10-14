@@ -150,6 +150,7 @@ impl ThreadEventStore {
     }
 
     pub(super) fn set_turns(&mut self, turns: Vec<Turn>) {
+        self.prompt_cache.observe_history(&turns);
         if self.active_reasoning_item.as_ref().is_some_and(|started| {
             turns.iter().any(|turn| {
                 (turn.id == started.turn_id && turn.status != TurnStatus::InProgress)

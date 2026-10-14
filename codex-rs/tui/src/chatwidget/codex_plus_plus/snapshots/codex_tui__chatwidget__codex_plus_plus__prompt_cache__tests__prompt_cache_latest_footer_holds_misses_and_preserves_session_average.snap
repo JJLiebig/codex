@@ -1,6 +1,6 @@
 ---
 source: tui/src/chatwidget/codex_plus_plus/prompt_cache_tests.rs
-assertion_line: 148
+assertion_line: 157
 expression: "rendered.join(\"\\n\")"
 ---
 unknown:
@@ -11,9 +11,13 @@ unknown:
 cold:
 › Ask Codex to do anything
 
+  Cache 0.0%
+later miss:
+› Ask Codex to do anything
+
   Cache 0.0% (miss)
 hit:
 › Ask Codex to do anything
 
   Cache 88.9%
-  Cache:               80.0% of reported input this session
+  Cache:               72.7% of reported input this session

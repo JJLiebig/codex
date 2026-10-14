@@ -2,6 +2,7 @@
 
 use codex_app_server_protocol::RawResponseCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
+use codex_app_server_protocol::Turn;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -15,6 +16,7 @@ struct Usage {
     cached: u128,
     latest: Option<(i64, i64)>,
     miss_until: Option<Instant>,
+    has_prior_context: bool,
 }
 
 /// Shared by the existing per-thread event store and its currently displayed widget.
@@ -28,6 +30,14 @@ pub(crate) enum CacheObservation {
 }
 
 impl PromptCache {
+    pub(crate) fn observe_history(&self, turns: &[Turn]) {
+        if !turns.is_empty() {
+            #[expect(clippy::expect_used)]
+            let mut usage = self.0.lock().expect("prompt cache state poisoned");
+            usage.has_prior_context = true;
+        }
+    }
+
     pub(crate) fn observe(&self, notification: &ServerNotification, active: bool) {
         if let ServerNotification::RawResponseCompleted(completed) = notification {
             self.observe_completion(
@@ -48,9 +58,11 @@ impl PromptCache {
     ) {
         #[expect(clippy::expect_used)]
         let mut usage = self.0.lock().expect("prompt cache state poisoned");
-        if !usage.responses.insert(completed.response_id.clone())
-            || matches!(observation, CacheObservation::Replay)
-        {
+        if !usage.responses.insert(completed.response_id.clone()) {
+            return;
+        }
+        let has_prior_context = std::mem::replace(&mut usage.has_prior_context, /*src*/ true);
+        if matches!(observation, CacheObservation::Replay) {
             return;
         }
         let reported = completed
@@ -76,7 +88,8 @@ impl PromptCache {
             usage.cached += counts.cached_input_tokens as u128;
         }
         usage.latest = counts.map(|counts| (counts.input_tokens, counts.cached_input_tokens));
-        if matches!(observation, CacheObservation::Active)
+        if has_prior_context
+            && matches!(observation, CacheObservation::Active)
             && counts.is_some_and(|counts| counts.cached_input_tokens == 0)
         {
             usage.miss_until = Some(Instant::now() + Duration::from_secs(/*secs*/ 3));
