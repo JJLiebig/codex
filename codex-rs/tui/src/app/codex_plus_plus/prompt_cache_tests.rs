@@ -27,8 +27,14 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         .push_notification(completion.clone());
     app.activate_thread_channel(first).await;
     assert_eq!(
-        app.chat_widget.prompt_cache.status(),
-        "75.0% of reported input this session"
+        (
+            app.chat_widget.prompt_cache.status(),
+            app.chat_widget.prompt_cache.status_line()
+        ),
+        (
+            "75.0% of reported input this session".into(),
+            ("Cache 75.0%".into(), None)
+        )
     );
     app.store_active_thread_receiver().await;
     app.clear_active_thread().await;
@@ -38,8 +44,14 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
     app.ensure_thread_channel(second);
     app.activate_thread_channel(second).await;
     assert_eq!(
-        app.chat_widget.prompt_cache.status(),
-        "Unknown (no reported cache usage this session)"
+        (
+            app.chat_widget.prompt_cache.status(),
+            app.chat_widget.prompt_cache.status_line()
+        ),
+        (
+            "Unknown (no reported cache usage this session)".into(),
+            ("Cache unknown".into(), None)
+        )
     );
     app.store_active_thread_receiver().await;
     app.clear_active_thread().await;
@@ -48,10 +60,16 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         .store
         .lock()
         .await
-        .push_notification(completion);
+        .push_notification(completion.clone());
     assert_eq!(
-        app.chat_widget.prompt_cache.status(),
-        "75.0% of reported input this session"
+        (
+            app.chat_widget.prompt_cache.status(),
+            app.chat_widget.prompt_cache.status_line()
+        ),
+        (
+            "75.0% of reported input this session".into(),
+            ("Cache 75.0%".into(), None)
+        )
     );
     let reconnected_cache = app.prompt_cache_for_thread(first).await;
     app.clear_active_thread().await;
@@ -63,7 +81,40 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         .prompt_cache = reconnected_cache;
     app.activate_thread_channel(first).await;
     assert_eq!(
-        app.chat_widget.prompt_cache.status(),
-        "75.0% of reported input this session"
+        (
+            app.chat_widget.prompt_cache.status(),
+            app.chat_widget.prompt_cache.status_line()
+        ),
+        (
+            "75.0% of reported input this session".into(),
+            ("Cache 75.0%".into(), None)
+        )
+    );
+    let codex_app_server_protocol::ServerNotification::RawResponseCompleted(mut miss) = completion
+    else {
+        unreachable!()
+    };
+    miss.response_id = "background-miss".into();
+    miss.usage.as_mut().unwrap().cached_input_tokens = 0;
+    miss.usage_metadata
+        .as_mut()
+        .unwrap()
+        .metadata
+        .as_mut()
+        .unwrap()["input_tokens_details"]["cached_tokens"] = json!(0);
+    // A background miss changes the latest percentage without a delayed warning on activation.
+    app.store_active_thread_receiver().await;
+    app.clear_active_thread().await;
+    app.ensure_thread_channel(first)
+        .store
+        .lock()
+        .await
+        .push_notification(
+            codex_app_server_protocol::ServerNotification::RawResponseCompleted(miss),
+        );
+    app.activate_thread_channel(first).await;
+    assert_eq!(
+        app.chat_widget.prompt_cache.status_line(),
+        ("Cache 0.0%".into(), None)
     );
 }

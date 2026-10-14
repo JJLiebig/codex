@@ -1,4 +1,5 @@
 use super::ChatWidget;
+use crate::codex_plus_plus::prompt_cache::CacheObservation;
 use codex_app_server_protocol::RawResponseCompletedNotification;
 
 impl ChatWidget {
@@ -10,13 +11,33 @@ impl ChatWidget {
         if self.thread_id.map(|id| id.to_string()).as_deref() != Some(&completed.thread_id) {
             return;
         }
-        // Historical replay must neither contribute usage nor re-emit a miss notice.
+        // Historical replay must neither contribute usage nor re-emit a miss indication.
+        self.prompt_cache.observe_completion(
+            &completed,
+            if replay_kind.is_none() {
+                CacheObservation::Active
+            } else {
+                CacheObservation::Replay
+            },
+        );
         if replay_kind.is_none() {
-            self.prompt_cache.observe_completion(&completed);
+            self.refresh_prompt_cache_status_line();
+            self.request_redraw();
         }
-        let miss = self.prompt_cache.take_miss(&completed.response_id);
-        if miss && replay_kind.is_none() {
-            self.add_info_message("Prompt cache miss.".into(), /*hint*/ None);
+    }
+
+    pub(in crate::chatwidget) fn refresh_prompt_cache_status_line(&mut self) {
+        if self
+            .local_settings
+            .tui
+            .status_line
+            .as_ref()
+            .is_some_and(|items| items.iter().any(|item| item == "prompt-cache"))
+        {
+            self.refresh_status_line();
+            if let Some(delay) = self.prompt_cache.status_line().1 {
+                self.frame_requester.schedule_frame_in(delay);
+            }
         }
     }
 }
