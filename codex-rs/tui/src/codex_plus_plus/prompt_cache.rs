@@ -2,35 +2,55 @@
 
 use codex_app_server_protocol::RawResponseCompletedNotification;
 use codex_app_server_protocol::ServerNotification;
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::time::Duration;
+use tokio::time::Instant;
 
 #[derive(Debug, Default)]
 struct Usage {
-    responses: HashMap<String, bool>,
+    responses: HashSet<String>,
     input: u128,
     cached: u128,
+    latest: Option<(i64, i64)>,
+    miss_until: Option<Instant>,
 }
 
 /// Shared by the existing per-thread event store and its currently displayed widget.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct PromptCache(Arc<Mutex<Usage>>);
 
+pub(crate) enum CacheObservation {
+    Active,
+    Background,
+    Replay,
+}
+
 impl PromptCache {
     pub(crate) fn observe(&self, notification: &ServerNotification, active: bool) {
         if let ServerNotification::RawResponseCompleted(completed) = notification {
-            self.observe_completion(completed);
-            if !active {
-                self.take_miss(&completed.response_id);
-            }
+            self.observe_completion(
+                completed,
+                if active {
+                    CacheObservation::Active
+                } else {
+                    CacheObservation::Background
+                },
+            );
         }
     }
 
-    pub(crate) fn observe_completion(&self, completed: &RawResponseCompletedNotification) {
+    pub(crate) fn observe_completion(
+        &self,
+        completed: &RawResponseCompletedNotification,
+        observation: CacheObservation,
+    ) {
         #[expect(clippy::expect_used)]
         let mut usage = self.0.lock().expect("prompt cache state poisoned");
-        if usage.responses.contains_key(&completed.response_id) {
+        if !usage.responses.insert(completed.response_id.clone())
+            || matches!(observation, CacheObservation::Replay)
+        {
             return;
         }
         let reported = completed
@@ -55,16 +75,32 @@ impl PromptCache {
             usage.input += counts.input_tokens as u128;
             usage.cached += counts.cached_input_tokens as u128;
         }
-        usage.responses.insert(
-            completed.response_id.clone(),
-            counts.is_some_and(|counts| counts.cached_input_tokens == 0),
-        );
+        usage.latest = counts.map(|counts| (counts.input_tokens, counts.cached_input_tokens));
+        if matches!(observation, CacheObservation::Active)
+            && counts.is_some_and(|counts| counts.cached_input_tokens == 0)
+        {
+            usage.miss_until = Some(Instant::now() + Duration::from_secs(/*secs*/ 3));
+        } else if matches!(observation, CacheObservation::Background) {
+            usage.miss_until = None;
+        }
     }
 
-    pub(crate) fn take_miss(&self, response_id: &str) -> bool {
+    /// Keep a miss visible briefly even when the next response arrives immediately.
+    pub(crate) fn status_line(&self) -> (String, Option<Duration>) {
         #[expect(clippy::expect_used)]
-        let mut usage = self.0.lock().expect("prompt cache state poisoned");
-        std::mem::take(usage.responses.entry(response_id.to_owned()).or_default())
+        let usage = self.0.lock().expect("prompt cache state poisoned");
+        if let Some(remaining) = usage
+            .miss_until
+            .and_then(|deadline| deadline.checked_duration_since(Instant::now()))
+            .filter(|remaining| !remaining.is_zero())
+        {
+            return ("Cache 0.0% (miss)".into(), Some(remaining));
+        }
+        let text = match usage.latest {
+            Some((input, cached)) => format!("Cache {:.1}%", 100.0 * cached as f64 / input as f64),
+            None => "Cache unknown".into(),
+        };
+        (text, None)
     }
 
     pub(crate) fn status(&self) -> String {
