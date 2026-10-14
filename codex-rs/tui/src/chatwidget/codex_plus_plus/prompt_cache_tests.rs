@@ -55,10 +55,19 @@ async fn prompt_cache_latest_footer_holds_misses_and_preserves_session_average()
         }
     }
     let cold = completed(thread, "cold", /*input*/ 100, /*cached*/ 0);
+    let miss = completed(thread, "miss", /*input*/ 100, /*cached*/ 0);
     let hit = completed(thread, "hit", /*input*/ 900, /*cached*/ 800);
     chat.handle_server_notification(cold.clone(), /*replay_kind*/ None);
+    assert_eq!(chat.prompt_cache.status_line(), ("Cache 0.0%".into(), None));
     rendered.push(format!(
         "cold:\n{}",
+        render_bottom_popup(&chat, /*width*/ 100)
+    ));
+    chat.handle_server_notification(cold.clone(), /*replay_kind*/ None);
+    assert_eq!(chat.prompt_cache.status_line(), ("Cache 0.0%".into(), None));
+    chat.handle_server_notification(miss.clone(), /*replay_kind*/ None);
+    rendered.push(format!(
+        "later miss:\n{}",
         render_bottom_popup(&chat, /*width*/ 100)
     ));
     // The initial immediate draw coalesces delayed draws; each frame must re-arm expiry.
@@ -91,7 +100,7 @@ async fn prompt_cache_latest_footer_holds_misses_and_preserves_session_average()
             .to_string(),
         "Cache 88.9%"
     );
-    for notification in [cold, hit] {
+    for notification in [cold, miss, hit] {
         chat.handle_server_notification(notification, /*replay_kind*/ None);
     }
     for replay in [
@@ -143,7 +152,7 @@ async fn prompt_cache_latest_footer_holds_misses_and_preserves_session_average()
     }
     assert_eq!(
         chat.prompt_cache.status(),
-        "80.0% of reported input this session"
+        "72.7% of reported input this session"
     );
     insta::assert_snapshot!(rendered.join("\n"));
 }

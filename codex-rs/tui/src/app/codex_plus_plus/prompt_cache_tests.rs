@@ -110,11 +110,37 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
         .lock()
         .await
         .push_notification(
-            codex_app_server_protocol::ServerNotification::RawResponseCompleted(miss),
+            codex_app_server_protocol::ServerNotification::RawResponseCompleted(miss.clone()),
         );
     app.activate_thread_channel(first).await;
     assert_eq!(
         app.chat_widget.prompt_cache.status_line(),
         ("Cache 0.0%".into(), None)
+    );
+    let mut resumed_store = crate::app::thread_events::ThreadEventStore::new(/*capacity*/ 8);
+    resumed_store.set_turns(vec![codex_app_server_protocol::Turn {
+        inference_attribution: None,
+        id: "previous".into(),
+        root_turn_id: None,
+        items_view: codex_app_server_protocol::TurnItemsView::Full,
+        items: Vec::new(),
+        status: codex_app_server_protocol::TurnStatus::Completed,
+        error: None,
+        started_at: None,
+        completed_at: None,
+        duration_ms: None,
+    }]);
+    resumed_store.active = true;
+    assert_eq!(
+        resumed_store.prompt_cache.status(),
+        "Unknown (no reported cache usage this session)"
+    );
+    resumed_store.push_notification(
+        codex_app_server_protocol::ServerNotification::RawResponseCompleted(miss),
+    );
+    let (text, refresh_in) = resumed_store.prompt_cache.status_line();
+    assert_eq!(
+        (text, refresh_in.is_some()),
+        ("Cache 0.0% (miss)".into(), true)
     );
 }
