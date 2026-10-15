@@ -360,6 +360,9 @@ async fn ambiguous_outcomes_are_not_replayed_and_the_attempt_is_bounded() {
         ResponseTemplate::new(200)
             .insert_header("content-type", "text/event-stream")
             .set_body_string("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"server_is_overloaded\"}}}\n\n"),
+        ResponseTemplate::new(200)
+            .insert_header("content-type", "text/event-stream")
+            .set_body_string("event: response.incomplete\ndata: {\"type\":\"response.incomplete\",\"response\":{\"incomplete_details\":{\"reason\":\"max_output_tokens\"}}}\n\n"),
         completed_response().set_delay(Duration::from_secs(1)),
     ] {
         server.reset().await;

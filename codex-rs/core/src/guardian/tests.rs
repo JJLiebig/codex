@@ -1711,6 +1711,10 @@ fn guardian_request_target_item_id_handles_absent_and_future_items() {
         guardian_request_target_item_id(&pre_tool_use),
         Some("tool-call-1")
     );
+    assert_eq!(
+        super::runtime::ReviewAction::from(pre_tool_use).tool_call_id,
+        Some("tool-call-1".to_string())
+    );
 }
 
 #[derive(Clone, Copy)]

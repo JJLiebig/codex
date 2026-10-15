@@ -384,7 +384,7 @@ impl SamplingExecution {
                                     &error,
                                     &mut auth_recovery,
                                     &mut retries,
-                                    Some(&lease),
+                                    response.lease(),
                                 )
                                 .await
                         {
@@ -393,7 +393,9 @@ impl SamplingExecution {
                         return Err(error);
                     }
                 };
-                accepted_output |= lease.accepts_owned_output(&event);
+                accepted_output |= response
+                    .lease()
+                    .is_some_and(|lease| lease.accepts_owned_output(&event));
                 match event {
                     ResponseEvent::OutputTextDelta(delta) => {
                         if mode.early_result_sent() {

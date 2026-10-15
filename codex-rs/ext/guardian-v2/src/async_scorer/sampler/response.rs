@@ -38,6 +38,10 @@ impl PendingResponse {
         self.response.as_mut()?.0.rx_event.recv().await
     }
 
+    pub(super) fn lease(&self) -> Option<&ConnectionLease> {
+        self.response.as_ref().map(|(_, lease)| lease)
+    }
+
     pub(super) async fn reuse(mut self, token_usage: Option<&TokenUsage>) {
         if let Some((_, lease)) = self.response.take() {
             record_token_usage(self.metrics.as_deref(), token_usage);

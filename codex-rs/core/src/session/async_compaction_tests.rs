@@ -8,6 +8,7 @@ use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::TokenUsage;
 use core_test_support::responses;
 use pretty_assertions::assert_eq;
+use std::collections::HashSet;
 
 #[test_case::test_case(CompactionTrigger::Auto; "optional ready adoption")]
 #[test_case::test_case(CompactionTrigger::Manual; "manual ready reuse")]
@@ -132,6 +133,7 @@ async fn cancelled_turn_skips_launch_but_preserves_existing_work(trigger: Compac
                     next_step,
                     &mut client_session,
                     world_state,
+                    &mut HashSet::new(),
                     CompactionReason::ContextLimit,
                     phase,
                     Some(candidate),

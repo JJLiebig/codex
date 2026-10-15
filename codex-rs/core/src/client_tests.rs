@@ -1210,8 +1210,7 @@ async fn background_http_preserves_foreground_routing_and_websocket_cache() -> a
         .expect(/*requests*/ 1)
         .mount(&server)
         .await;
-    let mut provider =
-        ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
+    let provider = ModelProviderInfo::create_openai_provider(Some(format!("{}/v1", server.uri())));
     let mut client = test_model_client(SessionSource::Cli);
     Arc::get_mut(&mut client.state)
         .expect("unique test state")
@@ -1222,9 +1221,7 @@ async fn background_http_preserves_foreground_routing_and_websocket_cache() -> a
         )),
     );
     let mut foreground = client.new_session();
-    foreground
-        .websocket_session
-        .reset(Some("connection_closed"));
+    foreground.websocket_session.continuation_reset_reason = Some("connection_closed");
     drop(foreground);
     let metadata = test_responses_metadata_for_client(
         &client,
@@ -1624,6 +1621,7 @@ async fn responses_websocket_enabled_ignores_inactive_imported_accounts() -> any
         /*include_timing_metrics*/ false,
         /*beta_features_header*/ None,
         /*concurrent_reasoning_summaries_enabled*/ false,
+        /*output_token_replay_enabled*/ false,
         /*attestation_provider*/ None,
         HttpClientFactory::new(OutboundProxyPolicy::ReqwestDefault),
         codex_model_provider::WorkspaceRoutingContext::new(

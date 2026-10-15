@@ -167,7 +167,10 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
         let canonical = model_info.clone();
         let mut session = client.new_session();
         let mut stream = session
-            .stream_responses_api(
+            .stream_responses_http(
+                &Arc::clone(&session.turn_state),
+                /*expected_auth_owner*/ None,
+                /*event_sender*/ None,
                 &Prompt::default(),
                 &model_info,
                 &test_session_telemetry(),
@@ -332,7 +335,10 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
             let mut session = client.new_session();
             let revision = *fixture.manager.auth_change_receiver().borrow();
             let result = session
-                .stream_responses_api(
+                .stream_responses_http(
+                    &Arc::clone(&session.turn_state),
+                    /*expected_auth_owner*/ None,
+                    /*event_sender*/ None,
                     &Prompt::default(),
                     &model_info,
                     &test_session_telemetry(),
@@ -546,7 +552,10 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
         let mut error = None;
         loop {
             match session
-                .stream_responses_api(
+                .stream_responses_http(
+                    &Arc::clone(&session.turn_state),
+                    /*expected_auth_owner*/ None,
+                    /*event_sender*/ None,
                     &Prompt::default(),
                     &model_info,
                     &test_session_telemetry(),

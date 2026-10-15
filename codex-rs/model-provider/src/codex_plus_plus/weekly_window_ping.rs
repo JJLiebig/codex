@@ -275,6 +275,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         }
         ApiError::Transport(_)
         | ApiError::Stream(_)
+        | ApiError::ResponseIncomplete(_)
         | ApiError::ContentFilter
         | ApiError::Retryable { .. }
         | ApiError::ServerOverloaded { .. }
