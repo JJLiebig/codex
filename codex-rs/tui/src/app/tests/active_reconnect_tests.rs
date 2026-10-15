@@ -718,14 +718,8 @@ async fn reconnect_allows_slow_hydration_but_bounds_a_stalled_server() -> Result
             app.begin_reconnect();
             let mut session = crate::start_embedded_app_server_for_picker(&app.config).await?;
             let mut tui = crate::tui::test_support::make_test_tui()?;
-            app.finish_reconnect(
-                &mut tui,
-                &mut session,
-                &mut events,
-                result?,
-                codex_cli_version(),
-            )
-            .await?;
+            app.finish_reconnect(&mut tui, &mut session, &mut events, result?, "0.0.0")
+                .await?;
             assert!(app.thread_unavailable(id));
             app.handle_tui_event(
                 &mut tui,

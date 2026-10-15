@@ -11,7 +11,7 @@ impl OnboardingScreen {
         let kind = self.current_steps().last().and_then(|step| match step {
             Step::Auth(_) => Some(Kind::Auth),
             Step::TrustDirectory(_) => Some(Kind::Permission),
-            Step::Welcome(_) => None,
+            Step::Welcome(_) | Step::GovCloudGuidance { .. } => None,
         });
         let message = match kind {
             Some(Kind::Auth) => Some("Sign in to Codex".to_string()),
