@@ -12,7 +12,6 @@ use crate::tools::handlers::unified_exec::ExecCommandArgs;
 use crate::tools::handlers::unified_exec::get_command;
 use crate::tools::hook_names::HookToolName;
 use codex_exec_server::Environment;
-use codex_tools::UnifiedExecShellMode;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct ExactPreToolUseApproval {
@@ -71,11 +70,10 @@ pub(crate) fn reviewed_exec_command_shell(
     environment: &Environment,
     args: &ExecCommandArgs,
     shell: Arc<Shell>,
-    shell_mode: &UnifiedExecShellMode,
     allow_login_shell: bool,
 ) -> Option<ResolvedExecCommandShell> {
     resolved_exec_command_shell(environment, || {
-        let resolved_command = get_command(args, shell, shell_mode, allow_login_shell).ok()?;
+        let resolved_command = get_command(args, shell, allow_login_shell).ok()?;
         Some((
             resolved_command.shell.shell.shell_type,
             resolved_command.command.first()?.clone(),

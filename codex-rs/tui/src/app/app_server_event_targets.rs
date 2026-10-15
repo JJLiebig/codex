@@ -208,6 +208,7 @@ pub(super) fn server_notification_thread_target(
         ServerNotification::ProjectChanged(_)
         | ServerNotification::SkillsChanged(_)
         | ServerNotification::AccountUpdated(_)
+        | ServerNotification::ThreadReadStateChanged(_)
         | ServerNotification::GatewayOAuthChanged(_)
         | ServerNotification::AppListUpdated(_)
         | ServerNotification::EnvironmentConnected(_)
