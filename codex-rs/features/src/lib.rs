@@ -982,6 +982,7 @@ impl FeaturesToml {
         self.clear_removed_compatibility_entries();
         let Self {
             tool_registry: _,
+            async_compaction,
             code_mode,
             code_mode_host,
             non_prefixed_mcp_tool_names,
@@ -1001,7 +1002,9 @@ impl FeaturesToml {
         }
         for spec in FEATURES {
             let enabled = features.enabled(spec.id);
-            if spec.id == Feature::CodeMode {
+            if spec.id == Feature::AsyncCompaction {
+                materialize_resolved_feature_enabled(async_compaction, enabled);
+            } else if spec.id == Feature::CodeMode {
                 materialize_resolved_feature_enabled(code_mode, enabled);
             } else if spec.id == Feature::CodeModeHost {
                 materialize_resolved_feature_enabled(code_mode_host, enabled);

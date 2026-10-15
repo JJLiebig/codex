@@ -48,6 +48,27 @@ fn materializing_sleep_tool_preserves_mode() {
 }
 
 #[test]
+fn materializing_async_compaction_preserves_threshold() {
+    let mut config = toml::from_str::<FeaturesToml>(
+        "[async_compaction]\nmodel_async_compact_threshold_percent = 70",
+    )
+    .expect("async compaction config should deserialize");
+    let mut features = Features::with_defaults();
+    for enabled in [true, false] {
+        features.set_enabled(Feature::AsyncCompaction, enabled);
+        config.materialize_resolved_enabled(&features);
+        assert_eq!(
+            config.async_compaction,
+            Some(FeatureToml::Config(crate::AsyncCompactionConfigToml {
+                enabled: Some(enabled),
+                model_async_compact_threshold_percent: Some(70),
+            }))
+        );
+        assert_eq!(config.entries().get("async_compaction"), Some(&enabled));
+    }
+}
+
+#[test]
 fn under_development_features_are_disabled_by_default() {
     for spec in crate::FEATURES {
         // Instant interrupts are enabled by default while retaining their development stage.

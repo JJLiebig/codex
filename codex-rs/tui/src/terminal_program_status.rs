@@ -140,6 +140,7 @@ pub(crate) fn set_terminal_program_status(
                 status,
                 iterm_detail: &detail,
                 emit_iterm_status: support.osc_21337,
+                emit_osc_7501: !crate::codex_plus_plus::program_status::enabled(),
             }
         )
     })
@@ -171,6 +172,7 @@ pub(crate) fn clear_terminal_program_status() -> io::Result<()> {
 /// lifecycle state did not change during the handoff.
 pub(crate) fn invalidate_terminal_program_status() {
     SESSION_STATUS_STATE.invalidate();
+    crate::codex_plus_plus::program_status::invalidate();
 }
 
 fn sanitize_iterm_session_detail(detail: &str) -> String {
@@ -218,6 +220,7 @@ struct SetTerminalProgramStatus<'a> {
     status: ProgramStatus,
     iterm_detail: &'a str,
     emit_iterm_status: bool,
+    emit_osc_7501: bool,
 }
 
 impl Command for SetTerminalProgramStatus<'_> {
@@ -231,11 +234,14 @@ impl Command for SetTerminalProgramStatus<'_> {
                 self.iterm_detail,
             )?;
         }
-        write!(
-            f,
-            "\x1b]7501;state={}:app=codex\x1b\\",
-            self.status.protocol_state(),
-        )
+        if self.emit_osc_7501 {
+            write!(
+                f,
+                "\x1b]7501;state={}:app=codex\x1b\\",
+                self.status.protocol_state(),
+            )?;
+        }
+        Ok(())
     }
 
     #[cfg(windows)]

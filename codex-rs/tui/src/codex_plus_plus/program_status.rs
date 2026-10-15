@@ -14,6 +14,14 @@ const MAX_MESSAGE_BYTES: usize = 2048;
 static SUPPORTED: AtomicBool = AtomicBool::new(false);
 static GENERATION: AtomicU64 = AtomicU64::new(0);
 
+pub(crate) fn enabled() -> bool {
+    match std::env::var("CODEX_PROGRAM_STATUS").as_deref() {
+        Ok("1") => true,
+        Ok("0") => false,
+        _ => SUPPORTED.load(Ordering::Relaxed),
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum State {
     #[default]
@@ -87,13 +95,7 @@ pub(crate) struct Reporter {
 
 impl Reporter {
     pub(crate) fn publish(&mut self, status: Status) {
-        let override_value = std::env::var("CODEX_PROGRAM_STATUS").ok();
-        let enabled = match override_value.as_deref() {
-            Some("1") => true,
-            Some("0") => false,
-            _ => SUPPORTED.load(Ordering::Relaxed),
-        };
-        if enabled {
+        if enabled() {
             let generation = GENERATION.load(Ordering::Relaxed);
             let mut writer = std::io::stdout().lock();
             if let Err(error) = self.write(&mut writer, generation, status) {
@@ -125,6 +127,10 @@ pub(crate) fn clear() {
         kind: None,
         message: None,
     });
+    invalidate();
+}
+
+pub(crate) fn invalidate() {
     GENERATION.fetch_add(1, Ordering::Relaxed);
 }
 

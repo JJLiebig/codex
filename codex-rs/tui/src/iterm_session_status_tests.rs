@@ -28,6 +28,7 @@ fn encodes_iterm_session_status_fields() {
             status,
             iterm_detail: detail,
             emit_iterm_status: true,
+            emit_osc_7501: true,
         }
         .write_ansi(&mut value)
         .expect("encode combined terminal program status");
@@ -49,11 +50,35 @@ fn encodes_generic_program_status() {
         status: ProgramStatus::Working,
         iterm_detail: "ignored",
         emit_iterm_status: false,
+        emit_osc_7501: true,
     }
     .write_ansi(&mut encoded)
     .expect("encode generic terminal program status");
 
     assert_eq!(encoded, "\x1b]7501;state=working:app=codex\x1b\\");
+}
+
+#[test]
+fn rich_program_status_preserves_iterm_without_overwriting_outcomes() {
+    for emit_iterm_status in [false, true] {
+        let mut encoded = String::new();
+        SetTerminalProgramStatus {
+            status: ProgramStatus::Idle,
+            iterm_detail: "",
+            emit_iterm_status,
+            emit_osc_7501: false,
+        }
+        .write_ansi(&mut encoded)
+        .expect("encode status with rich OSC 7501 reporter active");
+        assert_eq!(
+            encoded,
+            if emit_iterm_status {
+                "\x1b]21337;status=Idle;indicator=#00d75f;status-color=;detail=\x07"
+            } else {
+                ""
+            }
+        );
+    }
 }
 
 #[test]

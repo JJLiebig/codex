@@ -1873,8 +1873,7 @@ impl ModelClientSession {
             let (client_setup, transport, wire_model) =
                 self.response_request_setup(&model_info.slug).await?;
             if expected_auth_owner.is_some_and(|owner| {
-                (self.owned_request.is_none()
-                    && Some(owner) != client_setup.auth_owner_generation)
+                (self.owned_request.is_none() && Some(owner) != client_setup.auth_owner_generation)
                     || Some(owner) != self.client.auth_owner_generation()
             }) {
                 return Err(CodexErr::TurnAborted);
@@ -1905,7 +1904,8 @@ impl ModelClientSession {
                 self.client.state.auth_env_telemetry.clone(),
             );
             let http_executor = ResponsesHttpExecutor::new(&self.client);
-            let compression = http_executor.responses_request_compression(client_setup.auth.as_ref());
+            let compression =
+                http_executor.responses_request_compression(client_setup.auth.as_ref());
             let mut options = http_executor
                 .build_responses_options(
                     turn_state,

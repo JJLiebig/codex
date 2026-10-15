@@ -1222,7 +1222,9 @@ async fn background_http_preserves_foreground_routing_and_websocket_cache() -> a
         )),
     );
     let mut foreground = client.new_session();
-    foreground.websocket_session.reset(Some("connection_closed"));
+    foreground
+        .websocket_session
+        .reset(Some("connection_closed"));
     drop(foreground);
     let metadata = test_responses_metadata_for_client(
         &client,
@@ -1266,7 +1268,9 @@ async fn background_http_preserves_foreground_routing_and_websocket_cache() -> a
             &InferenceTraceContext::disabled(),
         )
         .await;
-    assert!(matches!(stale, Err(ref error) if matches!(error.details(), CodexErrorDetails::TurnAborted)));
+    assert!(
+        matches!(stale, Err(ref error) if matches!(error.details(), CodexErrorDetails::TurnAborted))
+    );
     let foreground = client.new_session();
     assert_eq!(
         foreground.websocket_session.continuation_reset_reason,
