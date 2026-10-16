@@ -18,7 +18,7 @@ const CODE_MODE_HOST_EXECUTABLE_NAME: &str = if cfg!(windows) {
 const PACKAGE_METADATA_FILENAME: &str = "codex-package.json";
 const PATH_DIRNAME: &str = "codex-path";
 const RESOURCES_DIRNAME: &str = "codex-resources";
-const ZSH_DIRNAME: &str = "zsh";
+const STANDALONE_PACKAGES_DIRNAME: &str = "standalone";
 static INSTALL_CONTEXT: OnceLock<InstallContext> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -228,18 +228,6 @@ impl InstallContext {
 
         None
     }
-
-    pub fn bundled_zsh_path(&self) -> Option<AbsolutePathBuf> {
-        if cfg!(windows) {
-            None
-        } else {
-            self.bundled_resource(zsh_resource_path())
-        }
-    }
-
-    pub fn bundled_zsh_bin_dir(&self) -> Option<AbsolutePathBuf> {
-        self.bundled_zsh_path()?.parent()
-    }
 }
 
 impl CodexPackageLayout {
@@ -368,10 +356,6 @@ fn default_rg_command() -> PathBuf {
     } else {
         PathBuf::from("rg")
     }
-}
-
-fn zsh_resource_path() -> PathBuf {
-    PathBuf::from(ZSH_DIRNAME).join(BIN_DIRNAME).join("zsh")
 }
 
 #[cfg(test)]
@@ -610,11 +594,6 @@ mod tests {
         fs::write(bin_dir.join(CODE_MODE_HOST_EXECUTABLE_NAME), "")?;
         fs::write(resources_dir.join(TEST_RESOURCE_NAME), "")?;
         fs::write(path_dir.join(default_rg_command()), "")?;
-        if !cfg!(windows) {
-            let zsh_path = resources_dir.join(zsh_resource_path());
-            fs::create_dir_all(zsh_path.parent().expect("zsh path should have parent"))?;
-            fs::write(&zsh_path, "")?;
-        }
         let canonical_package_dir =
             AbsolutePathBuf::from_absolute_path(package_dir.path().canonicalize()?)?;
         let canonical_bin_dir = AbsolutePathBuf::from_absolute_path(bin_dir.canonicalize()?)?;
@@ -669,19 +648,6 @@ mod tests {
             context.bundled_resource(TEST_RESOURCE_NAME),
             Some(canonical_resources_dir.join(TEST_RESOURCE_NAME))
         );
-        if cfg!(windows) {
-            assert_eq!(context.bundled_zsh_path(), None);
-            assert_eq!(context.bundled_zsh_bin_dir(), None);
-        } else {
-            assert_eq!(
-                context.bundled_zsh_path(),
-                Some(canonical_resources_dir.join(zsh_resource_path()))
-            );
-            assert_eq!(
-                context.bundled_zsh_bin_dir(),
-                Some(canonical_resources_dir.join(ZSH_DIRNAME).join(BIN_DIRNAME))
-            );
-        }
         Ok(())
     }
 

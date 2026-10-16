@@ -474,12 +474,16 @@ impl App {
         self.apply_runtime_policy_overrides(&mut config, RuntimePolicyOverrideScope::All)?;
         self.local_settings = self.local_settings.reloaded(&config);
         self.refresh_server_version_overview_notice(codex_cli_version());
-        // Other preferences have runtime caches and are adopted when the widget is replaced.
+        // Copy preferences read directly by the live widget. Other preferences have runtime
+        // caches and are adopted when the widget is replaced.
         self.chat_widget
             .local_settings
             .tui
             .terminal_resize_reflow_max_rows =
             self.local_settings.tui.terminal_resize_reflow_max_rows;
+        self.chat_widget.local_settings.tui.session_picker_view =
+            self.local_settings.tui.session_picker_view;
+        self.chat_widget.local_settings.tui.resume_cwd = self.local_settings.tui.resume_cwd;
         self.config = config;
         self.chat_widget.sync_plugin_mentions_config(&self.config);
         Ok(())
@@ -1926,10 +1930,13 @@ enabled = false
     }
 
     #[tokio::test]
-    async fn refresh_in_memory_config_from_disk_updates_resize_reflow_config() -> Result<()> {
+    async fn refresh_in_memory_config_from_disk_updates_live_widget_preferences() -> Result<()> {
         let mut app = make_test_app().await;
         let mut expected_widget_settings = app.chat_widget.local_settings.clone();
         expected_widget_settings.tui.terminal_resize_reflow_max_rows = Some(9000);
+        expected_widget_settings.tui.session_picker_view =
+            Some(codex_config::types::SessionPickerViewMode::Comfortable);
+        expected_widget_settings.tui.resume_cwd = Some(codex_config::types::ResumeCwdMode::Current);
         let codex_home = tempdir()?;
         app.config.codex_home = codex_home.path().to_path_buf().abs();
         std::fs::write(
@@ -1937,6 +1944,8 @@ enabled = false
             r#"
 [tui]
 terminal_resize_reflow_max_rows = 9000
+session_picker_view = "comfortable"
+resume_cwd = "current"
 theme = "dracula"
 "#,
         )?;
@@ -1946,6 +1955,10 @@ theme = "dracula"
         assert_eq!(
             app.local_settings.terminal_resize_reflow().max_rows,
             crate::legacy_core::config::TerminalResizeReflowMaxRows::Limit(9000)
+        );
+        assert_eq!(
+            app.local_settings.tui.session_picker_view,
+            Some(codex_config::types::SessionPickerViewMode::Comfortable)
         );
         assert_eq!(app.local_settings.tui.theme.as_deref(), Some("dracula"));
         assert_eq!(app.chat_widget.local_settings, expected_widget_settings);
@@ -2057,6 +2070,10 @@ theme = "dracula"
         assert_eq!(app.local_settings.tui.theme.as_deref(), Some("dracula"));
         assert_eq!(
             app.chat_widget.local_settings.tui.theme.as_deref(),
+            Some("dracula")
+        );
+        assert_eq!(
+            app.chat_widget.config_panel_tui.theme.as_deref(),
             Some("dracula")
         );
     }

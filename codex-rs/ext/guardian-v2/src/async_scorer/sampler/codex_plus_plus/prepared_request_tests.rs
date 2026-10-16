@@ -22,6 +22,19 @@ async fn unattributed_owned_auth_errors_do_not_consume_native_recovery() -> anyh
     );
     let permit = pool.classifications.clone().acquire_owned().await?;
     let lease = lease(&pool, permit, prepared)?;
+    let (_sender, rx_event) = tokio::sync::mpsc::channel(1);
+    let response = super::super::super::response::PendingResponse::new(
+        codex_api::ResponseStream {
+            rx_event,
+            proxy_trace_id: None,
+            upstream_request_id: None,
+            interrupt: None,
+        },
+        lease,
+        /*metrics*/ None,
+    );
+    let lease = response.lease().expect("in-flight response owns the lease");
+    assert!(lease.accepts_owned_output(&codex_api::ResponseEvent::OutputTextDelta("low".into())));
     for (status, code) in [
         (401, "auth_unavailable"),
         (503, "upstream_authentication_required"),

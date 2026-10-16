@@ -48,6 +48,27 @@ fn materializing_sleep_tool_preserves_mode() {
 }
 
 #[test]
+fn materializing_async_compaction_preserves_threshold() {
+    let mut config = toml::from_str::<FeaturesToml>(
+        "[async_compaction]\nmodel_async_compact_threshold_percent = 70",
+    )
+    .expect("async compaction config should deserialize");
+    let mut features = Features::with_defaults();
+    for enabled in [true, false] {
+        features.set_enabled(Feature::AsyncCompaction, enabled);
+        config.materialize_resolved_enabled(&features);
+        assert_eq!(
+            config.async_compaction,
+            Some(FeatureToml::Config(crate::AsyncCompactionConfigToml {
+                enabled: Some(enabled),
+                model_async_compact_threshold_percent: Some(70),
+            }))
+        );
+        assert_eq!(config.entries().get("async_compaction"), Some(&enabled));
+    }
+}
+
+#[test]
 fn under_development_features_are_disabled_by_default() {
     for spec in crate::FEATURES {
         // Instant interrupts are enabled by default while retaining their development stage.
@@ -773,11 +794,13 @@ usage_hint_text = "Custom delegation guidance."
 root_agent_usage_hint_text = "Root guidance."
 subagent_usage_hint_text = "Subagent guidance."
 subagent_developer_instructions = "Delegate carefully."
+preserve_fork_prefix = true
 multi_agent_mode_hint_text = "Custom mode guidance."
 tool_namespace = "agents"
 hide_spawn_agent_metadata = true
 expose_spawn_agent_model_overrides = true
 wait_agent_enabled = false
+disable_native_tools = true
 disable_direct_message = true
 message_board_in_memory = true
 non_code_mode_only = true
@@ -802,11 +825,13 @@ non_code_mode_only = true
             root_agent_usage_hint_text: Some("Root guidance.".to_string()),
             subagent_usage_hint_text: Some("Subagent guidance.".to_string()),
             subagent_developer_instructions: Some("Delegate carefully.".to_string()),
+            preserve_fork_prefix: Some(true),
             multi_agent_mode_hint_text: Some("Custom mode guidance.".to_string()),
             tool_namespace: Some("agents".to_string()),
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
             wait_agent_enabled: Some(false),
+            disable_native_tools: Some(true),
             disable_direct_message: Some(true),
             message_board_in_memory: Some(true),
             message_board_remote: None,

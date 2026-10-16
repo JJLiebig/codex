@@ -222,6 +222,7 @@ pub(super) async fn at_sampling_boundary(
             attempts,
             CompactionReason::CacheDeadline,
             CompactionPhase::MidTurn,
+            /*candidate*/ None,
         )
         .await;
         if let Err(error) = result {
@@ -362,6 +363,7 @@ impl SessionTask for CacheDeadlineTask {
             &mut HashSet::new(),
             CompactionReason::CacheDeadline,
             CompactionPhase::StandaloneTurn,
+            /*candidate*/ None,
         )
         .await;
         if let Err(error) = result {

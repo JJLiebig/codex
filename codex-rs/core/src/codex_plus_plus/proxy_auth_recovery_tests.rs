@@ -147,7 +147,10 @@ async fn owned_auth_recovery_is_guarded_and_bounded() -> anyhow::Result<()> {
         .into();
         let mut session = client.new_session();
         let result = session
-            .stream_responses_api(
+            .stream_responses_http(
+                &Arc::clone(&session.turn_state),
+                /*expected_auth_owner*/ None,
+                /*event_sender*/ None,
                 &Prompt::default(),
                 &model,
                 &test_session_telemetry(),

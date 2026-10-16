@@ -56,7 +56,6 @@ use super::ExecCommandArgs;
 use super::ExecCommandEnvironmentArgs;
 use super::get_command;
 use super::post_unified_exec_tool_use_payload;
-use super::shell_mode_for_environment;
 
 // A byte limit is a conservative hard token bound even for byte-fallback tokenizers.
 const EXEC_COMMAND_REJECTION_MAX_BYTES: usize = 900;
@@ -274,8 +273,6 @@ impl ExecCommandHandler {
             &turn_environment.selection.environment_id,
         )
         .await;
-        let shell_mode =
-            shell_mode_for_environment(&turn.unified_exec_shell_mode, environment.as_ref());
         // Remote environments may use a different OS and must build commands with their native
         // shell; fall back to the session shell when the environment did not report one.
         let shell = turn_environment
@@ -302,13 +299,9 @@ impl ExecCommandHandler {
                 )));
             }
         }
-        let resolved_command = get_command(
-            &args,
-            shell,
-            &shell_mode,
-            turn_environment.config().allow_login_shell,
-        )
-        .map_err(FunctionCallError::RespondToModel)?;
+        let resolved_command =
+            get_command(&args, shell, turn_environment.config().allow_login_shell)
+                .map_err(FunctionCallError::RespondToModel)?;
         let resolved_shell = resolved_exec_command_shell(environment.as_ref(), || {
             Some((
                 resolved_command.shell.shell.shell_type,
@@ -465,7 +458,6 @@ impl ExecCommandHandler {
             cwd,
             sandbox_cwd: native_environment_cwd,
             turn_environment: turn_environment.clone(),
-            shell_mode,
             network: context.step_context.turn.network.clone(),
             tty,
             sandbox_permissions: effective_additional_permissions.sandbox_permissions,
@@ -596,10 +588,6 @@ impl CoreToolRuntime for ExecCommandHandler {
         let mut execution_target = turn_environment.selection();
         execution_target.cwd = cwd;
         let mut execution_target = PreToolUseExecutionTarget::from(execution_target);
-        let shell_mode = shell_mode_for_environment(
-            &invocation.turn.unified_exec_shell_mode,
-            turn_environment.environment.as_ref(),
-        );
         let shell = turn_environment
             .shell
             .clone()
@@ -609,7 +597,6 @@ impl CoreToolRuntime for ExecCommandHandler {
             turn_environment.environment.as_ref(),
             &args,
             shell,
-            &shell_mode,
             turn_environment.config().allow_login_shell,
         )?;
         execution_target.exec_command_shell = resolved_shell.execution_target;
