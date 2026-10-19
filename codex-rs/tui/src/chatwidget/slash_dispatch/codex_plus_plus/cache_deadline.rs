@@ -44,7 +44,7 @@ impl ChatWidget {
             .collect();
         self.show_selection_view(SelectionViewParams {
             title: Some("Auto-compact before cache expiry".to_string()),
-            subtitle: Some("Choose a model. Each model is off until enabled.".to_string()),
+            subtitle: Some("Choose a model. GPT-6 and newer default to 55m.".to_string()),
             items,
             ..Default::default()
         });
@@ -124,7 +124,7 @@ fn interval_params(model: String, seconds: u64) -> SelectionViewParams {
     });
     SelectionViewParams {
         title: Some(format!("Auto-compact · {model}")),
-        subtitle: Some("Astra / Sol default: 55m. Compacts once when safe.".to_string()),
+        subtitle: Some("GPT-6 and newer default: 55m. Compacts once when safe.".to_string()),
         items,
         ..Default::default()
     }

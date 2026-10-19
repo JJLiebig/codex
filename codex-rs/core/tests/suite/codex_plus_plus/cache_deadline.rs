@@ -19,10 +19,10 @@ use std::sync::Arc;
 use std::time::Duration;
 use test_case::test_case;
 
-#[test_case(3300, 3300, 95_000, None; "default waits for active tool")]
-#[test_case(1800, 2400, 95_000, None; "custom interval stays fresh until known expiry")]
+#[test_case(3300, 3300, 114_000, None; "default waits for active tool")]
+#[test_case(1800, 2400, 114_000, None; "custom interval stays fresh until known expiry")]
 #[test_case(3300, 3300, 0, None; "small context continues without compaction")]
-#[test_case(3300, 3300, 95_000, Some("usage_limit_reached"); "failure stops foreground and preserves history")]
+#[test_case(3300, 3300, 114_000, Some("usage_limit_reached"); "failure stops foreground and preserves history")]
 #[tokio::test]
 async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary(
     interval: u64,
@@ -169,7 +169,7 @@ async fn cache_deadline_waits_for_active_tool_then_compacts_at_sampling_boundary
     Ok(())
 }
 
-fn builder(seconds: u64) -> TestCodexBuilder {
+fn builder(seconds: Option<u64>) -> TestCodexBuilder {
     let mut extensions = ExtensionRegistryBuilder::new();
     extensions.thread_lifecycle_contributor(Arc::new(ThreadIdle));
     test_codex()
@@ -188,11 +188,9 @@ fn builder(seconds: u64) -> TestCodexBuilder {
                 .config_layer_stack
                 .with_user_config(
                     &config.codex_home.join("config.toml"),
-                    toml::from_str(&if seconds == 0 {
-                        String::new()
-                    } else {
+                    toml::from_str(&seconds.map_or_else(String::new, |seconds| {
                         format!("[cache_deadline_compact_seconds]\n'gpt-6-astra' = {seconds}")
-                    })
+                    }))
                     .unwrap(),
                 )
                 .unwrap();
@@ -200,7 +198,7 @@ fn builder(seconds: u64) -> TestCodexBuilder {
 }
 
 async fn harness(seconds: u64) -> Result<TestCodexHarness> {
-    TestCodexHarness::with_auto_env_builder(builder(seconds)).await
+    TestCodexHarness::with_auto_env_builder(builder(Some(seconds))).await
 }
 
 async fn prompt(harness: &TestCodexHarness, text: &str) -> Result<()> {
@@ -230,7 +228,7 @@ async fn advance(seconds: u64) {
 fn reply(id: &str) -> String {
     responses::sse(vec![
         responses::ev_assistant_message(id, "reply"),
-        responses::ev_completed_with_tokens(id, 95_000),
+        responses::ev_completed_with_tokens(id, 114_000),
     ])
 }
 
@@ -244,13 +242,33 @@ fn compacted() -> String {
     ])
 }
 
+#[test_case(None; "default thirty percent")]
+#[test_case(Some(50); "configured fifty percent")]
 #[tokio::test]
-async fn cache_deadline_skips_small_current_context_but_manual_compact_still_runs() -> Result<()> {
-    let harness = harness(3300).await?;
+async fn cache_deadline_skips_small_current_context_but_manual_compact_still_runs(
+    minimum: Option<u8>,
+) -> Result<()> {
+    let harness =
+        TestCodexHarness::with_auto_env_builder(builder(None).with_config(move |config| {
+            if let Some(percent) = minimum {
+                config.config_layer_stack = config
+                    .config_layer_stack
+                    .with_user_config(
+                        &config.codex_home.join("config.toml"),
+                        toml::from_str(&format!(
+                            "cache_deadline_compact_min_context_percent = {percent}"
+                        ))
+                        .unwrap(),
+                    )
+                    .unwrap();
+            }
+        }))
+        .await?;
+    let floor = i64::from(minimum.unwrap_or(30)) * 3800;
     let small_reply = |id| {
         responses::sse(vec![
             responses::ev_assistant_message(id, "reply"),
-            responses::ev_completed_with_tokens(id, 94_999),
+            responses::ev_completed_with_tokens(id, floor - 1),
         ])
     };
     let mock = responses::mount_sse_sequence(
@@ -259,7 +277,7 @@ async fn cache_deadline_skips_small_current_context_but_manual_compact_still_run
             small_reply("first"),
             small_reply("second"),
             compacted(),
-            reply("large"),
+            responses::sse(vec![responses::ev_completed_with_tokens("large", floor)]),
             compacted(),
         ],
     )
@@ -296,11 +314,21 @@ async fn cache_deadline_skips_small_current_context_but_manual_compact_still_run
     Ok(())
 }
 
-#[test_case(false; "successful checkpoint is reused")]
-#[test_case(true; "failed compaction preserves history")]
+#[test_case("gpt-6-astra", false; "successful checkpoint is reused")]
+#[test_case("gpt-6-astra", true; "failed compaction preserves history")]
+#[test_case("gpt-6.1-sol", false; "sol defaults to timer compaction")]
+#[test_case("gpt-7.2-mini", false; "future gpt defaults to timer compaction")]
 #[tokio::test]
-async fn cache_deadline_compacts_once_and_foreground_rearms(fail: bool) -> Result<()> {
-    let harness = harness(3300).await?;
+async fn cache_deadline_compacts_once_and_foreground_rearms(model: &str, fail: bool) -> Result<()> {
+    let harness = TestCodexHarness::with_auto_env_builder(
+        builder(None)
+            .with_model(model)
+            .with_model_info_override(model, |info| {
+                info.context_window = Some(400_000);
+                info.effective_context_window_percent = 95;
+            }),
+    )
+    .await?;
     let mock = responses::mount_sse_sequence(
         harness.server(),
         vec![
@@ -364,7 +392,7 @@ async fn cache_deadline_compacts_once_and_foreground_rearms(fail: bool) -> Resul
     Ok(())
 }
 
-#[test_case("off"; "missing deadline stays off")]
+#[test_case("off"; "explicit zero stays off")]
 #[test_case("overdue"; "resume after expiry drops stale deadline")]
 #[test_case("model"; "model changes disarm deadline")]
 #[test_case("too_late"; "known expired interval stays off")]
@@ -413,17 +441,18 @@ async fn cache_deadline_does_not_compact_stale_or_disabled_context(case: &str) -
 
 #[tokio::test]
 async fn cache_deadline_approval_cancel_disarms_until_foreground_inference() -> Result<()> {
-    let harness = TestCodexHarness::with_auto_env_builder(builder(3300).with_config(|config| {
-        config.permissions.approval_policy = codex_config::Constrained::allow_any(
-            codex_protocol::protocol::AskForApproval::OnRequest,
-        );
-        config
-            .set_legacy_sandbox_policy(
-                codex_protocol::protocol::SandboxPolicy::new_workspace_write_policy(),
-            )
-            .unwrap();
-    }))
-    .await?;
+    let harness =
+        TestCodexHarness::with_auto_env_builder(builder(Some(3300)).with_config(|config| {
+            config.permissions.approval_policy = codex_config::Constrained::allow_any(
+                codex_protocol::protocol::AskForApproval::OnRequest,
+            );
+            config
+                .set_legacy_sandbox_policy(
+                    codex_protocol::protocol::SandboxPolicy::new_workspace_write_policy(),
+                )
+                .unwrap();
+        }))
+        .await?;
     let mock = responses::mount_sse_sequence(harness.server(), vec![
         responses::sse(vec![responses::ev_function_call("approval", "exec_command", &json!({
             "cmd": "echo approval", "sandbox_permissions": "require_escalated", "justification": "Confirm the test command"
@@ -611,7 +640,7 @@ async fn cache_deadline_reopen_does_not_restore_an_old_timer() -> Result<()> {
         responses::mount_sse_sequence(harness.server(), vec![reply("first"), reply("reopened")])
             .await;
     prompt(&harness, "history survives restart").await?;
-    let reopened = builder(3300)
+    let reopened = builder(Some(3300))
         .restart_with_auto_env(harness.server(), harness.test())
         .await?;
     advance(3300).await;
