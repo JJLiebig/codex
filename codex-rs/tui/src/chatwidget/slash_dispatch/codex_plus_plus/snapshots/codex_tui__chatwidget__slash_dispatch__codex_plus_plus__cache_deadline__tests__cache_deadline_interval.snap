@@ -3,7 +3,7 @@ source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/cache_deadline_tests.r
 expression: "terminal.backend().to_string().lines().map(str::trim_end).collect::<Vec<_>>().join(\"\\n\")"
 ---
   Auto-compact · gpt-6-astra
-  Astra / Sol default: 55m. Compacts once when safe.
+  GPT-6 and newer default: 55m. Compacts once when safe.
 
 
 › 1. Off (current)

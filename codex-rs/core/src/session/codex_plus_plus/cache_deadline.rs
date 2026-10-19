@@ -178,6 +178,8 @@ async fn take_due(session: &Session, model_info: &ModelInfo) -> bool {
     let config = session.get_config().await;
     let model = model_info.slug.as_str();
     let interval = codex_config::cache_deadline_compact_interval(&config.config_layer_stack, model);
+    let min_context_percent =
+        codex_config::cache_deadline_compact_min_context_percent(&config.config_layer_stack);
     let window = session.current_window_id().await;
     let owner_generation = owner_generation(session);
     let context_tokens = session.get_total_token_usage().await;
@@ -202,7 +204,9 @@ async fn take_due(session: &Session, model_info: &ModelInfo) -> bool {
             && SystemTime::now() < deadline.wall_expires
             // Consume small-context deadlines too; only foreground inference rearms maintenance.
             && model_info.usable_context_window().is_some_and(|limit| {
-                limit > 0 && i128::from(context_tokens) * 100 >= i128::from(limit) * 25
+                limit > 0
+                    && i128::from(context_tokens) * 100
+                        >= i128::from(limit) * i128::from(min_context_percent)
             })
     })
 }

@@ -88,7 +88,6 @@ async fn cache_deadline_model_picker_and_custom_prompt_keep_model_identity() {
     assert_eq!(model, "gpt-6.1-sol");
     chat.open_cache_deadline_interval(model);
     chat.handle_key_event(KeyEvent::from(KeyCode::Down));
-    chat.handle_key_event(KeyEvent::from(KeyCode::Down));
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     let AppEvent::OpenCacheDeadlineCustom(model) = events.try_recv().unwrap() else {
         panic!("expected custom interval")
