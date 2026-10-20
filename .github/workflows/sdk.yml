@@ -28,7 +28,7 @@ jobs:
             python:3.12-slim \
             sh -euxc '
               python -m venv /tmp/build
-              /tmp/build/bin/python -m pip install uv==0.11.3
+              /tmp/build/bin/python -m pip install uv==0.13.4
               /tmp/build/bin/uv build --wheel --out-dir /tmp/dist
               python -m venv /tmp/installed
               /tmp/build/bin/uv pip install --python /tmp/installed/bin/python /tmp/dist/*.whl
@@ -138,7 +138,7 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
-          version: "0.11.3"
+          version: "0.13.4"
 
       - name: Test Python SDK against the same CLI
         working-directory: sdk/python
