@@ -382,7 +382,7 @@ class CodexPlusPlusNpmTest(unittest.TestCase):
         self.assertIn(
             "format('refs/tags/{0}', inputs.release_tag) || github.ref", workflow
         )
-        self.assertIn('node-version: "24"', workflow)
+        self.assertIn('node-version: "26.12.1"', workflow)
         self.assertEqual(workflow.count("package-manager-cache: false"), 2)
         self.assertIn("--generate-notes", github_job)
         self.assertIn('gh release upload "$RELEASE_TAG"', github_job)
