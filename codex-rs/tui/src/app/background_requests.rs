@@ -1399,6 +1399,7 @@ mod tests {
         )
         .expect("write ChatGPT authentication");
         let app_server = crate::start_app_server_for_picker(
+            crate::backend_id::BackendId::new(),
             &app.config,
             &crate::AppServerTarget::Embedded,
             app.cli_kv_overrides.clone(),
@@ -1610,6 +1611,7 @@ mod tests {
         let statuses = vec![
             McpServerStatus {
                 server_capabilities: None,
+                tool_list_meta: None,
                 tools_error: None,
                 name: "docs".to_string(),
                 runtime_status: None,
@@ -1635,6 +1637,7 @@ mod tests {
             },
             McpServerStatus {
                 server_capabilities: None,
+                tool_list_meta: None,
                 tools_error: None,
                 name: "disabled".to_string(),
                 runtime_status: None,

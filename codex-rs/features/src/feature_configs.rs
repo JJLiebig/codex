@@ -164,7 +164,7 @@ pub struct GuardianV2ConfigToml {
     /// Transcript encoding for synchronous Guardian review and asynchronous scoring. Defaults to line.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transcript_mode: Option<codex_protocol::TranscriptFormat>,
-    /// Classifier experiment override. Otherwise use the model default, then snapshots.
+    /// Classifier mode override. Otherwise use the model default, then conversation.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub async_classifier_mode: Option<codex_protocol::openai_models::AsyncClassifierMode>,
     /// Reset retained async history when the next request exceeds this token estimate.
@@ -330,7 +330,7 @@ pub struct MultiAgentV2ConfigToml {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub subagent_developer_instructions: Option<String>,
     /// Preserve the parent's model-visible history on full forks and append child instructions.
-    /// Defaults to false. Legacy compaction without a reusable context baseline still rebuilds.
+    /// Defaults to true. Legacy compaction without a reusable context baseline still rebuilds.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preserve_fork_prefix: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

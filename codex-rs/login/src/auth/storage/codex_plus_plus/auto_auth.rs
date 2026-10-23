@@ -47,6 +47,21 @@ pub(in crate::auth::storage) fn load(
     }
 }
 
+pub(in crate::auth::storage) fn load_account_grant(
+    storage: &AutoAuthStorage,
+) -> std::io::Result<Option<AuthDotJson>> {
+    let guard = AuthRefreshGuard::acquire(&storage.codex_home)?;
+    if storage.file_authority.is_active()? {
+        return storage
+            .file_authority
+            .load_authoritative(&storage.file_storage, &guard);
+    }
+    match storage.keyring_storage.load()? {
+        Some(auth) => Ok(Some(auth)),
+        None => storage.file_storage.load_with_guard(&guard),
+    }
+}
+
 pub(in crate::auth::storage) fn save(
     storage: &AutoAuthStorage,
     auth: &AuthDotJson,
@@ -98,3 +113,7 @@ pub(in crate::auth::storage) fn delete(
     telemetry.record_delete_attempt(Store::Multiple, &result);
     result
 }
+
+#[cfg(test)]
+#[path = "auto_auth_tests.rs"]
+mod tests;

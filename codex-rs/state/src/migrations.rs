@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use crate::sqlite::SqliteWriteQueryExt;
 use sqlx::AssertSqlSafe;
 use sqlx::SqlSafeStr;
 use sqlx::migrate::Migration;
@@ -211,7 +212,7 @@ WHERE version = ?
     .bind(38_i64)
     .bind(recency_migration.checksum.as_ref())
     .bind(recency_migration.version)
-    .execute(pool)
+    .execute_with_busy_retry(pool)
     .await?;
     Ok(())
 }

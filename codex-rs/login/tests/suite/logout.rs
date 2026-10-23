@@ -425,6 +425,8 @@ fn chatgpt_auth_for_account(
             },
             access_token: access_token.to_string(),
             refresh_token: refresh_token.to_string(),
+            oauth_provenance: None,
+            login_owner_id: None,
             account_id: Some(account_id.to_string()),
         }),
         last_refresh: None,

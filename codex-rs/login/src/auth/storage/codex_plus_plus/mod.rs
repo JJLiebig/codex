@@ -6,6 +6,7 @@ mod telemetry;
 
 pub(super) use auto_auth::delete as delete_auto_auth;
 pub(super) use auto_auth::load as load_auto_auth;
+pub(super) use auto_auth::load_account_grant as load_auto_account_grant;
 pub(super) use auto_auth::save as save_auto_auth;
 pub(super) use file_authority::FileAuthorityMarker;
 pub(super) use telemetry::cleanup_fallback;

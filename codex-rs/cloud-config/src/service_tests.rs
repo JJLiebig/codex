@@ -348,6 +348,7 @@ async fn retired_policy_discards_staged_cache_and_retains_previous_payload() {
     let loader = codex_config::CloudConfigBundleLoader::new(async { Ok(None) })
         .with_ema_policy_snapshots(service.policy.clone(), || async {
             CloudConfigBundleSnapshot {
+                config_server: None,
                 bundle: Ok(None),
                 binding: None,
             }
@@ -601,6 +602,8 @@ async fn get_bundle_allows_eligible_workspace_plans_and_writes_cache() {
         "education",
         "edu_plus",
         "edu_pro",
+        "sci",
+        "sci_plus",
     ] {
         let bundle = test_bundle();
         let fetcher = Arc::new(StaticBundleClient::new(bundle.clone()));

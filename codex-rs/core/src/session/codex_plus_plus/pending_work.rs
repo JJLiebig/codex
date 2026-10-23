@@ -19,7 +19,9 @@ pub(super) async fn reserve(
     }
     let needs_new_turn = session.input_queue.has_trigger_turn_mailbox_items().await;
     let mailbox_ready = session.input_queue.has_pending_mailbox_items().await
-        && (needs_new_turn || session.has_outstanding_durable_sleep());
+        && (needs_new_turn
+            || session.has_outstanding_durable_sleep()
+            || session.should_wake_on_agent_messages().await);
     let claimed_completion = session
         .services
         .unified_exec_manager

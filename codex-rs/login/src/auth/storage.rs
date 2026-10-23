@@ -173,9 +173,22 @@ pub(super) fn delete_file_if_exists(codex_home: &Path) -> std::io::Result<bool> 
     }
 }
 
+// Protect in-process read-modify-write commits, never network requests.
+static AUTH_STORAGE_COMMIT: Mutex<()> = Mutex::new(());
+
+pub(super) fn auth_storage_commit_guard() -> std::io::Result<std::sync::MutexGuard<'static, ()>> {
+    AUTH_STORAGE_COMMIT
+        .lock()
+        .map_err(|_| std::io::Error::other("Auth storage commit lock is unavailable."))
+}
+
 pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn load(&self) -> std::io::Result<Option<AuthDotJson>>;
     fn load_with_guard(&self, _guard: &AuthRefreshGuard) -> std::io::Result<Option<AuthDotJson>> {
+        self.load()
+    }
+    /// An unavailable keyring cannot authorize using an older fallback record.
+    fn load_account_grant(&self) -> std::io::Result<Option<AuthDotJson>> {
         self.load()
     }
     fn save(&self, auth: &AuthDotJson) -> std::io::Result<()>;
@@ -579,6 +592,10 @@ impl AutoAuthStorage {
 }
 
 impl AuthStorageBackend for AutoAuthStorage {
+    fn load_account_grant(&self) -> std::io::Result<Option<AuthDotJson>> {
+        codex_plus_plus::load_auto_account_grant(self)
+    }
+
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
         let guard = AuthRefreshGuard::acquire(&self.codex_home)?;
         self.load_with_guard(&guard)

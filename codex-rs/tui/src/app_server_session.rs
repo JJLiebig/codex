@@ -4,6 +4,7 @@
 //! request/response plumbing out of `App` and `ChatWidget`.
 
 mod daybreak_api_key_compat;
+mod events;
 mod external_agent_config;
 pub(crate) mod fs;
 mod history;
@@ -22,6 +23,7 @@ mod web_search;
 #[path = "app_server_session/collaboration_catalog_tests.rs"]
 mod collaboration_catalog_tests;
 
+pub(crate) use events::AppServerSessionEvent;
 pub(crate) use history::HISTORY_ITEM_PAGE_LIMIT;
 pub(crate) use history::HISTORY_ITEM_SCAN_LIMIT;
 pub(crate) use history::HistoryHydrationScope;
@@ -43,7 +45,6 @@ use crate::status::StatusAccountDisplay;
 use crate::status::plan_type_display_name;
 use crate::terminal_visualization_instructions::with_terminal_visualization_instructions;
 use codex_app_server_client::AppServerClient;
-use codex_app_server_client::AppServerEvent;
 use codex_app_server_client::AppServerPath;
 use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
@@ -322,6 +323,7 @@ pub(crate) struct AppServerBootstrap {
 }
 
 pub(crate) struct AppServerSession {
+    backend_id: crate::backend_id::BackendId,
     client: AppServerClient,
     next_request_id: i64,
     history_pagination: HashMap<ThreadId, history::ThreadHistoryPagination>,
@@ -333,7 +335,7 @@ pub(crate) struct AppServerSession {
     /// Explicit CLI provider selection, distinct from resolved configuration defaults.
     pub(crate) model_provider_override: Option<String>,
     history_support: ThreadHistorySupport,
-    thread_settings_update_supported: bool,
+    pub(crate) thread_settings_update_supported: bool,
     default_model: Option<String>,
     available_models: Vec<ModelPreset>,
     daybreak_api_key_compat: Arc<tokio::sync::Semaphore>,
@@ -385,6 +387,17 @@ pub(crate) fn is_active_writer_error(err: &color_eyre::eyre::Report) -> bool {
         .any(|cause| cause.to_string().contains("already has an active writer"))
 }
 
+/// Recognizes a draining server's refusal, using the legacy message only when data is absent.
+pub(crate) fn is_server_shutting_down_error(error: &JSONRPCErrorError) -> bool {
+    error.code == JSONRPC_INVALID_REQUEST
+        && match &error.data {
+            Some(data) => {
+                data.get("reason").and_then(serde_json::Value::as_str) == Some("serverShuttingDown")
+            }
+            None => error.message == "Server is draining; retry after reconnecting",
+        }
+}
+
 pub(crate) fn source_agent_path(source: &SessionSource) -> Option<String> {
     match source {
         SessionSource::SubAgent(SubAgentSource::ThreadSpawn { agent_path, .. }) => {
@@ -428,8 +441,13 @@ impl AppServerSession {
         self.client.platform_os()
     }
 
-    pub(crate) fn new(client: AppServerClient, thread_params_mode: ThreadParamsMode) -> Self {
+    pub(crate) fn new(
+        backend_id: crate::backend_id::BackendId,
+        client: AppServerClient,
+        thread_params_mode: ThreadParamsMode,
+    ) -> Self {
         Self {
+            backend_id,
             client,
             next_request_id: 1,
             history_pagination: HashMap::new(),
@@ -451,16 +469,17 @@ impl AppServerSession {
         }
     }
 
+    pub(crate) fn backend_id(&self) -> crate::backend_id::BackendId {
+        self.backend_id
+    }
+
     pub(crate) async fn start_dynamic_tool_mcp(
         &mut self,
         config: Config,
         app_event_tx: AppEventSender,
         status_updates: tokio::sync::broadcast::Sender<ThreadStatusChangedNotification>,
     ) -> std::io::Result<()> {
-        let worktrees = if !self.uses_remote_workspace()
-            && !config.active_project.is_untrusted()
-            && config.features.enabled(codex_features::Feature::Worktrees)
-        {
+        let worktrees = if !self.uses_remote_workspace() && !config.active_project.is_untrusted() {
             // Listing a fresh, nonexistent thread is read-only and returns an empty page
             // on supported stores. Probe before advertising tools or allocating a checkout.
             let support = self
@@ -847,8 +866,14 @@ impl AppServerSession {
             .map_err(|err| bootstrap_request_error("account/read failed during TUI bootstrap", err))
     }
 
-    pub(crate) async fn next_event(&mut self) -> Option<AppServerEvent> {
-        self.client.next_event().await
+    pub(crate) async fn next_event(&mut self) -> Option<AppServerSessionEvent> {
+        self.client
+            .next_event()
+            .await
+            .map(|event| AppServerSessionEvent {
+                backend_id: self.backend_id,
+                event,
+            })
     }
 
     #[cfg(test)]
@@ -1458,6 +1483,7 @@ impl AppServerSession {
                     input: items,
                     tool_output: None,
                     responsesapi_client_metadata: None,
+                    responsesapi_client_metadata_patch: None,
                     additional_context: None,
                     environments: None,
                     cwd: Some(cwd),
@@ -1524,6 +1550,7 @@ impl AppServerSession {
                     client_user_message_id: Some(client_user_message_id),
                     input: items,
                     responsesapi_client_metadata: None,
+                    responsesapi_client_metadata_patch: None,
                     additional_context: None,
                     expected_turn_id: turn_id,
                 },
