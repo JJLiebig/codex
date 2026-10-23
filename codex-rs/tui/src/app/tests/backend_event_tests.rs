@@ -58,6 +58,7 @@ async fn foreign_backend_events_leave_thread_cache_and_connection_untouched() ->
         ))),
         AppServerEvent::ServerNotification(Box::new(ServerNotification::AccountRateLimitsUpdated(
             AccountRateLimitsUpdatedNotification {
+                inference: None,
                 rate_limits: serde_json::from_value(
                     serde_json::json!({ "spendControlReached": true }),
                 )?,

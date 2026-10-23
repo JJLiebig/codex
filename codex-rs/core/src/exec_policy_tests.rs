@@ -2536,7 +2536,7 @@ async fn windows_powershell_policy_classifies_only_independent_literal_commands(
                     shell_path: PathBuf::from(configured_executable),
                 };
                 let requirement = manager
-                    .create_exec_approval_requirement_for_shell(
+                    .create_exec_approval_requirement_for_shell_with_guardian(
                         ExecApprovalRequest {
                             command: &command,
                             approval_policy: AskForApproval::Never,
@@ -2549,6 +2549,7 @@ async fn windows_powershell_policy_classifies_only_independent_literal_commands(
                         },
                         &shell,
                         DangerousCommandPlatform::Windows,
+                        /*exact_pre_tool_use_approval*/ false,
                     )
                     .await;
                 let actual = match requirement {

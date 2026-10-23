@@ -3,10 +3,10 @@ source: tui/src/chatwidget/slash_dispatch/codex_plus_plus/cache_deadline_tests.r
 expression: "render_bottom_popup(&chat, 84)"
 ---
   Auto-compact before cache expiry
-  Choose a model. GPT-6 and newer default to 55m.
+  Choose a model. Off by default.
 
 
-› 1. Astra  After 55m
-  2. Sol    After 55m
+› 1. Astra  Off
+  2. Sol    Off
 
   enter select · esc back

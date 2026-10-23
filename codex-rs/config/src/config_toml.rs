@@ -314,8 +314,8 @@ pub struct ConfigToml {
     /// Suppress time-driven progress updates; enabled by default.
     pub disable_unnecessary_updates: Option<bool>,
     /// Seconds after foreground inference before one automatic compaction, by exact model ID.
-    /// GPT generations 6 and newer default to 3300 seconds; zero disables the exact model.
-    /// Other models default to off. Timers are not restored when reopening threads.
+    /// Models default to off; zero disables the exact model.
+    /// Timers are not restored when reopening threads.
     /// Astra/Sol intervals must be below their tested 3600-second lifetime; larger values are ignored.
     pub cache_deadline_compact_seconds: Option<BTreeMap<String, u64>>,
     /// Minimum current context usage percent for timer-based compaction (default 30, capped at 100).

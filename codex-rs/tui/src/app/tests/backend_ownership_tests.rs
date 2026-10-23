@@ -145,6 +145,7 @@ async fn startup_fallback_requires_no_established_backend() -> Result<()> {
             /*log_db*/ None,
             &mut state_db,
             Arc::clone(&app.environment_manager),
+            /*initial_account_id*/ None,
             policy,
         )
         .await;

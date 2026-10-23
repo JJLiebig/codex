@@ -28,4 +28,8 @@ impl FeatureConfig for RuntimeAgentInstancesConfigToml {
     fn enabled(&self) -> Option<bool> {
         self.enabled
     }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = Some(enabled);
+    }
 }

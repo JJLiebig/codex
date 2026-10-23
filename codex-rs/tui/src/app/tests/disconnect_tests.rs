@@ -606,7 +606,7 @@ async fn rejected_initial_thread_start_reconnects_and_submits_prompt_once() -> R
             &mut app_server,
             &mut events,
             connected,
-            CODEX_CLI_VERSION,
+            codex_cli_version(),
         )
         .await?;
 

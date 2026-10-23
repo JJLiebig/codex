@@ -78,7 +78,10 @@ async fn auth_owner_generation_preserves_logout_and_switches_when_coalesced() {
     manager.logout().await.unwrap();
     assert!(
         manager
-            .publish_reloaded_auth(generation, Some(initial.clone()))
+            .publish_reloaded_auth(
+                generation,
+                LoadedAuth::from_current_source(Some(initial.clone())),
+            )
             .is_none()
     );
     assert!(manager.auth_cached().is_none());
@@ -87,7 +90,10 @@ async fn auth_owner_generation_preserves_logout_and_switches_when_coalesced() {
     manager.logout().await.unwrap();
     assert!(
         manager
-            .publish_reloaded_auth(generation, Some(initial.clone()))
+            .publish_reloaded_auth(
+                generation,
+                LoadedAuth::from_current_source(Some(initial.clone())),
+            )
             .is_none()
     );
     manager.set_cached_auth(Some(initial.clone()));

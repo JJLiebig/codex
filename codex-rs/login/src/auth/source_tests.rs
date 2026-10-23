@@ -159,7 +159,9 @@ async fn legacy_identity_persistence_does_not_reload_credentials() -> anyhow::Re
         "account_id": "workspace-a", "chatgpt_user_id": "user-a", "plan_type": "pro",
         "chatgpt_account_is_fedramp": false, "task_id": "legacy-task",
     }))?;
-    captured.persist_managed_chatgpt_agent_identity_record(identity)?;
+    captured
+        .persist_managed_chatgpt_agent_identity_record(identity)
+        .await?;
     assert_eq!(captured.get_token()?, original.get_token()?);
     assert_eq!(manager.auth_change_state_for(&captured), Some(initial));
     assert_eq!(storage.load()?.unwrap().tokens, stored.tokens);

@@ -13,7 +13,7 @@ fn output_is_bounded_and_cannot_close_the_context_fragment() {
             })
             .collect(),
     );
-    let body = completion.body();
+    let body = completion.body().into_text().unwrap();
     assert!(body.len() < 4096);
     assert!(!body.contains("</background_completion>"));
     assert_eq!(body.matches("output_truncated=true").count(), 8);

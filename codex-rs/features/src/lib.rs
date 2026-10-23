@@ -1019,6 +1019,7 @@ impl FeaturesToml {
             rollout_budget,
             current_time_reminder,
             sleep_tool,
+            runtime_agent_instances,
             removed_apps_mcp_path_override: _,
             network_proxy,
             entries,
@@ -1050,6 +1051,8 @@ impl FeaturesToml {
                 materialize_resolved_feature_enabled(current_time_reminder, enabled);
             } else if spec.id == Feature::SleepTool {
                 materialize_resolved_feature_enabled(sleep_tool, enabled);
+            } else if spec.id == Feature::RuntimeAgentInstances {
+                materialize_resolved_feature_enabled(runtime_agent_instances, enabled);
             } else if spec.id == Feature::NetworkProxy {
                 materialize_resolved_feature_enabled(network_proxy, enabled);
             } else {
