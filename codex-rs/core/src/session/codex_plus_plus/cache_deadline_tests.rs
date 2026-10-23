@@ -127,7 +127,7 @@ async fn cache_deadline_task_admission_preserves_racing_mail_and_its_start_optio
     // Reproduce mail arriving after the idle check but before native task admission.
     session
         .input_queue
-        .enqueue_mailbox_communication(mail.clone(), options.clone())
+        .enqueue_mailbox_communication(mail.clone().into(), options.clone())
         .await;
     session.start_task(context, Vec::new(), WaitingTask).await;
     let (pending, retained_options) = session.input_queue.drain_mailbox_input_items().await;
@@ -138,7 +138,9 @@ async fn cache_deadline_task_admission_preserves_racing_mail_and_its_start_optio
             retained_options.root_turn_id
         ),
         (
-            vec![super::super::TurnInput::InterAgentCommunication(mail)],
+            vec![super::super::TurnInput::InterAgentCommunication(
+                mail.into()
+            )],
             options.parent_turn_id,
             options.root_turn_id,
         )

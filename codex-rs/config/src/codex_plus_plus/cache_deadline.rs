@@ -7,26 +7,14 @@ pub fn cache_deadline_known_lifetime(model: &str) -> Option<Duration> {
         .then_some(Duration::from_secs(60 * 60))
 }
 
-/// Exact-model override, defaulting to 55 minutes for GPT generations 6 and newer.
+/// Opt-in compaction interval for an exact model ID.
 pub fn cache_deadline_compact_interval(config: &ConfigLayerStack, model: &str) -> Option<Duration> {
     let effective = config.effective_config();
-    let configured = effective
+    let seconds = effective
         .get("cache_deadline_compact_seconds")
-        .and_then(|models| models.get(model));
-    let seconds = match configured {
-        Some(value) => u64::try_from(value.as_integer()?).ok()?,
-        None => {
-            let version = model.strip_prefix("gpt-")?.split('-').next()?;
-            if version.split('.').next()?.parse::<u32>().ok()? < 6
-                || !version
-                    .split('.')
-                    .all(|part| !part.is_empty() && part.bytes().all(|c| c.is_ascii_digit()))
-            {
-                return None;
-            }
-            3300
-        }
-    };
+        .and_then(|models| models.get(model))?
+        .as_integer()?;
+    let seconds = u64::try_from(seconds).ok()?;
     Some(seconds)
         .filter(|seconds| *seconds > 0)
         .map(Duration::from_secs)

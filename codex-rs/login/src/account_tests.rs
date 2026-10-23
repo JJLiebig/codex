@@ -1082,6 +1082,8 @@ fn test_auth(account_id: &str, user_id: &str, email: &str) -> AuthDotJson {
             },
             access_token: format!("access-{account_id}"),
             refresh_token: format!("refresh-{account_id}"),
+            oauth_provenance: None,
+            login_owner_id: None,
             account_id: Some(account_id.to_string()),
         }),
         last_refresh: Some(Utc::now()),

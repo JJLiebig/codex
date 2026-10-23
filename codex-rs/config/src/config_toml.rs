@@ -314,8 +314,8 @@ pub struct ConfigToml {
     /// Suppress time-driven progress updates; enabled by default.
     pub disable_unnecessary_updates: Option<bool>,
     /// Seconds after foreground inference before one automatic compaction, by exact model ID.
-    /// GPT generations 6 and newer default to 3300 seconds; zero disables the exact model.
-    /// Other models default to off. Timers are not restored when reopening threads.
+    /// Models default to off; zero disables the exact model.
+    /// Timers are not restored when reopening threads.
     /// Astra/Sol intervals must be below their tested 3600-second lifetime; larger values are ignored.
     pub cache_deadline_compact_seconds: Option<BTreeMap<String, u64>>,
     /// Minimum current context usage percent for timer-based compaction (default 30, capped at 100).
@@ -380,7 +380,7 @@ pub struct ConfigToml {
 
     /// Seconds a thread must have no subscribers and no activity before app-server
     /// unloads it. Defaults to 1800 (30 minutes); zero unloads immediately.
-    /// Changes require a server restart.
+    /// Resolved when each thread is loaded; request config overrides apply per thread.
     pub thread_unload_delay_secs: Option<u64>,
 
     /// Deprecated: ignored.
@@ -406,9 +406,11 @@ pub struct ConfigToml {
     /// Defaults to `$CODEX_SQLITE_HOME` when set. Otherwise uses `$CODEX_HOME`.
     pub sqlite_home: Option<AbsolutePathBuf>,
 
-    /// Directory where Codex writes log files. Setting this value explicitly
-    /// also enables the TUI text log in this directory.
-    /// Defaults to `$CODEX_HOME/log`.
+    /// Directory for log files. Setting this value explicitly also routes the
+    /// SQLite logs database here and enables the TUI text log in this directory.
+    /// When unset, log files use `$CODEX_HOME/log` and SQLite logs use `sqlite_home`.
+    /// Existing SQLite logs in `sqlite_home` are not migrated automatically.
+    /// A managed `sqlite_home` requirement keeps SQLite logs in that required directory.
     pub log_dir: Option<AbsolutePathBuf>,
 
     /// Debugging and reproducibility settings.

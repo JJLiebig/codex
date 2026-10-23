@@ -16,6 +16,11 @@ impl UnauthorizedRecovery {
         // Consume the existing budget once, reloading and refreshing under the same guard.
         self.step = UnauthorizedRecoveryStep::Done;
         let manager = Arc::clone(&self.manager);
+        let _account_grant_guard = manager
+            .account_oauth_grant_lock
+            .acquire()
+            .await
+            .map_err(|_| native_source_changed())?;
         let _refresh_guard = manager
             .refresh_lock
             .acquire()
@@ -44,7 +49,7 @@ impl UnauthorizedRecovery {
             return Err(native_source_changed());
         }
         let result = manager
-            .refresh_token_from_authority_impl(Some(&guard))
+            .refresh_token_from_authority_impl(RefreshReason::UnauthorizedRecovery, Some(&guard))
             .await;
         manager
             .recover_terminal_imported_refresh(

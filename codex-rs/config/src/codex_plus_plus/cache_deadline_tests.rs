@@ -4,30 +4,15 @@ use crate::ConfigLayerSource;
 use pretty_assertions::assert_eq;
 
 #[test]
-fn cache_deadline_defaults_follow_numeric_gpt_generations_and_exact_overrides() {
+fn cache_deadline_requires_an_exact_model_interval() {
     let config = ConfigLayerStack::default();
     for model in [
         "gpt-6-astra",
         "gpt-6.1-sol",
         "gpt-6-sol",
-        "gpt-6.2",
         "gpt-7",
-        "gpt-12.3-mini",
-    ] {
-        assert_eq!(
-            cache_deadline_compact_interval(&config, model),
-            Some(Duration::from_secs(3300)),
-            "{model}"
-        );
-    }
-    for model in [
-        "gpt-5.4",
         "claude-sonnet-4",
-        "custom-gpt-6",
-        "gpt-next",
-        "gpt-6x",
-        "gpt-6..1",
-        "gpt-+6",
+        "custom",
     ] {
         assert_eq!(
             cache_deadline_compact_interval(&config, model),
@@ -52,7 +37,7 @@ fn cache_deadline_defaults_follow_numeric_gpt_generations_and_exact_overrides() 
         ("gpt-6.1-sol", Some(1800)),
         ("gpt-6-sol", None),
         ("custom", Some(20)),
-        ("gpt-7", Some(3300)),
+        ("gpt-7", None),
     ] {
         assert_eq!(
             cache_deadline_compact_interval(&config, model),

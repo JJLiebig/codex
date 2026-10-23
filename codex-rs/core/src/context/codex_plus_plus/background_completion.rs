@@ -1,5 +1,7 @@
 use super::super::ContextualUserFragment;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ContentItemKind;
+use codex_protocol::models::input_text;
 use codex_utils_output_truncation::TruncationPolicy;
 use codex_utils_output_truncation::truncate_text;
 
@@ -30,14 +32,14 @@ impl ContextualUserFragment for BackgroundCompletion {
     fn type_markers() -> (&'static str, &'static str) {
         ("<background_completion>", "</background_completion>")
     }
-    fn body(&self) -> String {
+    fn body(&self) -> ContentItem {
         let results = match self {
             Self::Finished(results) => results,
             Self::StillRunning(ids) => {
                 let ids: Vec<_> = ids.iter().take(8).copied().collect();
-                return format!(
+                return input_text(format!(
                     "Background commands are still running after 55 minutes of waiting: session_ids={ids:?}. Completion monitoring remains active. Continue independent work or end this turn; another wake will arrive on completion or after another 55 minutes of waiting. Do not sleep, wait, or poll for these sessions. No user-facing update is needed solely because this timer elapsed."
-                );
+                ));
             }
         };
         let mut text = String::from(
@@ -58,7 +60,7 @@ impl ContextualUserFragment for BackgroundCompletion {
             let output = truncate_text(&escaped, TruncationPolicy::Bytes(output_budget));
             text.push_str(&format!("session_id={id}, exit_code={status}, output_truncated={truncated}\nuntrusted_output_tail={output}\n"));
         }
-        text
+        input_text(text)
     }
 }
 

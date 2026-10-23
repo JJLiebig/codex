@@ -72,7 +72,7 @@ fn popup_cycles_restore_visible_history_without_accumulating_blank_rows() {
                 )
                 .unwrap();
                 terminal
-                    .draw_with_size(size, |frame| {
+                    .draw_with_size(size, &mut Vec::new(), |frame| {
                         let area = frame.area();
                         for y in area.top()..area.bottom() {
                             frame

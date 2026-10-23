@@ -5,13 +5,18 @@ mod daemon_continuation;
 mod daemon_snapshot;
 
 use super::persisted_resume_settings::PersistedResumeSettings;
+use super::persisted_resume_settings::latest_persisted_model_settings;
 use super::persisted_resume_settings::latest_persisted_resume_settings;
 use super::thread_enrichment::enrich_loaded_threads;
 use super::thread_fork_goal::inherit_thread_goal_snapshot;
 use super::thread_input::can_accept_direct_input;
 use super::thread_input::ensure_direct_input_allowed;
 use super::*;
+use crate::connection_rpc_gate::ConnectionRpcGate;
 use crate::error_code::method_not_found;
+use crate::thread_sample::SampleTask;
+use crate::thread_sample::SampleThread;
+use crate::thread_sample::generate_sample;
 use codex_app_server_protocol::SelectedCapabilityRoot;
 use codex_app_server_protocol::ThreadHistoryMode as ApiThreadHistoryMode;
 use codex_app_server_protocol::ThreadItemsListAnchor;
@@ -19,6 +24,8 @@ use codex_app_server_protocol::ThreadItemsListCursor;
 use codex_app_server_protocol::ThreadRevertParams;
 use codex_app_server_protocol::ThreadRevertResponse;
 use codex_app_server_protocol::ThreadRevertedNotification;
+use codex_app_server_protocol::ThreadSampleParams;
+use codex_app_server_protocol::ThreadSampleResponse;
 use codex_app_server_protocol::ThreadSection;
 use codex_app_server_protocol::ThreadSectionAppearance;
 use codex_app_server_protocol::ThreadSectionMoveParams;
@@ -114,6 +121,7 @@ struct ThreadRevertRuntimeSnapshot {
 fn collect_resume_override_mismatches(
     request: &ThreadResumeParams,
     config_snapshot: &ThreadConfigSnapshot,
+    selected_service_tier: Option<&str>,
 ) -> Vec<String> {
     let mut mismatch_details = Vec::new();
 
@@ -134,7 +142,7 @@ fn collect_resume_override_mismatches(
         ));
     }
     if let Some(requested_service_tier) = request.service_tier.as_ref()
-        && requested_service_tier != &config_snapshot.service_tier
+        && Some(requested_service_tier.as_deref().unwrap_or("default")) != selected_service_tier
     {
         mismatch_details.push(format!(
             "service_tier requested={requested_service_tier:?} active={:?}",
@@ -463,6 +471,7 @@ pub(crate) struct ThreadRequestProcessor {
     pub(super) state_db: Option<StateDbHandle>,
     pub(super) log_db: Option<LogDbLayer>,
     pub(super) background_tasks: TaskTracker,
+    pub(super) sample_responses: Arc<crate::thread_sample::SampleResponseRegistry>,
     pub(super) skills_watcher: Arc<SkillsWatcher>,
     pub(super) turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
     pub(super) initial_config_warnings: Arc<Vec<ConfigWarningNotification>>,
@@ -505,6 +514,7 @@ impl ThreadRequestProcessor {
         skills_watcher: Arc<SkillsWatcher>,
         turn_cost_worker: Option<crate::turn_cost_worker::TurnCostWorkerHandle>,
         initial_config_warnings: Vec<ConfigWarningNotification>,
+        sample_responses: Arc<crate::thread_sample::SampleResponseRegistry>,
     ) -> Self {
         Self {
             auth_manager,
@@ -522,6 +532,7 @@ impl ThreadRequestProcessor {
             state_db,
             log_db,
             background_tasks: TaskTracker::new(),
+            sample_responses,
             skills_watcher,
             turn_cost_worker,
             initial_config_warnings: Arc::new(initial_config_warnings),
@@ -601,6 +612,39 @@ impl ThreadRequestProcessor {
         ))
         .await
         .map(|()| None)
+    }
+
+    pub(crate) async fn thread_sample(
+        &self,
+        params: ThreadSampleParams,
+        rpc_gate: Arc<ConnectionRpcGate>,
+        context: RequestContext,
+    ) -> Result<ThreadSampleResponse, JSONRPCErrorError> {
+        let id = ThreadId::from_string(&params.thread_id)
+            .map_err(|error| invalid_request(error.to_string()))?;
+        let parent = self
+            .thread_manager
+            .get_thread(id)
+            .await
+            .map_err(|_| invalid_request("thread/sample requires a loaded source"))?;
+        self.config_manager
+            .check_thread_model_provider(parent.config().await.as_ref())
+            .await
+            .map_err(|error| config_load_error(&error))?;
+        generate_sample(
+            SampleTask {
+                manager: Arc::clone(&self.thread_manager),
+                store: Arc::clone(&self.thread_store),
+                parent,
+                samples: Arc::clone(&self.sample_responses),
+                params,
+                trace: context.request_trace(),
+                cancellation: context.cancellation,
+            },
+            &self.background_tasks,
+            rpc_gate,
+        )
+        .await
     }
 
     pub(crate) async fn thread_revert(
@@ -1102,7 +1146,6 @@ impl ThreadRequestProcessor {
             pending_thread_unloads: Arc::clone(&self.pending_thread_unloads),
             thread_watch_manager: self.thread_watch_manager.clone(),
             codex_home: self.config.codex_home.to_path_buf(),
-            thread_unload_delay: self.config.thread_unload_delay,
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
         }
@@ -1233,7 +1276,6 @@ impl ThreadRequestProcessor {
             pending_thread_unloads: Arc::clone(&self.pending_thread_unloads),
             thread_watch_manager: self.thread_watch_manager.clone(),
             codex_home: self.config.codex_home.to_path_buf(),
-            thread_unload_delay: self.config.thread_unload_delay,
             skills_watcher: Arc::clone(&self.skills_watcher),
             turn_cost_worker: self.turn_cost_worker.clone(),
         };
@@ -2171,8 +2213,17 @@ impl ThreadRequestProcessor {
                 "thread/revert only supports paginated threads",
             ));
         }
+        let mut config = thread.config().await.as_ref().clone();
+        // Give the replacement its own pending lifetime before removal revokes the old runtime.
+        let ema_cancellation = config
+            .config_layer_stack
+            .mcp_ema_cancellation()
+            .for_startup();
+        config.config_layer_stack = config
+            .config_layer_stack
+            .with_mcp_ema_cancellation(ema_cancellation);
         let runtime_snapshot = ThreadRevertRuntimeSnapshot {
-            config: thread.config().await.as_ref().clone(),
+            config,
             settings: thread.restorable_thread_settings().await,
             client_mcp_extensions: thread.client_mcp_extensions(),
         };
@@ -2356,10 +2407,17 @@ impl ThreadRequestProcessor {
         app_server_client_version: Option<String>,
     ) -> Result<ThreadRevertResponse, JSONRPCErrorError> {
         let ThreadRevertRuntimeSnapshot {
-            config,
+            mut config,
             settings,
             client_mcp_extensions,
         } = runtime_snapshot;
+        if let Some(collaboration_mode) = settings.collaboration_mode.as_ref() {
+            config.model = Some(collaboration_mode.model().to_string());
+        }
+        if let Some(service_tier) = settings.service_tier.as_ref() {
+            config.service_tier.clone_from(service_tier);
+        }
+        config.personality = settings.personality;
         let thread_id_string = thread_id.to_string();
         let stored_thread = self
             .read_stored_thread_for_resume(
@@ -2889,13 +2947,17 @@ impl ThreadRequestProcessor {
         params: ThreadLoadedListParams,
     ) -> Result<ThreadLoadedListResponse, JSONRPCErrorError> {
         let ThreadLoadedListParams { cursor, limit } = params;
-        let mut data: Vec<String> = self
-            .thread_manager
-            .list_thread_ids()
-            .await
-            .into_iter()
-            .map(|thread_id| thread_id.to_string())
-            .collect();
+        let mut data = Vec::new();
+        for thread_id in self.thread_manager.list_thread_ids().await {
+            if let Ok(thread) = self.thread_manager.get_thread(thread_id).await
+                && thread
+                    .thread_extension_data()
+                    .get::<SampleThread>()
+                    .is_none()
+            {
+                data.push(thread_id.to_string());
+            }
+        }
 
         if data.is_empty() {
             return Ok(ThreadLoadedListResponse {
@@ -4133,6 +4195,17 @@ impl ThreadRequestProcessor {
         }
         let has_explicit_model_resume_override =
             has_model_resume_override(request_overrides.as_ref(), &typesafe_overrides);
+        let persisted_model_settings = latest_persisted_model_settings(&thread_history);
+        let has_override = |key| {
+            request_overrides
+                .as_ref()
+                .is_some_and(|overrides| overrides.contains_key(key))
+        };
+        let restore_service_tier =
+            typesafe_overrides.service_tier.is_none() && !has_override("service_tier");
+        let restore_summary = !has_override("model_reasoning_summary");
+        let restore_personality =
+            typesafe_overrides.personality.is_none() && !has_override("personality");
         typesafe_overrides.persisted_permission_profile = history_settings
             .filter(|settings| {
                 settings.active_permission_profile.is_none()
@@ -4196,7 +4269,17 @@ impl ThreadRequestProcessor {
         if clear_reasoning_effort {
             config.model_reasoning_effort = None;
         }
-
+        if let Some(settings) = persisted_model_settings {
+            if restore_service_tier {
+                config.service_tier.clone_from(&settings.service_tier);
+            }
+            if restore_summary {
+                config.model_reasoning_summary = settings.reasoning_summary;
+            }
+            if restore_personality {
+                config.personality = settings.personality;
+            }
+        }
         let response_history = thread_history.clone();
 
         match self
@@ -4563,8 +4646,13 @@ impl ThreadRequestProcessor {
                     active_path.display()
                 )));
             }
-            let config_snapshot = existing_thread.config_snapshot().await;
-            let mismatch_details = collect_resume_override_mismatches(params, &config_snapshot);
+            let (config_snapshot, selected_service_tier) =
+                existing_thread.resume_config_snapshot().await;
+            let mismatch_details = collect_resume_override_mismatches(
+                params,
+                &config_snapshot,
+                selected_service_tier.as_deref(),
+            );
             if !mismatch_details.is_empty() {
                 let has_subscribers = !self
                     .thread_state_manager
@@ -5091,6 +5179,11 @@ impl ThreadRequestProcessor {
         app_server_client_version: Option<String>,
         client_mcp_extensions: ClientMcpExtensions,
     ) -> Result<(), JSONRPCErrorError> {
+        if params.experimental_disable_prediction_mcp && !params.experimental_prediction_mode {
+            return Err(invalid_request(
+                "`experimentalDisablePredictionMcp` requires `experimentalPredictionMode: true`",
+            ));
+        }
         let has_config_overrides = params.model.is_some()
             || params.model_provider.is_some()
             || params.service_tier.is_some()
@@ -5105,7 +5198,7 @@ impl ThreadRequestProcessor {
             || params
                 .config
                 .as_ref()
-                .is_some_and(|config| !config.is_empty());
+                .is_some_and(|config| config.keys().any(|key| key != "thread_unload_delay_secs"));
         if params.experimental_prediction_mode && has_config_overrides {
             return Err(invalid_request(
                 "`experimentalPredictionMode` cannot be combined with configuration overrides",
@@ -5119,6 +5212,7 @@ impl ThreadRequestProcessor {
         let ThreadForkParams {
             thread_id,
             experimental_prediction_mode,
+            experimental_disable_prediction_mcp,
             last_turn_id,
             before_turn_id,
             path,
@@ -5159,6 +5253,11 @@ impl ThreadRequestProcessor {
                 /*include_history*/ false,
             )
             .await?;
+        let loaded_parent = self
+            .thread_manager
+            .get_thread(source_thread.thread_id)
+            .await
+            .ok();
         let inherited_fork = if experimental_prediction_mode {
             // Keep inherited state and its preparation off the fork handler's stack.
             let (mut options, settings) = Box::pin(async {
@@ -5175,9 +5274,42 @@ impl ThreadRequestProcessor {
                 _ => internal_error(format!("failed to inherit parent state: {err}")),
             })?;
             options.config.ephemeral = ephemeral;
+            // Runtime retention does not change the inherited prompt or cache key.
+            if let Some(value) = cli_overrides
+                .as_ref()
+                .and_then(|config| config.get("thread_unload_delay_secs"))
+            {
+                let seconds = value.as_u64().ok_or_else(|| {
+                    invalid_request("`thread_unload_delay_secs` must be a non-negative integer")
+                })?;
+                let delay = Duration::from_secs(seconds);
+                if std::time::Instant::now().checked_add(delay).is_none() {
+                    return Err(invalid_request("`thread_unload_delay_secs` is too large"));
+                }
+                options.config.thread_unload_delay = delay;
+            }
             options
                 .thread_extension_init
                 .insert(codex_core::compact::AutoCompactionDisabled);
+            if experimental_disable_prediction_mcp
+                && let Some(parent) = loaded_parent.as_ref()
+                && parent
+                    .conversation_history_snapshot()
+                    .await
+                    .items()
+                    .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }))
+                && let Some(model) = options.config.model.as_deref()
+                && self
+                    .thread_manager
+                    .get_models_manager()
+                    .get_model_info(model, &options.config.to_models_manager_config())
+                    .await
+                    .use_responses_lite
+            {
+                options
+                    .thread_extension_init
+                    .insert(codex_core::McpServersDisabled);
+            }
             options
                 .config
                 .features
@@ -5317,7 +5449,6 @@ impl ThreadRequestProcessor {
             !has_permission_override(request_overrides.as_ref(), &typesafe_overrides);
         let needs_latest_settings =
             restore_approval_policy || restore_approvals_reviewer || restore_permission_profile;
-        let loaded_parent = self.thread_manager.get_thread(source_thread_id).await.ok();
         let loaded_parent_settings = if paginated_source && needs_latest_settings {
             if let Some(parent) = loaded_parent.as_ref() {
                 let snapshot = parent.thread_settings_snapshot().await;

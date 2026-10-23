@@ -30,11 +30,36 @@ fn sleep_tool_config_rejects_unknown_mode() {
 }
 
 #[test]
-fn materializing_sleep_tool_preserves_mode() {
-    let mut config = toml::from_str::<FeaturesToml>("[sleep_tool]\nmode = 'always_on'")
-        .expect("sleep tool config should deserialize");
+fn runtime_auth_config_accepts_modes_without_implicitly_enabling_the_feature() {
+    for mode in ["dual_header", "assertion_only"] {
+        let config: FeaturesToml =
+            toml::from_str(&format!("[runtime_agent_instances]\nmode = '{mode}'")).unwrap();
+        let mut features = Features::with_defaults();
+        features.apply_toml(&config);
+        assert!(!features.enabled(Feature::RuntimeAgentInstances));
+
+        let config: FeaturesToml = toml::from_str(&format!(
+            "[runtime_agent_instances]\nenabled = true\nmode = '{mode}'"
+        ))
+        .unwrap();
+        features.apply_toml(&config);
+        assert!(features.enabled(Feature::RuntimeAgentInstances));
+    }
+    assert!(
+        toml::from_str::<FeaturesToml>("[runtime_agent_instances]\nmode = 'credential_only'")
+            .is_err()
+    );
+}
+
+#[test]
+fn materializing_feature_configs_preserves_modes() {
+    let mut config = toml::from_str::<FeaturesToml>(
+        "[sleep_tool]\nmode = 'always_on'\n[runtime_agent_instances]\nmode = 'assertion_only'",
+    )
+    .expect("feature config should deserialize");
     let mut features = Features::with_defaults();
     features.disable(Feature::SleepTool);
+    features.enable(Feature::RuntimeAgentInstances);
 
     config.materialize_resolved_enabled(&features);
 
@@ -44,6 +69,15 @@ fn materializing_sleep_tool_preserves_mode() {
             enabled: Some(false),
             mode: Some(crate::SleepToolMode::AlwaysOn),
         }))
+    );
+    assert_eq!(
+        config.runtime_agent_instances,
+        Some(FeatureToml::Config(
+            crate::RuntimeAgentInstancesConfigToml {
+                enabled: Some(true),
+                mode: Some(crate::RuntimeAuthMode::AssertionOnly),
+            }
+        ))
     );
 }
 
@@ -939,4 +973,23 @@ code_mode = true
         "Under-development features enabled: code_mode. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /tmp/config.toml.".to_string(),
         message
     );
+}
+
+#[test]
+fn retired_worktree_and_voice_config_overrides_are_ignored() {
+    for enabled in [false, true] {
+        let features_toml = FeaturesToml::from(BTreeMap::from([
+            ("worktrees".to_string(), enabled),
+            ("realtime_conversation".to_string(), enabled),
+        ]));
+        let features = Features::from_sources(
+            FeatureConfigSource {
+                features: Some(&features_toml),
+                ..Default::default()
+            },
+            FeatureConfigSource::default(),
+            FeatureOverrides::default(),
+        );
+        assert_eq!(features, Features::with_defaults());
+    }
 }

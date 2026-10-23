@@ -62,6 +62,7 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::GuardianAssessmentStatus;
 use codex_protocol::protocol::ReviewDecision;
 use codex_protocol::protocol::TurnCompleteEvent;
+use codex_protocol_test_support::ContentItemTestExt;
 use codex_utils_path_uri::LegacyAppPathString;
 use codex_utils_path_uri::PathUri;
 use core_test_support::PathBufExt;
@@ -4171,6 +4172,7 @@ async fn guardian_review_session_config_isolates_parent_customizations() {
                 guardian_output_contract_prompt(),
             )
             .render()
+            .expect_text()
         )
     );
 }
@@ -4294,6 +4296,7 @@ async fn guardian_review_session_config_uses_requirements_guardian_policy_config
                 guardian_output_contract_prompt(),
             )
             .render()
+            .expect_text()
         )
     );
 }

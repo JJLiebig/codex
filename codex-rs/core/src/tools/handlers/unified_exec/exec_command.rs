@@ -62,8 +62,6 @@ const EXEC_COMMAND_REJECTION_MAX_BYTES: usize = 900;
 
 #[derive(Clone, Copy)]
 pub(crate) struct ExecCommandHandlerOptions {
-    pub(crate) include_login_parameter: bool,
-    pub(crate) include_shell_parameter: bool,
     pub(crate) allow_tty: bool,
     pub(crate) completion_wake: bool,
     pub(crate) exec_permission_approvals_enabled: bool,
@@ -87,8 +85,6 @@ impl Default for ExecCommandHandler {
         Self {
             lifetime: ExecCommandLifetime::Interactive,
             options: ExecCommandHandlerOptions {
-                include_login_parameter: false,
-                include_shell_parameter: true,
                 allow_tty: true,
                 completion_wake: true,
                 exec_permission_approvals_enabled: false,
@@ -123,11 +119,9 @@ impl ToolExecutor<ToolInvocation> for ExecCommandHandler {
     fn spec(&self) -> ToolSpec {
         let spec = create_exec_command_tool_with_environment_id(
             CommandToolOptions {
-                include_login_parameter: self.options.include_login_parameter,
                 exec_permission_approvals_enabled: self.options.exec_permission_approvals_enabled,
             },
             self.options.include_environment_id,
-            self.options.include_shell_parameter,
             self.options.include_windows_shell_guidance,
         );
         let mut spec = match self.lifetime {
@@ -199,9 +193,8 @@ impl ExecCommandHandler {
         );
         let environment_args: ExecCommandEnvironmentArgs = parse_arguments(&arguments)?;
         let turn_environment = resolve_tool_environment(
-            &step_context,
+            &step_context.environments,
             environment_args.environment_id.as_deref(),
-            "unified exec is unavailable in this session",
         )?;
         let native_environment_cwd = turn_environment.cwd().clone();
         let cwd = environment_args
@@ -266,7 +259,7 @@ impl ExecCommandHandler {
         let hook_command = args.cmd.clone();
         maybe_emit_implicit_skill_invocation(
             session.as_ref(),
-            context.step_context.turn.as_ref(),
+            context.step_context.as_ref(),
             &hook_command,
             &cwd,
             native_cwd.as_ref(),
@@ -572,9 +565,8 @@ impl CoreToolRuntime for ExecCommandHandler {
         args.login.get_or_insert_default();
         let environment_args: ExecCommandEnvironmentArgs = parse_arguments(arguments).ok()?;
         let turn_environment = resolve_tool_environment(
-            &invocation.step_context,
+            &invocation.step_context.environments,
             environment_args.environment_id.as_deref(),
-            "unified exec is unavailable in this session",
         )
         .ok()?;
         let cwd = environment_args

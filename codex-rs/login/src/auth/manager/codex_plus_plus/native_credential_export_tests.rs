@@ -40,6 +40,8 @@ fn auth(account_id: &str, access_label: &str) -> AuthDotJson {
                 "label": access_label
             })),
             refresh_token: "refresh-secret".to_string(),
+            oauth_provenance: None,
+            login_owner_id: None,
             account_id: Some(account_id.to_string()),
         }),
         last_refresh: Some(Utc::now()),
@@ -421,4 +423,45 @@ async fn bound_native_recovery_rechecks_disk_before_mutation_and_after_candidate
             "{case}"
         );
     }
+}
+
+#[tokio::test]
+async fn logout_completes_with_account_grant_and_queued_refresh() -> anyhow::Result<()> {
+    let home = TempDir::new()?;
+    let mut stored = auth("account-one", "access-one");
+    let tokens = stored.tokens.as_mut().unwrap();
+    tokens.id_token = parse_chatgpt_jwt_claims(&jwt(json!({
+        "sub": "user-one",
+        "https://api.openai.com/auth": {
+            "chatgpt_user_id": "user-one",
+            "chatgpt_account_id": "account-one"
+        }
+    })))?;
+    tokens.login_owner_id = Some("login-one".to_string());
+    tokens.oauth_provenance = Some(crate::token_data::AccountOAuthProvenance {
+        issuer: "https://auth.openai.com".to_string(),
+        client_id: "codex-client".to_string(),
+    });
+    save_auth(
+        home.path(),
+        &stored,
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    )?;
+    let manager = std::sync::Arc::new(manager(&home, AutomaticAccountSelection::Disabled).await);
+    let lease = manager.lease_account_oauth_grant().await?.unwrap();
+    let refresh = manager.refresh_token();
+    tokio::pin!(refresh);
+    assert!(
+        std::future::Future::poll(
+            refresh.as_mut(),
+            &mut std::task::Context::from_waker(std::task::Waker::noop()),
+        )
+        .is_pending()
+    );
+
+    tokio::time::timeout(std::time::Duration::from_secs(5), manager.logout()).await??;
+    assert!(manager.auth_cached().is_none());
+    assert!(lease.release().current_tokens().await?.is_none());
+    Ok(())
 }

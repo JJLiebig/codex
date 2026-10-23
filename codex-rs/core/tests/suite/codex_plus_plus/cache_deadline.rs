@@ -249,14 +249,14 @@ async fn cache_deadline_skips_small_current_context_but_manual_compact_still_run
     minimum: Option<u8>,
 ) -> Result<()> {
     let harness =
-        TestCodexHarness::with_auto_env_builder(builder(None).with_config(move |config| {
+        TestCodexHarness::with_auto_env_builder(builder(Some(3300)).with_config(move |config| {
             if let Some(percent) = minimum {
                 config.config_layer_stack = config
                     .config_layer_stack
                     .with_user_config(
                         &config.codex_home.join("config.toml"),
                         toml::from_str(&format!(
-                            "cache_deadline_compact_min_context_percent = {percent}"
+                            "cache_deadline_compact_min_context_percent = {percent}\n[cache_deadline_compact_seconds]\ngpt-6-astra = 3300"
                         ))
                         .unwrap(),
                     )
@@ -314,21 +314,11 @@ async fn cache_deadline_skips_small_current_context_but_manual_compact_still_run
     Ok(())
 }
 
-#[test_case("gpt-6-astra", false; "successful checkpoint is reused")]
-#[test_case("gpt-6-astra", true; "failed compaction preserves history")]
-#[test_case("gpt-6.1-sol", false; "sol defaults to timer compaction")]
-#[test_case("gpt-7.2-mini", false; "future gpt defaults to timer compaction")]
+#[test_case(false; "successful checkpoint is reused")]
+#[test_case(true; "failed compaction preserves history")]
 #[tokio::test]
-async fn cache_deadline_compacts_once_and_foreground_rearms(model: &str, fail: bool) -> Result<()> {
-    let harness = TestCodexHarness::with_auto_env_builder(
-        builder(None)
-            .with_model(model)
-            .with_model_info_override(model, |info| {
-                info.context_window = Some(400_000);
-                info.effective_context_window_percent = 95;
-            }),
-    )
-    .await?;
+async fn cache_deadline_compacts_once_and_foreground_rearms(fail: bool) -> Result<()> {
+    let harness = harness(3300).await?;
     let mock = responses::mount_sse_sequence(
         harness.server(),
         vec![
@@ -393,17 +383,29 @@ async fn cache_deadline_compacts_once_and_foreground_rearms(model: &str, fail: b
 }
 
 #[test_case("off"; "explicit zero stays off")]
+#[test_case("unset"; "missing interval stays off")]
+#[test_case("future_unset"; "future models require an explicit interval")]
 #[test_case("overdue"; "resume after expiry drops stale deadline")]
 #[test_case("model"; "model changes disarm deadline")]
 #[test_case("too_late"; "known expired interval stays off")]
 #[tokio::test]
 async fn cache_deadline_does_not_compact_stale_or_disabled_context(case: &str) -> Result<()> {
-    let harness = harness(match case {
-        "off" => 0,
-        "too_late" => 3600,
-        _ => 3300,
-    })
-    .await?;
+    let mut builder = builder(match case {
+        "off" => Some(0),
+        "too_late" => Some(3600),
+        "unset" | "future_unset" => None,
+        _ => Some(3300),
+    });
+    if case == "future_unset" {
+        builder =
+            builder
+                .with_model("gpt-7.2-mini")
+                .with_model_info_override("gpt-7.2-mini", |info| {
+                    info.context_window = Some(400_000);
+                    info.effective_context_window_percent = 95;
+                });
+    }
+    let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
     let mock =
         responses::mount_sse_sequence(harness.server(), vec![reply("first"), reply("next")]).await;
     prompt(&harness, "retain original history").await?;
