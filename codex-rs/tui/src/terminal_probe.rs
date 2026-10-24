@@ -288,7 +288,6 @@ mod imp {
         if keyboard_probe == StartupKeyboardEnhancementProbe::Query {
             query.extend_from_slice(b"\x1B[?u");
         }
-        query.extend_from_slice(crate::codex_plus_plus::program_status::probe_query());
         // DA1 must follow the keyboard query: its reply also finishes keyboard detection.
         if keyboard_probe == StartupKeyboardEnhancementProbe::Query || query_identity {
             query.extend_from_slice(b"\x1B[c");
@@ -306,7 +305,6 @@ mod imp {
             query_identity,
             &mut buffer,
         );
-        crate::codex_plus_plus::program_status::finish_probe(&buffer);
         crossterm::event::buffer_input(&startup_replay_input(&buffer))?;
         result
     }
@@ -361,9 +359,7 @@ mod imp {
                 buffer,
                 keyboard_probe,
             );
-            if startup_probe_complete(&probe, keyboard_probe)
-                && crate::codex_plus_plus::program_status::probe_complete(buffer)
-            {
+            if startup_probe_complete(&probe, keyboard_probe) {
                 return Ok(probe);
             }
             let now = Instant::now();

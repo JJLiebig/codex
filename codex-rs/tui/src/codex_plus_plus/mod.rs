@@ -10,7 +10,6 @@ pub(crate) mod destructive_command_guard;
 mod lag_warning;
 mod model_capacity_retry;
 mod native_account_maintenance;
-pub(crate) mod program_status;
 pub(crate) mod prompt_cache;
 mod release_status;
 pub(crate) mod runtime_version;
