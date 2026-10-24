@@ -4345,7 +4345,5 @@ mod tests {
     }
 }
 
-#[path = "codex_plus_plus/program_status.rs"]
-mod program_status;
 #[path = "codex_plus_plus/transient_status.rs"]
 mod transient_status;

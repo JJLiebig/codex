@@ -1220,7 +1220,6 @@ impl App {
                 TuiEvent::FocusLost => {}
             }
         }
-        self.chat_widget.refresh_program_status();
         // Both transcript owners must consume completions before automatic work advances.
         if idle_draw {
             tui.clipboard.advance(tui.frame_requester());
