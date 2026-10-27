@@ -1230,7 +1230,6 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
         responses::ev_assistant_message("msg-1", "Done"),
         completed,
     ]);
-    let response_mock = responses::mount_sse_once(&server, body).await;
 
     let codex_home = TempDir::new()?;
     MockResponsesConfig::new(&server.uri()).write(codex_home.path())?;
@@ -1244,6 +1243,26 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
     let ThreadStartResponse { thread, .. } = mcp.start_thread(ThreadStartParams::default()).await?;
 
     if resume {
+        let seed_mock = responses::mount_sse_once(
+            &server,
+            responses::sse(vec![
+                responses::ev_response_created("resp-seed"),
+                responses::ev_assistant_message("msg-seed", "Ready"),
+                responses::ev_completed("resp-seed"),
+            ]),
+        )
+        .await;
+        mcp.start_turn_and_wait_for_completion(TurnStartParams {
+            thread_id: thread.id.clone(),
+            input: vec![V2UserInput::Text {
+                text: "Materialize the thread".to_string(),
+                text_elements: Vec::new(),
+            }],
+            ..Default::default()
+        })
+        .await?;
+        seed_mock.single_request();
+        mcp.clear_message_buffer();
         let resume_id = mcp
             .send_thread_resume_request(codex_app_server_protocol::ThreadResumeParams {
                 thread_id: thread.id.clone(),
@@ -1254,6 +1273,7 @@ async fn turn_start_emits_raw_response_completed_with_upstream_usage(
             timeout(DEFAULT_READ_TIMEOUT, mcp.read_response(resume_id)).await??;
     }
 
+    let response_mock = responses::mount_sse_once(&server, body).await;
     let TurnStartResponse { turn } = mcp
         .request(|request_id| ClientRequest::TurnStart {
             request_id,
