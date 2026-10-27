@@ -1027,6 +1027,7 @@ impl FeaturesToml {
             code_mode_host,
             non_prefixed_mcp_tool_names,
             guardianv2,
+            guardianv3,
             multi_agent_v2,
             token_budget,
             context_management,
@@ -1053,6 +1054,8 @@ impl FeaturesToml {
                 materialize_resolved_feature_enabled(non_prefixed_mcp_tool_names, enabled);
             } else if spec.id == Feature::GuardianV2 {
                 materialize_resolved_feature_enabled(guardianv2, enabled);
+            } else if spec.id == Feature::GuardianV3 {
+                materialize_resolved_feature_enabled(guardianv3, enabled);
             } else if spec.id == Feature::MultiAgentV2 {
                 materialize_resolved_feature_enabled(multi_agent_v2, enabled);
             } else if spec.id == Feature::TokenBudget {

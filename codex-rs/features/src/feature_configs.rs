@@ -312,6 +312,10 @@ impl FeatureConfig for GuardianV3ConfigToml {
     fn enabled(&self) -> Option<bool> {
         self.enabled
     }
+
+    fn set_enabled(&mut self, enabled: bool) {
+        self.enabled = Some(enabled);
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]

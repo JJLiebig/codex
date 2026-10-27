@@ -54,12 +54,13 @@ fn runtime_auth_config_accepts_modes_without_implicitly_enabling_the_feature() {
 #[test]
 fn materializing_feature_configs_preserves_modes() {
     let mut config = toml::from_str::<FeaturesToml>(
-        "[sleep_tool]\nmode = 'always_on'\n[runtime_agent_instances]\nmode = 'assertion_only'",
+        "[sleep_tool]\nmode = 'always_on'\n[runtime_agent_instances]\nmode = 'assertion_only'\n[guardianv3]\nenabled = false",
     )
     .expect("feature config should deserialize");
     let mut features = Features::with_defaults();
     features.disable(Feature::SleepTool);
     features.enable(Feature::RuntimeAgentInstances);
+    features.enable(Feature::GuardianV3);
 
     config.materialize_resolved_enabled(&features);
 
@@ -78,6 +79,12 @@ fn materializing_feature_configs_preserves_modes() {
                 mode: Some(crate::RuntimeAuthMode::AssertionOnly),
             }
         ))
+    );
+    assert_eq!(
+        config.guardianv3,
+        Some(FeatureToml::Config(crate::GuardianV3ConfigToml {
+            enabled: Some(true),
+        }))
     );
 }
 
