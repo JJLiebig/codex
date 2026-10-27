@@ -320,9 +320,13 @@ async fn ambiguous_outcomes_are_not_replayed_and_the_attempt_is_bounded() {
                 retry_after: None,
             },
             ApiError::FlexUnavailable,
+            ApiError::ModelNotFound {
+                message: "model unavailable".to_string(),
+                status: None,
+            },
         ]
         .map(|error| classify_error(&error)),
-        [WeeklyWindowPingOutcome::Rejected { status: None }; 3]
+        [WeeklyWindowPingOutcome::Rejected { status: None }; 4]
     );
 
     let server = MockServer::start().await;

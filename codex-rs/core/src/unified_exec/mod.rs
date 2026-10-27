@@ -53,6 +53,7 @@ mod head_tail_buffer;
 mod oneshot;
 mod process;
 mod process_manager;
+pub(crate) use process_manager::exec_env_policy_from_shell_policy;
 mod process_state;
 mod shell_snapshot;
 mod stdin_approval;
@@ -127,9 +128,18 @@ pub(crate) struct ExecCommandRequest {
     pub exact_pre_tool_use_approval: bool,
 }
 
+/// The process and environment behind a terminal session ID at the time of lookup.
+#[derive(Clone, Debug)]
+pub(crate) struct TerminalSession {
+    pub(crate) process_id: i32,
+    process: Arc<UnifiedExecProcess>,
+    call_id: String,
+    pub(crate) environment_id: String,
+}
+
 #[derive(Debug)]
 pub(crate) struct WriteStdinRequest<'a> {
-    pub process_id: i32,
+    pub terminal: &'a TerminalSession,
     pub input: &'a str,
     pub yield_time_ms: u64,
     pub max_output_tokens: Option<usize>,

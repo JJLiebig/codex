@@ -46,6 +46,7 @@ async fn invocation_for_payload(
         tool_name: codex_tools::ToolName::plain(tool_name),
         source: ToolCallSource::Direct,
         payload,
+        environments: Default::default(),
     }
 }
 
@@ -356,6 +357,7 @@ async fn exec_command_rejects_login_when_selected_environment_disallows_it() {
         call_id: "login-disallowed".to_string(),
         tool_name: codex_tools::ToolName::plain("exec_command"),
         source: ToolCallSource::Direct,
+        environments: Default::default(),
         payload: ToolPayload::Function {
             arguments: serde_json::json!({ "cmd": "echo hello", "login": true }).to_string(),
         },
@@ -440,6 +442,7 @@ async fn exec_command_reuses_foreign_windows_grant() {
             call_id: "foreign-windows-grant".to_string(),
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: ToolCallSource::Direct,
+            environments: Default::default(),
             payload: ToolPayload::Function {
                 arguments: serde_json::json!({
                     "cmd": "*** Begin Patch\n*** Add File: granted/file.txt\n+text\n*** End Patch",
@@ -481,6 +484,7 @@ async fn exec_command_pre_tool_use_payload_uses_raw_command() {
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            environments: Default::default(),
         })
         .expect("pre-tool-use payload");
     assert_eq!(
@@ -528,6 +532,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
     let environment = step_context.environments.primary().unwrap();
     let mut execution_target = environment.selection();
     execution_target.cwd = remote_cwd.join("reviewed")?;
+    let environments = ToolEnvironments::single_executor(environment);
     let handler = ExecCommandHandler::default();
 
     assert_eq!(
@@ -541,6 +546,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            environments,
         }),
         Some(crate::tools::registry::PreToolUsePayload {
             tool_name: HookToolName::bash(),
@@ -590,6 +596,7 @@ async fn exec_command_pre_tool_use_payload_resolves_local_shell_identity() -> an
                 executable_path: resolved_shell.shell_path,
             },
         );
+        let environments = ToolEnvironments::single_executor(environment);
         let hook_payload = ExecCommandHandler::default()
             .pre_tool_use_payload(&ToolInvocation {
                 session: session.into(),
@@ -601,6 +608,7 @@ async fn exec_command_pre_tool_use_payload_resolves_local_shell_identity() -> an
                 tool_name: codex_tools::ToolName::plain("exec_command"),
                 source: ToolCallSource::Direct,
                 payload,
+                environments,
             })
             .expect("local shell should resolve before PreToolUse");
 
@@ -639,6 +647,7 @@ async fn exec_command_pre_tool_use_payload_skips_write_stdin() {
             tool_name: codex_tools::ToolName::plain("write_stdin"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            environments: Default::default(),
         }),
         None
     );

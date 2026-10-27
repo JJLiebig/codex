@@ -42,6 +42,7 @@ use codex_model_provider_info::AMAZON_BEDROCK_PROVIDER_ID;
 use codex_model_provider_info::AMAZON_BEDROCK_RUNTIME_PROVIDER_ID;
 use codex_model_provider_info::CLI_PROXY_PROVIDER_ID;
 use codex_model_provider_info::CLI_PROXY_PROVIDER_NAME;
+use codex_model_provider_info::GCP_PROVIDER_ID;
 use codex_model_provider_info::LEGACY_OLLAMA_CHAT_PROVIDER_ID;
 use codex_model_provider_info::LMSTUDIO_OSS_PROVIDER_ID;
 use codex_model_provider_info::ModelProviderInfo;
@@ -71,10 +72,11 @@ use serde::Serialize;
 use serde::de::Error as SerdeError;
 use serde_json::Value as JsonValue;
 
-const RESERVED_MODEL_PROVIDER_IDS: [&str; 6] = [
+const RESERVED_MODEL_PROVIDER_IDS: [&str; 7] = [
     AMAZON_BEDROCK_PROVIDER_ID,
     AMAZON_BEDROCK_RUNTIME_PROVIDER_ID,
     CLI_PROXY_PROVIDER_ID,
+    GCP_PROVIDER_ID,
     OPENAI_PROVIDER_ID,
     OLLAMA_OSS_PROVIDER_ID,
     LMSTUDIO_OSS_PROVIDER_ID,
@@ -646,6 +648,10 @@ pub enum ThreadStoreToml {
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq, JsonSchema)]
 pub struct AutoReviewToml {
+    /// Overall Guardian review budget in milliseconds, including setup and retries.
+    /// Defaults to 90,000. Set to 0 to wait without a review deadline; cancellation
+    /// and independent transport timeouts still apply.
+    pub timeout_ms: Option<u32>,
     /// Controls whether circuit-breaker interruptions include a structured error.
     /// Strict mode writes structured errors that older clients may not
     /// recognize when reading shared history. Defaults to `default`.
@@ -1003,7 +1009,7 @@ pub fn validate_reserved_model_provider_ids(
         .filter(|key| {
             !matches!(
                 key.as_str(),
-                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
+                AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID | GCP_PROVIDER_ID
             ) && RESERVED_MODEL_PROVIDER_IDS.contains(&key.as_str())
         })
         .map(|key| format!("`{key}`"))
@@ -1032,23 +1038,29 @@ pub fn validate_model_providers(
             provider
                 .validate_bedrock_override()
                 .map_err(|message| format!("model_providers.{key} {message}"))?;
-        } else {
-            if provider.aws.is_some() {
-                return Err(format!(
-                    "model_providers.{key}: provider aws is only supported for \
+        } else if provider.aws.is_some() {
+            return Err(format!(
+                "model_providers.{key}: provider aws is only supported for \
 `{AMAZON_BEDROCK_PROVIDER_ID}` or `{AMAZON_BEDROCK_RUNTIME_PROVIDER_ID}`"
-                ));
-            }
-            if provider.name.trim().is_empty() {
-                return Err(format!(
-                    "model_providers.{key}: provider name must not be empty"
-                ));
-            }
-            if provider.name == CLI_PROXY_PROVIDER_NAME {
-                return Err(format!(
-                    "model_providers.{key}: `{CLI_PROXY_PROVIDER_NAME}` is reserved for the built-in `cli-proxy` provider"
-                ));
-            }
+            ));
+        }
+        if !matches!(
+            key.as_str(),
+            AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID | GCP_PROVIDER_ID
+        ) && provider.name.trim().is_empty()
+        {
+            return Err(format!(
+                "model_providers.{key}: provider name must not be empty"
+            ));
+        }
+        if !matches!(
+            key.as_str(),
+            AMAZON_BEDROCK_PROVIDER_ID | AMAZON_BEDROCK_RUNTIME_PROVIDER_ID
+        ) && provider.name == CLI_PROXY_PROVIDER_NAME
+        {
+            return Err(format!(
+                "model_providers.{key}: `{CLI_PROXY_PROVIDER_NAME}` is reserved for the built-in `cli-proxy` provider"
+            ));
         }
         provider
             .validate()
@@ -1299,6 +1311,32 @@ command = "   "
             err.to_string().contains(
                 "model_providers.amazon-bedrock: provider auth.command must not be empty"
             )
+        );
+    }
+
+    #[test]
+    fn gcp_provider_accepts_partial_endpoint_and_auth_overrides() {
+        let config = toml::from_str::<ConfigToml>(
+            r#"
+[model_providers.gcp]
+base_url = "https://vertex.example.com/v1"
+
+[model_providers.gcp.auth]
+command = "print-token"
+"#,
+        )
+        .expect("partial GCP provider overrides should deserialize");
+
+        let provider = config
+            .model_providers
+            .get(GCP_PROVIDER_ID)
+            .expect("GCP overrides should be retained");
+        assert_eq!(
+            (
+                provider.base_url.as_deref(),
+                provider.auth.as_ref().map(|auth| auth.command.as_str()),
+            ),
+            (Some("https://vertex.example.com/v1"), Some("print-token"))
         );
     }
 }

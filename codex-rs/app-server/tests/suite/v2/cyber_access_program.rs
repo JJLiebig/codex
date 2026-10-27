@@ -269,6 +269,8 @@ async fn api_key_cyber_access_program_requires_only_forwarding_feature() -> Resu
                 assert_eq!(
                     completed.turn.error,
                     Some(TurnError {
+                        inference_attribution: None,
+                        usage_limit_observed_at_ns: None,
                         message: "Cyber access programs are disabled for this API-key session."
                             .to_owned(),
                         codex_error_info: Some(CodexErrorInfo::Other),

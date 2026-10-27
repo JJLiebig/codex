@@ -99,7 +99,7 @@ fn wait_for_release_command() -> &'static str {
 #[test_case(Finish::Wake; "idle completion resumes once")]
 #[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
 #[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
-#[test_case(Finish::Compact; "completion wakes after compact replacement")]
+#[test_case(Finish::Compact; "completion wakes after compact replacement in plan mode with agent message wakes")]
 #[test_case(Finish::Steer; "completion wakes after ordinary steering")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
@@ -108,6 +108,9 @@ fn wait_for_release_command() -> &'static str {
 #[test_case(Finish::Ordinary; "ordinary background commands do not wake")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn background_completion(finish: Finish) -> Result<()> {
+    use codex_features::Feature;
+    use codex_protocol::config_types::ModeKind;
+
     let source = if matches!(finish, Finish::Exec) {
         codex_protocol::protocol::SessionSource::Exec
     } else if matches!(finish, Finish::Subagent) {
@@ -119,6 +122,14 @@ async fn background_completion(finish: Finish) -> Result<()> {
     };
     let contributions = Arc::new(AtomicUsize::new(0));
     let mut builder = test_codex().with_session_source(source);
+    if matches!(finish, Finish::Compact) {
+        builder = builder.with_config(|config| {
+            config
+                .features
+                .enable(Feature::WakeOnAgentMessages)
+                .expect("enable agent-message wakes");
+        });
+    }
     if matches!(finish, Finish::Steer) {
         let mut extensions = ExtensionRegistryBuilder::<Config>::new();
         extensions.turn_input_contributor(Arc::new(CountingTurnInputContributor(Arc::clone(
@@ -264,6 +275,21 @@ async fn background_completion(finish: Finish) -> Result<()> {
     }
 
     if matches!(finish, Finish::Compact) {
+        let mut collaboration_mode = harness
+            .test()
+            .codex
+            .config_snapshot()
+            .await
+            .collaboration_mode;
+        collaboration_mode.mode = ModeKind::Plan;
+        harness
+            .test()
+            .codex
+            .update_thread_settings(ThreadSettingsOverrides {
+                collaboration_mode: Some(collaboration_mode),
+                ..Default::default()
+            })
+            .await?;
         harness.test().codex.submit(Op::Compact).await?;
         wait_for_event(&harness.test().codex, |event| {
             matches!(event, EventMsg::TurnComplete(_))

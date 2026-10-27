@@ -54,12 +54,13 @@ fn runtime_auth_config_accepts_modes_without_implicitly_enabling_the_feature() {
 #[test]
 fn materializing_feature_configs_preserves_modes() {
     let mut config = toml::from_str::<FeaturesToml>(
-        "[sleep_tool]\nmode = 'always_on'\n[runtime_agent_instances]\nmode = 'assertion_only'",
+        "[sleep_tool]\nmode = 'always_on'\n[runtime_agent_instances]\nmode = 'assertion_only'\n[guardianv3]\nenabled = false",
     )
     .expect("feature config should deserialize");
     let mut features = Features::with_defaults();
     features.disable(Feature::SleepTool);
     features.enable(Feature::RuntimeAgentInstances);
+    features.enable(Feature::GuardianV3);
 
     config.materialize_resolved_enabled(&features);
 
@@ -78,6 +79,12 @@ fn materializing_feature_configs_preserves_modes() {
                 mode: Some(crate::RuntimeAuthMode::AssertionOnly),
             }
         ))
+    );
+    assert_eq!(
+        config.guardianv3,
+        Some(FeatureToml::Config(crate::GuardianV3ConfigToml {
+            enabled: Some(true),
+        }))
     );
 }
 
@@ -260,6 +267,43 @@ fn guardian_v2_feature_config_preserves_boolean_toggle() {
         features.entries(),
         BTreeMap::from([("guardianv2".to_owned(), true)])
     );
+}
+
+#[test]
+fn guardian_v3_feature_config_resolves_base_and_profile_toggles() {
+    for (base, profile, enabled) in [
+        ("guardianv3 = true", "", true),
+        ("guardianv3 = false", "", false),
+        ("[guardianv3]", "", false),
+        ("[guardianv3]\nenabled = true", "", true),
+        ("[guardianv3]\nenabled = false", "", false),
+        (
+            "[guardianv3]\nenabled = true",
+            "[guardianv3]\nenabled = false",
+            false,
+        ),
+        (
+            "[guardianv3]\nenabled = false",
+            "[guardianv3]\nenabled = true",
+            true,
+        ),
+        ("[guardianv3]\nenabled = true", "[guardianv3]", true),
+    ] {
+        let base = toml::from_str::<FeaturesToml>(base).expect("base features");
+        let profile = toml::from_str::<FeaturesToml>(profile).expect("profile features");
+        let features = Features::from_sources(
+            FeatureConfigSource {
+                features: Some(&base),
+                ..Default::default()
+            },
+            FeatureConfigSource {
+                features: Some(&profile),
+                ..Default::default()
+            },
+            FeatureOverrides::default(),
+        );
+        assert_eq!(features.enabled(Feature::GuardianV3), enabled);
+    }
 }
 
 #[test]
