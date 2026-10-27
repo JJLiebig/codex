@@ -571,13 +571,13 @@ impl CoreToolRuntime for ExecCommandHandler {
         };
         let mut args = parse_arguments::<ExecCommandArgs>(arguments).ok()?;
         args.login.get_or_insert_default();
-        let environment_args: ExecCommandEnvironmentArgs = parse_arguments(arguments).ok()?;
-        let turn_environment = resolve_tool_environment(
+        let workdir_args: ExecCommandWorkdirArgs = parse_arguments(arguments).ok()?;
+        let turn_environment = selected_executor(
+            &invocation.environments,
             &invocation.step_context.environments,
-            environment_args.environment_id.as_deref(),
         )
         .ok()?;
-        let cwd = environment_args
+        let cwd = workdir_args
             .workdir
             .as_deref()
             .filter(|workdir| !workdir.is_empty())

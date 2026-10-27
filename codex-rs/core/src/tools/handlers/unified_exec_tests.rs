@@ -484,6 +484,7 @@ async fn exec_command_pre_tool_use_payload_uses_raw_command() {
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            environments: Default::default(),
         })
         .expect("pre-tool-use payload");
     assert_eq!(
@@ -531,6 +532,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
     let environment = step_context.environments.primary().unwrap();
     let mut execution_target = environment.selection();
     execution_target.cwd = remote_cwd.join("reviewed")?;
+    let environments = ToolEnvironments::single_executor(environment);
     let handler = ExecCommandHandler::default();
 
     assert_eq!(
@@ -544,7 +546,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
-            environments: Default::default(),
+            environments,
         }),
         Some(crate::tools::registry::PreToolUsePayload {
             tool_name: HookToolName::bash(),
@@ -594,6 +596,7 @@ async fn exec_command_pre_tool_use_payload_resolves_local_shell_identity() -> an
                 executable_path: resolved_shell.shell_path,
             },
         );
+        let environments = ToolEnvironments::single_executor(environment);
         let hook_payload = ExecCommandHandler::default()
             .pre_tool_use_payload(&ToolInvocation {
                 session: session.into(),
@@ -605,6 +608,7 @@ async fn exec_command_pre_tool_use_payload_resolves_local_shell_identity() -> an
                 tool_name: codex_tools::ToolName::plain("exec_command"),
                 source: ToolCallSource::Direct,
                 payload,
+                environments,
             })
             .expect("local shell should resolve before PreToolUse");
 
