@@ -1,6 +1,6 @@
 //! Ensure a provisioned CLI still discovers its outer package and install method.
 
-use super::*;
+use crate::*;
 use pretty_assertions::assert_eq;
 use std::fs;
 
@@ -72,5 +72,43 @@ fn winget_root_requires_metadata_for_the_actual_executable() -> std::io::Result<
         });
         assert_eq!(CodexPackageLayout::from_exe(executable.as_path()), expected);
     }
+    Ok(())
+}
+
+#[test]
+fn detects_codex_plus_plus_generation_release_layout() -> std::io::Result<()> {
+    let codex_home = tempfile::tempdir()?;
+    let release_dir = codex_home
+        .path()
+        .join("packages/codex-plus-plus/releases/shim-id/generation");
+    let bin_dir = release_dir.join(BIN_DIRNAME);
+    fs::create_dir_all(&bin_dir)?;
+    fs::write(release_dir.join(PACKAGE_METADATA_FILENAME), "{}")?;
+    let exe_path = bin_dir.join(if cfg!(windows) { "codex.exe" } else { "codex" });
+    fs::write(&exe_path, "")?;
+    let canonical_release_dir = AbsolutePathBuf::from_absolute_path(release_dir.canonicalize()?)?;
+    let canonical_bin_dir = AbsolutePathBuf::from_absolute_path(bin_dir.canonicalize()?)?;
+
+    assert_eq!(
+        InstallContext::from_exe_with_codex_home(
+            /*is_macos*/ false,
+            /*current_exe*/ Some(&exe_path),
+            /*method_override*/ None,
+            /*codex_home*/ Some(codex_home.path()),
+        ),
+        InstallContext {
+            method: InstallMethod::Standalone {
+                release_dir: canonical_release_dir.clone(),
+                resources_dir: None,
+                platform: standalone_platform(),
+            },
+            package_layout: Some(CodexPackageLayout {
+                package_dir: canonical_release_dir,
+                bin_dir: canonical_bin_dir,
+                resources_dir: None,
+                path_dir: None,
+            }),
+        }
+    );
     Ok(())
 }
