@@ -61,6 +61,7 @@ pub(crate) fn review(
             escalated_exec: false,
             full_access: false,
             cancellation: cancellation.clone(),
+            timeout: turn.config.guardian_review_timeout,
             model: turn.model_info(),
             telemetry: &session.services.session_telemetry,
             log_assessments: turn.config.otel.guardian_assessment_logging_enabled(),

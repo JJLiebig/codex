@@ -1206,14 +1206,10 @@ pub(crate) async fn apply_bespoke_event_handling(
                     private.thread_id,
                     event_turn_id,
                     TurnCompletionMetadata {
+                        inference_attribution: None,
                         status: TurnStatus::Interrupted,
                         root_turn_id: aborted.root_turn_id,
-                        error: aborted.error.map(|error| TurnError {
-                            message: error.message,
-                            codex_error_info: error.codex_error_info.map(Into::into),
-                            misalignment: error.misalignment.map(Into::into),
-                            additional_details: None,
-                        }),
+                        error: aborted.error.map(inference_failure::error_event),
                         last_agent_message: None,
                         started_at: aborted.started_at,
                         completed_at: aborted.completed_at,
