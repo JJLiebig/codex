@@ -1,5 +1,3 @@
-#[path = "codex_plus_plus/cache_deadline.rs"]
-pub(crate) mod cache_deadline;
 pub(crate) mod startup;
 
 use crate::PromptCacheKey;
@@ -2565,7 +2563,6 @@ impl Session {
                     .as_ref()
                     .is_some_and(CodexErrorInfo::affects_turn_status))
         {
-            self.cache_deadline.clear();
             turn_context
                 .terminal_error
                 .lock()
@@ -4578,7 +4575,6 @@ impl Session {
                         .cloned(),
                 );
             }
-            self.cache_deadline.clear();
             let replacement_history = items.clone();
             state.replace_annotated_history(
                 items,

@@ -2882,12 +2882,6 @@ impl App {
                     app_event_tx.send(AppEvent::DcgStatusDetected(request_id, status));
                 });
             }
-            AppEvent::OpenCacheDeadlineModels => self.chat_widget.open_cache_deadline_models(),
-            AppEvent::OpenCacheDeadlineInterval(model) => self.chat_widget.open_cache_deadline_interval(model),
-            AppEvent::OpenCacheDeadlineCustom(model) => self.chat_widget.open_cache_deadline_custom(model),
-            AppEvent::PersistCacheDeadline { model, seconds } => {
-                crate::codex_plus_plus::cache_deadline::persist(self, app_server, model, seconds).await;
-            }
             AppEvent::DcgStatusDetected(request_id, status) => {
                 if DcgManager::is_current_status_detection(request_id) {
                     self.chat_widget.finish_dcg_status_detection(status);

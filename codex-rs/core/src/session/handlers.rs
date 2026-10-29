@@ -488,12 +488,6 @@ pub(super) async fn submission_loop(
                 }
                 continue;
             }
-            context = super::cache_deadline::prepare_idle(&sess) => {
-                if let Some(context) = context {
-                    super::cache_deadline::start_if_idle(&sess, &rx_sub, context).await;
-                }
-                continue;
-            }
         };
         debug!(
             thread_id = %sess.thread_id(),
@@ -508,7 +502,6 @@ pub(super) async fn submission_loop(
         let should_exit = async {
             match sub.op {
                 Op::Interrupt => {
-                    sess.cache_deadline.clear();
                     interrupt(&sess).await;
                     false
                 }
@@ -583,7 +576,6 @@ pub(super) async fn submission_loop(
                     mode,
                     reply,
                 } => {
-                    super::cache_deadline::yield_to_foreground(&sess).await;
                     let request = WithTurnExtensionData {
                         request: *request,
                         turn_extension_init: sub.turn_extension_init,
@@ -627,8 +619,6 @@ pub(super) async fn submission_loop(
                     thread_settings,
                     reply,
                 } => {
-                    sess.cache_deadline.clear();
-                    super::cache_deadline::yield_to_foreground(&sess).await;
                     let _settings_guard = thread_settings::acquire_persistence_lock(&sess).await;
                     let thread_settings = WithTurnExtensionData {
                         request: thread_settings,
@@ -672,7 +662,6 @@ pub(super) async fn submission_loop(
                     update,
                     reply,
                 } => {
-                    sess.cache_deadline.clear();
                     let outcome = sess.apply_turn_settings(&turn_id, update).await;
                     let _ = reply.send(outcome);
                     false
@@ -720,7 +709,6 @@ pub(super) async fn submission_loop(
                     false
                 }
                 Op::Compact => {
-                    sess.cache_deadline.clear();
                     compact(&sess, sub.id.clone()).await;
                     false
                 }

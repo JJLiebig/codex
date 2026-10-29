@@ -7504,21 +7504,6 @@
     "browser_use": {
       "$ref": "#/definitions/BrowserUseConfigToml"
     },
-    "cache_deadline_compact_min_context_percent": {
-      "description": "Minimum current context usage percent for timer-based compaction (default 30, capped at 100).",
-      "format": "uint8",
-      "minimum": 0.0,
-      "type": "integer"
-    },
-    "cache_deadline_compact_seconds": {
-      "additionalProperties": {
-        "format": "uint64",
-        "minimum": 0.0,
-        "type": "integer"
-      },
-      "description": "Seconds after foreground inference before one automatic compaction, by exact model ID. Models default to off; zero disables the exact model. Timers are not restored when reopening threads. Astra/Sol intervals must be below their tested 3600-second lifetime; larger values are ignored.",
-      "type": "object"
-    },
     "chatgpt_base_url": {
       "description": "Base URL for requests to ChatGPT (as opposed to the OpenAI API).",
       "type": "string"

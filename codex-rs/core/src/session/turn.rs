@@ -604,17 +604,6 @@ pub(crate) async fn run_turn(
             &mut explicitly_enabled_connectors,
         )
         .await;
-        if super::cache_deadline::at_sampling_boundary(
-            &sess,
-            &step_context,
-            client_session,
-            usage_limit_account_attempts,
-        )
-        .await?
-        .is_break()
-        {
-            return Ok(None);
-        }
         let sampling_request_result: CodexResult<_> = async {
             let window_id = sess.current_window_id().await;
             super::time_reminder::maybe_record_current_time_reminder(
@@ -1681,7 +1670,7 @@ async fn maybe_run_previous_model_inline_compact(
     skip_all,
     fields(reason = ?reason, phase = ?phase)
 )]
-pub(super) async fn run_auto_compact(
+async fn run_auto_compact(
     sess: &Arc<Session>,
     step_context: Arc<StepContext>,
     replacement_step_context: Arc<StepContext>,
@@ -2944,7 +2933,6 @@ async fn try_run_sampling_request(
     let mut response_completed = false;
     let mut request_token_usage = None;
     client_session.begin_usage_limit_failover_tracking(usage_limit_account_attempts);
-    let cache_owner = super::cache_deadline::owner_generation(&sess);
     let mut includes_reasoning = step_context.settings.model_info.use_responses_lite;
     let stream = client_session
         .stream(
@@ -2982,7 +2970,6 @@ async fn try_run_sampling_request(
             return Err(error);
         }
     };
-    super::cache_deadline::record_foreground(&sess, &step_context, cache_owner).await;
     turn_context.begin_inference_request(client_session).await;
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted);

@@ -326,8 +326,7 @@ impl Session {
         let cancellation_token = CancellationToken::new();
         let done = Arc::new(Notify::new());
 
-        let pending_items =
-            crate::session::cache_deadline::starting_mailbox_input(self, &turn_context).await;
+        let (pending_items, _) = self.input_queue.drain_mailbox_input_items().await;
         let turn_state = {
             let mut active = self.active_turn.lock().await;
             let turn = active.get_or_insert_with(ActiveTurn::default);
@@ -939,7 +938,6 @@ impl Session {
         }
         if cleared_active_turn {
             self.maybe_start_turn_for_pending_work().await;
-            self.cache_deadline.changed.notify_one();
         }
     }
 
@@ -986,7 +984,6 @@ impl Session {
         turn_state: &Mutex<TurnState>,
         error: Option<ErrorEvent>,
     ) {
-        self.cache_deadline.clear();
         let sub_id = task.turn_context.sub_id.clone();
         if task.cancellation_token.is_cancelled() {
             self.emit_turn_abort_lifecycle(reason, task.turn_context.extension_data.as_ref())

@@ -4,7 +4,6 @@ mod account_identity_freshness;
 mod account_policy;
 mod account_removal;
 mod auto_redeem_resets;
-pub(crate) mod cache_deadline;
 pub(crate) mod destructive_command_guard;
 #[cfg(any(not(debug_assertions), test))]
 mod lag_warning;
