@@ -315,13 +315,6 @@ pub struct ConfigToml {
 
     /// Suppress time-driven progress updates; enabled by default.
     pub disable_unnecessary_updates: Option<bool>,
-    /// Seconds after foreground inference before one automatic compaction, by exact model ID.
-    /// Models default to off; zero disables the exact model.
-    /// Timers are not restored when reopening threads.
-    /// Astra/Sol intervals must be below their tested 3600-second lifetime; larger values are ignored.
-    pub cache_deadline_compact_seconds: Option<BTreeMap<String, u64>>,
-    /// Minimum current context usage percent for timer-based compaction (default 30, capped at 100).
-    pub cache_deadline_compact_min_context_percent: Option<u8>,
     /// How Codex++ presents routine tool activity in the main TUI conversation.
     pub codex_plus_plus_tool_activity: Option<ToolActivityPresentation>,
     /// Whether the global Destructive Command Guard introduction was shown.

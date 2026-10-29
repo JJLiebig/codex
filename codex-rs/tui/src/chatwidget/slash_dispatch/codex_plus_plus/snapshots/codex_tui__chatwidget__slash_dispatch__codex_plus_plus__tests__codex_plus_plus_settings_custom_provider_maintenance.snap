@@ -20,8 +20,8 @@ expression: terminal.backend().to_string()
   7. [*] Disable unnecessary updates to save tokens  Report meaningful progress
                                                      instead of timed status
                                                      updates.
-  8. Auto-compact before cache expiry                Choose when to compact before
-                                                     each model's cache expires.
+
+
 
 
 

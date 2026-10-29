@@ -205,7 +205,6 @@ impl Session {
             self.services.mcp_runtime.quiesce_ema().await;
         }
         self.emit_config_changed_contributors(previous_config.as_ref(), new_config.as_ref());
-        self.cache_deadline.clear();
         self.schedule_mcp_prewarm();
         self.refresh_hooks(config).await;
         outcome

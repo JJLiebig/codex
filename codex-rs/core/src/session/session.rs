@@ -93,7 +93,6 @@ pub(crate) struct Session {
     pub(crate) conversation: Arc<RealtimeConversationManager>,
     pub(crate) realtime_history: Option<Mutex<crate::realtime_history::RealtimeHistoryState>>,
     pub(crate) active_turn: Mutex<Option<ActiveTurn>>,
-    pub(crate) cache_deadline: super::cache_deadline::CacheDeadline,
     pub(crate) async_hook_results: async_channel::Receiver<HookCompletedEvent>,
     pub(crate) input_queue: InputQueue,
     pub(crate) services: SessionServices,
@@ -1939,7 +1938,6 @@ impl Session {
                 history_initialization,
                 forked_from_ordinal_exclusive,
                 next_internal_sub_id: AtomicU64::new(0),
-                cache_deadline: Default::default(),
             });
             if let Some(startup) = &startup {
                 startup.set_session(Arc::clone(&sess));

@@ -45,7 +45,6 @@ pub(crate) fn record_model_fallback(
         CompactionReason::ContextLimit => "context_limit",
         CompactionReason::ModelDownshift => "model_downshift",
         CompactionReason::CompHashChanged => "comp_hash_changed",
-        CompactionReason::CacheDeadline => "cache_deadline",
     };
     let implementation_tag = match implementation {
         CompactionImplementation::Responses => "responses",
