@@ -84,7 +84,7 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                 ):
                     release.npm_view(release.PACKAGE_NAME, "name")
 
-    def test_verify_accepts_exact_native_payloads(self) -> None:
+    def test_verify_accepts_npm_projection_and_rejects_payload_changes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             archives = root / "archives"
@@ -93,9 +93,17 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             npm.mkdir()
 
             for platform in release.PLATFORMS:
+                exec_server = (
+                    "codex-exec-server.exe"
+                    if platform.binary.endswith(".exe")
+                    else "codex-exec-server"
+                )
                 payload = {
-                    "codex-package.json": b'{"layoutVersion":1}',
+                    "codex-package.json": json.dumps(
+                        {"layoutVersion": 1, "execServer": f"bin/{exec_server}"}
+                    ).encode(),
                     f"bin/{platform.binary}": platform.target.encode(),
+                    f"bin/{exec_server}": b"standalone exec server",
                 }
                 archive = release.archive_path(archives, VERSION, platform)
                 if platform.archive_suffix == "zip":
@@ -104,15 +112,45 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                             output.writestr(name, content)
                 else:
                     write_tarball(archive, payload)
-                write_tarball(
-                    release.npm_tarball_path(npm, VERSION, platform.tag),
-                    {
-                        f"package/vendor/{platform.target}/{name}": content
-                        for name, content in payload.items()
+                npm_payload = {
+                    "codex-package.json": b'{\n  "layoutVersion": 1\n}\n',
+                    f"bin/{platform.binary}": platform.target.encode(),
+                }
+                cases = {
+                    "npm projection": npm_payload,
+                    "changed binary": {
+                        **npm_payload,
+                        f"bin/{platform.binary}": b"damaged",
                     },
-                )
-
-            release.verify(VERSION, archives, npm)
+                    "changed metadata": {
+                        **npm_payload,
+                        "codex-package.json": b'{\n  "layoutVersion": 2\n}\n',
+                    },
+                    "missing binary": {
+                        "codex-package.json": npm_payload["codex-package.json"]
+                    },
+                    "extra file": {**npm_payload, "unexpected": b"extra"},
+                }
+                for case, files in cases.items():
+                    with self.subTest(platform=platform.tag, case=case):
+                        write_tarball(
+                            release.npm_tarball_path(npm, VERSION, platform.tag),
+                            {
+                                f"package/vendor/{platform.target}/{name}": content
+                                for name, content in files.items()
+                            },
+                        )
+                        if case == "npm projection":
+                            release.verify(
+                                VERSION, archives, npm, platform=platform.tag
+                            )
+                        else:
+                            with self.assertRaisesRegex(
+                                RuntimeError, "Native payload mismatch"
+                            ):
+                                release.verify(
+                                    VERSION, archives, npm, platform=platform.tag
+                                )
 
     def test_single_platform_hydrates_verifies_and_publishes_without_other_targets(
         self,
@@ -124,7 +162,7 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             npm.mkdir()
             platform = release.PLATFORMS[0]
             payload = {
-                "codex-package.json": b'{"layoutVersion":1}',
+                "codex-package.json": b'{\n  "layoutVersion": 1\n}\n',
                 "bin/codex": b"native",
             }
             write_tarball(release.archive_path(archives, VERSION, platform), payload)

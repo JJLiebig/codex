@@ -76,6 +76,18 @@ def verify(
         archive = archive_path(archives_dir, version, platform)
         tarball = npm_tarball_path(npm_dir, version, platform.tag)
         archive_files = read_release_files(archive)
+        # npm staging omits the standalone exec server and rewrites its manifest.
+        exec_server = (
+            "codex-exec-server.exe"
+            if platform.binary.endswith(".exe")
+            else "codex-exec-server"
+        )
+        archive_files.pop(f"bin/{exec_server}", None)
+        metadata = json.loads(archive_files["codex-package.json"])
+        metadata.pop("execServer", None)
+        archive_files["codex-package.json"] = (
+            json.dumps(metadata, indent=2) + "\n"
+        ).encode()
         npm_files = read_npm_files(tarball, platform)
         if archive_files != npm_files:
             raise RuntimeError(
