@@ -19,6 +19,7 @@ use codex_login::ServerOptions;
 use codex_login::is_workload_identity_selected;
 use codex_login::login_with_access_token;
 use codex_login::login_with_api_key;
+use codex_login::logout_with_revoke;
 use codex_login::run_device_code_login;
 use codex_login::run_login_server;
 use codex_mcp::ema_auth_scope;
