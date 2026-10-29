@@ -21,6 +21,7 @@ pub use codex_protocol::config_types::AltScreenMode;
 pub use codex_protocol::config_types::ApprovalsReviewer;
 pub use codex_protocol::config_types::ModeKind;
 pub use codex_protocol::config_types::Personality;
+use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 pub use codex_protocol::config_types::ServiceTier;
 use codex_protocol::config_types::ToolExposureSurface;
 pub use codex_protocol::config_types::WebSearchMode;
@@ -29,6 +30,7 @@ use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt;
 
+use codex_utils_redacted_string::RedactedString;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -363,6 +365,8 @@ pub struct MemoriesToml {
     pub extract_model: Option<String>,
     /// Model used for memory consolidation.
     pub consolidation_model: Option<String>,
+    /// Service tier for memory consolidation. Defaults to Standard (`"default"`).
+    pub consolidation_service_tier: Option<String>,
 }
 
 /// Effective memories settings after defaults are applied.
@@ -382,6 +386,7 @@ pub struct MemoriesConfig {
     pub min_rate_limit_remaining_percent: i64,
     pub extract_model: Option<String>,
     pub consolidation_model: Option<String>,
+    pub consolidation_service_tier: String,
 }
 
 impl Default for MemoriesConfig {
@@ -401,6 +406,7 @@ impl Default for MemoriesConfig {
             min_rate_limit_remaining_percent: DEFAULT_MEMORIES_MIN_RATE_LIMIT_REMAINING_PERCENT,
             extract_model: None,
             consolidation_model: None,
+            consolidation_service_tier: SERVICE_TIER_DEFAULT_REQUEST_VALUE.to_string(),
         }
     }
 }
@@ -449,6 +455,13 @@ impl From<MemoriesToml> for MemoriesConfig {
                 .clamp(0, 100),
             extract_model: toml.extract_model,
             consolidation_model: toml.consolidation_model,
+            consolidation_service_tier: toml
+                .consolidation_service_tier
+                .map(|tier| {
+                    ServiceTier::from_request_value(&tier)
+                        .map_or(tier, |tier| tier.request_value().to_string())
+                })
+                .unwrap_or(defaults.consolidation_service_tier),
         }
     }
 }
@@ -614,7 +627,8 @@ pub enum OtelExporterKind {
     OtlpHttp {
         endpoint: String,
         #[serde(default)]
-        headers: HashMap<String, String>,
+        #[schemars(with = "HashMap<String, String>")]
+        headers: HashMap<String, RedactedString>,
         protocol: OtelHttpProtocol,
         #[serde(default)]
         tls: Option<OtelTlsConfig>,
@@ -622,7 +636,8 @@ pub enum OtelExporterKind {
     OtlpGrpc {
         endpoint: String,
         #[serde(default)]
-        headers: HashMap<String, String>,
+        #[schemars(with = "HashMap<String, String>")]
+        headers: HashMap<String, RedactedString>,
         #[serde(default)]
         tls: Option<OtelTlsConfig>,
     },
@@ -633,8 +648,7 @@ pub enum OtelExporterKind {
 #[schemars(deny_unknown_fields)]
 pub struct OtelConfigToml {
     /// Byte limit for tool-result log output; independent of model-visible output.
-    #[serde(default)]
-    pub tool_result: codex_protocol::config_types::ToolResultLogConfig,
+    pub tool_result: Option<codex_protocol::config_types::ToolResultLogConfig>,
     /// Log user prompt in traces
     pub log_user_prompt: Option<bool>,
     /// Opt in to logging final main-agent and spawned-subagent responses to an OTLP log exporter.
@@ -658,7 +672,7 @@ pub struct OtelConfigToml {
     pub metrics_exporter: Option<OtelExporterKind>,
 
     /// Attributes to add to every exported trace span.
-    pub span_attributes: Option<BTreeMap<String, String>>,
+    pub span_attributes: Option<HashMap<String, String>>,
 
     /// Semicolon-separated `key:value` fields to upsert into W3C tracestate members.
     pub tracestate: Option<BTreeMap<String, BTreeMap<String, String>>>,
@@ -675,7 +689,7 @@ pub struct OtelConfig {
     pub exporter: OtelExporterKind,
     pub trace_exporter: OtelExporterKind,
     pub metrics_exporter: OtelExporterKind,
-    pub span_attributes: BTreeMap<String, String>,
+    pub span_attributes: HashMap<String, String>,
     pub tracestate: BTreeMap<String, BTreeMap<String, String>>,
 }
 
@@ -690,7 +704,7 @@ impl Default for OtelConfig {
             exporter: OtelExporterKind::None,
             trace_exporter: OtelExporterKind::None,
             metrics_exporter: OtelExporterKind::Statsig,
-            span_attributes: BTreeMap::new(),
+            span_attributes: HashMap::new(),
             tracestate: BTreeMap::new(),
         }
     }

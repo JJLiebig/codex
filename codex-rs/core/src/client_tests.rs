@@ -1,3 +1,6 @@
+#[path = "client_runtime_auth_tests.rs"]
+mod runtime_auth_tests;
+
 use super::AuthRequestTelemetryContext;
 use super::ModelClient;
 use super::NonIncrementalReason;
@@ -22,6 +25,7 @@ use codex_api::AgentIdentityTelemetry;
 use codex_api::ApiError;
 use codex_api::ResponseEvent;
 use codex_api::TransportError;
+use codex_features::RuntimeAuthMode;
 use codex_history::HistoryInitialization;
 use codex_http_client::HttpClient;
 use codex_http_client::HttpClientBuilder;
@@ -78,6 +82,10 @@ use codex_rollout_trace::RawTraceEventPayload;
 use codex_rollout_trace::RolloutTrace;
 use codex_rollout_trace::TraceWriter;
 use codex_rollout_trace::replay_bundle;
+use codex_runtime_agent_instance::AgentHostAuthorization;
+use codex_runtime_agent_instance::RuntimeAuthManager;
+use codex_runtime_agent_instance::RuntimeRegistrationMetadata;
+use codex_runtime_agent_instance::RuntimeRole;
 use codex_tools::JsonSchema;
 use codex_tools::ResponsesApiTool;
 use codex_tools::ToolSpec;
@@ -226,13 +234,12 @@ async fn responses_http_uses_provider_owned_client() -> anyhow::Result<()> {
         inner: create_model_provider(info, /*auth_manager*/ None),
         client,
     });
-    let provider = model_client.state.provider.api_provider().await?;
-    let transport = model_client.build_api_transport(
-        &provider,
-        "/responses",
-        codex_login::default_client::ClientRedirectPolicy::Default,
-    )?;
-    let request = provider
+    let setup = model_client
+        .current_client_setup(super::ClientRouting::Workspace)
+        .await?;
+    let transport = setup.build_api_transport("/responses")?;
+    let request = setup
+        .api_provider
         .build_request(http::Method::POST, "/responses")
         .with_json(&json!({"input": "provider transport"}));
     assert_eq!(
@@ -248,8 +255,13 @@ async fn responses_http_uses_provider_owned_client() -> anyhow::Result<()> {
     Ok(())
 }
 
+#[test_case::test_case(None; "credential_auth")]
+#[test_case::test_case(Some(RuntimeAuthMode::DualHeader); "dual_header")]
+#[test_case::test_case(Some(RuntimeAuthMode::AssertionOnly); "assertion_only")]
 #[tokio::test]
-async fn workspace_routed_http_rejects_redirects_without_a_routing_header() {
+async fn workspace_routed_http_rejects_redirects_without_a_routing_header(
+    runtime_mode: Option<RuntimeAuthMode>,
+) {
     use codex_client::HttpTransport;
     use codex_login::WorkspaceRouting;
     use codex_login::WorkspaceRoutingRequest;
@@ -295,11 +307,36 @@ async fn workspace_routed_http_rejects_redirects_without_a_routing_header() {
             AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing());
         let resolver: Arc<dyn WorkspaceRoutingResolver> = Arc::new(Routing(routing_override));
         manager.set_workspace_routing_resolver(Arc::downgrade(&resolver));
+        let registration = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/register"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+                "runtime_agent_instance_id": "runtime-a",
+                "agent_host_id": "host-a",
+                "actor": {"kind": "chatgpt", "user_id": "user-a", "account_id": "account_id"},
+            })))
+            .mount(&registration)
+            .await;
+        let runtime = Arc::new(RuntimeAuthManager::new(
+            manager.clone(),
+            AgentHostAuthorization::InstallationId {
+                installation_id: uuid::Uuid::nil(),
+            },
+            RuntimeRegistrationMetadata {
+                harness: None,
+                harness_version: None,
+                role: RuntimeRole::OrchestratorAndExecutor,
+            },
+            format!("{}/register", registration.uri()).parse().unwrap(),
+        ));
         let mut client = test_model_client(SessionSource::Exec);
         Arc::get_mut(&mut client.state).unwrap().provider = create_model_provider(
             ModelProviderInfo::create_openai_provider(/*base_url*/ None),
             Some(manager),
         );
+        if let Some(mode) = runtime_mode {
+            client = client.with_runtime_auth(runtime, mode).unwrap();
+        }
         let mut setup = client
             .current_client_setup(super::ClientRouting::Workspace)
             .await
@@ -312,15 +349,14 @@ async fn workspace_routed_http_rejects_redirects_without_a_routing_header() {
         }
         // Exercise the resolved route's redirect policy against loopback HTTP servers.
         setup.api_provider.base_url = origin.uri();
-        let transport = client
-            .build_api_transport(&setup.api_provider, "/responses", setup.redirect_policy)
-            .unwrap();
+        let transport = setup.build_api_transport("/responses").unwrap();
         let request = setup
             .api_provider
             .build_request(http::Method::POST, "/responses")
             .with_json(&json!({"input": "workspace content"}));
         let result = transport.execute(request).await;
-        if routing_override.is_some() {
+        let reject_redirects = routing_override.is_some();
+        if reject_redirects {
             assert!(
                 matches!(
                     result,
@@ -337,7 +373,7 @@ async fn workspace_routed_http_rejects_redirects_without_a_routing_header() {
         }
         assert_eq!(
             destination.received_requests().await.unwrap().len(),
-            usize::from(routing_override.is_none())
+            usize::from(!reject_redirects)
         );
     }
 }
@@ -1945,6 +1981,35 @@ async fn summarize_memories_uses_prepared_wire_model_without_changing_model_info
 }
 
 #[tokio::test]
+async fn untraced_http_stream_releases_completed_output_before_response_ends() {
+    // This item's shared payload lets us observe whether the mapper kept a copy.
+    let tools = Arc::from([json!({"type": "function", "name": "lookup"})]);
+    let payload = Arc::downgrade(&tools);
+    let item = ResponseItem::AdditionalTools {
+        id: None,
+        role: "developer".to_string(),
+        tools,
+    };
+    let events = futures::stream::iter([Ok(ResponseEvent::OutputItemDone(item))])
+        .chain(futures::stream::pending());
+    let mut stream = super::map_response_events(
+        /*upstream_request_id*/ None,
+        events,
+        test_session_telemetry(),
+        InferenceTraceAttempt::disabled(),
+        test_model_provider(),
+        /*last_response_tx*/ None,
+        /*owned_request*/ None,
+    );
+
+    assert!(matches!(
+        stream.next().await,
+        Some(Ok(ResponseEvent::OutputItemDone(_)))
+    ));
+    assert_eq!(payload.strong_count(), 0);
+}
+
+#[tokio::test]
 async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Result<()> {
     let temp = TempDir::new()?;
     let attempt = started_inference_attempt(&temp)?;
@@ -1956,12 +2021,13 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
     let item = output_message("1", "partial answer");
     let api_stream = futures::stream::iter([Ok(ResponseEvent::OutputItemDone(item))])
         .chain(futures::stream::pending());
-    let (mut stream, _) = super::map_response_events(
+    let mut stream = super::map_response_events(
         /*upstream_request_id*/ None,
         api_stream,
         test_session_telemetry(),
         attempt,
         test_model_provider(),
+        /*last_response_tx*/ None,
         /*owned_request*/ None,
     );
 
@@ -2013,12 +2079,13 @@ async fn response_stream_records_last_model_feedback_ids() {
             end_turn: Some(true),
         }),
     ]);
-    let (mut stream, _) = super::map_response_events(
+    let mut stream = super::map_response_events(
         Some("req-123".to_string()),
         api_stream,
         test_session_telemetry(),
         InferenceTraceAttempt::disabled(),
         test_model_provider(),
+        /*last_response_tx*/ None,
         /*owned_request*/ None,
     );
 
@@ -2237,12 +2304,13 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
         notify: Arc::clone(&backpressured_item_yielded),
     };
 
-    let (stream, _) = super::map_response_events(
+    let stream = super::map_response_events(
         /*upstream_request_id*/ None,
         api_stream,
         test_session_telemetry(),
         attempt,
         test_model_provider(),
+        /*last_response_tx*/ None,
         /*owned_request*/ None,
     );
 
@@ -2387,7 +2455,7 @@ fn thread_responses_headers_are_scoped_to_model_and_backend_auth() {
     let chatgpt_auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     let api_key_auth = CodexAuth::from_api_key("test-api-key");
     for (auth, model, expected) in [
-        (Some(&chatgpt_auth), "selected-model", headers),
+        (Some(&chatgpt_auth), "selected-model", headers.clone()),
         (Some(&chatgpt_auth), "other-model", http::HeaderMap::new()),
         (
             Some(&api_key_auth),
@@ -2407,7 +2475,7 @@ fn thread_responses_headers_are_scoped_to_model_and_backend_auth() {
     );
     assert_eq!(
         model_client.responses_headers(Some(&chatgpt_auth), "selected-model"),
-        http::HeaderMap::new(),
+        headers,
     );
 }
 
@@ -2534,8 +2602,10 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         }))
         .await?;
     drop(tx_event);
-    let (mut stream, last_response) = super::map_response_stream(
+    let (last_response_tx, last_response_rx) = tokio::sync::oneshot::channel();
+    let mut stream = super::map_response_stream(
         codex_api::ResponseStream {
+            routing_affinity: None,
             proxy_trace_id: None,
             rx_event,
             upstream_request_id: None,
@@ -2545,6 +2615,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         attempt,
         test_model_provider(),
         vec![Box::new(ReplaceOutput)],
+        Some(last_response_tx),
         /*owned_request*/ None,
     );
     let mut delivered = Vec::new();
@@ -2554,7 +2625,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         }
     }
     assert_eq!(delivered, vec![output_message("1", "transformed")]);
-    assert_eq!(last_response.await?.items_added, delivered);
+    assert_eq!(last_response_rx.await?.items_added, delivered);
     let rollout = replay_bundle(temp.path())?;
     let payload = rollout
         .raw_payloads
