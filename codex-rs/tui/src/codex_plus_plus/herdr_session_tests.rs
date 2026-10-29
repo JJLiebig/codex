@@ -62,6 +62,7 @@ fn every_root_report_preserves_session_without_changing_record_address_or_clear(
             iterm_detail: "",
             emit_iterm_status: false,
             herdr_session: Some(session),
+            herdr_session_token: None,
         }
         .write_ansi(&mut encoded)
         .unwrap();
@@ -77,4 +78,34 @@ fn every_root_report_preserves_session_without_changing_record_address_or_clear(
     .write_ansi(&mut clear)
     .unwrap();
     assert_eq!(clear, "\x1b]7501;state=clear\x1b\\");
+}
+
+#[test]
+fn session_token_is_echoed_only_with_identity_and_safe_protocol_text() {
+    let session = ThreadId::from_u128(/*value*/ 42);
+    for token in ["current-0123_token", "stale-4567_token"] {
+        let mut encoded = String::new();
+        super::write_session(&mut encoded, Some(session), Some(token)).unwrap();
+        assert_eq!(
+            encoded,
+            format!(":session=00000000-0000-0000-0000-00000000002a:sessiontoken={token}")
+        );
+    }
+    for token in [
+        "",
+        "a:b",
+        "a=b",
+        "a;state=clear",
+        "a\x1b\\",
+        "a\n",
+        "a b",
+        "é",
+    ] {
+        let mut encoded = String::new();
+        super::write_session(&mut encoded, Some(session), Some(token)).unwrap();
+        assert_eq!(encoded, ":session=00000000-0000-0000-0000-00000000002a");
+    }
+    let mut encoded = String::new();
+    super::write_session(&mut encoded, /*session*/ None, Some("current-token")).unwrap();
+    assert_eq!(encoded, "");
 }

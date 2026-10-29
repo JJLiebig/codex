@@ -161,6 +161,7 @@ pub(crate) fn set_terminal_program_status(
                 iterm_detail: &detail,
                 emit_iterm_status: support.osc_21337,
                 herdr_session: emitted.herdr_session,
+                herdr_session_token: herdr_session::invocation_token(),
             }
         )
     })
@@ -239,6 +240,7 @@ struct SetTerminalProgramStatus<'a> {
     status: ProgramStatus,
     iterm_detail: &'a str,
     herdr_session: Option<codex_protocol::ThreadId>,
+    herdr_session_token: Option<&'a str>,
     emit_iterm_status: bool,
 }
 
@@ -266,7 +268,7 @@ impl Command for SetTerminalProgramStatus<'_> {
             };
             write!(f, ":kind={kind}")?;
         }
-        herdr_session::write_session(f, self.herdr_session)?;
+        herdr_session::write_session(f, self.herdr_session, self.herdr_session_token)?;
         write!(f, "\x1b\\")
     }
 

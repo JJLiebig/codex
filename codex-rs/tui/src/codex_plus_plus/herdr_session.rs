@@ -37,9 +37,28 @@ impl SessionStatusState {
     }
 }
 
-pub(super) fn write_session(f: &mut impl fmt::Write, session: Option<ThreadId>) -> fmt::Result {
+pub(super) fn invocation_token() -> Option<&'static str> {
+    static TOKEN: OnceLock<Option<String>> = OnceLock::new();
+    TOKEN
+        .get_or_init(|| std::env::var("HERDR_MAIN_INVOCATION").ok())
+        .as_deref()
+}
+
+pub(super) fn write_session(
+    f: &mut impl fmt::Write,
+    session: Option<ThreadId>,
+    token: Option<&str>,
+) -> fmt::Result {
     if let Some(session) = session {
         write!(f, ":session={session}")?;
+        if let Some(token) = token.filter(|token| {
+            !token.is_empty()
+                && token
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+        }) {
+            write!(f, ":sessiontoken={token}")?;
+        }
     }
     Ok(())
 }
