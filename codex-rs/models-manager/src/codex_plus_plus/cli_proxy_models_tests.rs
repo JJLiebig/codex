@@ -62,12 +62,20 @@ async fn refresh_replaces_complete_snapshots_including_empty_and_keeps_failures(
     let manager = CliProxyModelsManager::new(home.path().to_owned(), endpoint.clone());
     manager.set_api_key_model_discovery_enabled(/*enabled*/ false);
     assert!(manager.try_list_models().unwrap().is_empty());
+    assert!(
+        manager
+            .model_catalog_with_origins(RefreshStrategy::InMemory, factory.clone())
+            .await
+            .is_empty()
+    );
     assert_eq!(
         manager
-            .raw_model_catalog(RefreshStrategy::Online, factory.clone())
-            .await
-            .models,
-        vec![model.clone()]
+            .model_catalog_with_origins(RefreshStrategy::Online, factory.clone())
+            .await,
+        vec![CatalogModel {
+            model: model.clone(),
+            origin: ModelOrigin::Provider,
+        }]
     );
     assert_eq!(manager.try_list_models().unwrap()[0].model, model.slug);
     assert_eq!(
@@ -75,7 +83,16 @@ async fn refresh_replaces_complete_snapshots_including_empty_and_keeps_failures(
             .raw_model_catalog(RefreshStrategy::Online, factory.clone())
             .await
             .models,
-        vec![model]
+        vec![model.clone()]
+    );
+    assert_eq!(
+        manager
+            .model_catalog_with_origins(RefreshStrategy::InMemory, factory.clone())
+            .await,
+        vec![CatalogModel {
+            model,
+            origin: ModelOrigin::Provider,
+        }]
     );
 
     // Observed auth changes bypass a fresh snapshot without a per-turn network fetch.

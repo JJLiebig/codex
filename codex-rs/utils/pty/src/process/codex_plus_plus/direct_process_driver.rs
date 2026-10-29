@@ -58,8 +58,8 @@ pub fn spawn_from_direct_driver(driver: DirectProcessDriver) -> SpawnedProcess {
             #[cfg(windows)]
             interrupt_terminates: true,
         }),
-        tokio::spawn(async {}),
-        Vec::new(),
+        /*stdout_reader*/ None,
+        /*stderr_reader*/ None,
         driver
             .writer_handle
             .unwrap_or_else(|| tokio::spawn(async {})),

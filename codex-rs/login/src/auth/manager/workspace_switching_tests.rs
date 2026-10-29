@@ -94,6 +94,7 @@ async fn workspace_switch_preserves_login_and_survives_reload() -> anyhow::Resul
         codex_home: home.path().to_path_buf(),
         auth_credentials_store_mode: AuthCredentialsStoreMode::File,
         keyring_backend_kind: AuthKeyringBackendKind::default(),
+        automatic_account_selection: AutomaticAccountSelection::Enabled,
         forced_login_method: None,
         forced_chatgpt_workspace_id: Some(vec!["business".into()]),
         managed_auth_policy: ManagedAuthPolicy::default(),
@@ -168,6 +169,7 @@ async fn workspace_switch_rejects_stale_agent_identity_and_rolls_back_conditiona
             chatgpt_account_is_fedramp: false,
             task_id: None,
         })
+        .await
         .unwrap_err();
     assert!(error.to_string().contains("Account changed"));
     manager.reload().await;
@@ -260,6 +262,17 @@ async fn workspace_switch_obeys_workspace_policy() -> anyhow::Result<()> {
 async fn workspace_switch_does_not_restore_a_logged_out_session() -> anyhow::Result<()> {
     let server = MockServer::start().await;
     let (home, manager, _) = session(&server).await?;
+    // Another manager shares disk credentials without sharing the in-flight refresh permit.
+    let logout_manager = AuthManager::new(
+        home.path().to_path_buf(),
+        /*enable_codex_api_key_env*/ false,
+        AuthCredentialsStoreMode::File,
+        /*forced_chatgpt_workspace_id*/ None,
+        Some(server.uri()),
+        AuthKeyringBackendKind::default(),
+        crate::test_support::transport_default_auth_route_config(),
+    )
+    .await;
     let received = Arc::new(tokio::sync::Notify::new());
     let notify = received.clone();
     Mock::given(method("POST"))
@@ -275,10 +288,11 @@ async fn workspace_switch_does_not_restore_a_logged_out_session() -> anyhow::Res
     let (switched, logged_out) =
         tokio::join!(manager.switch_workspace("login-1", "business"), async {
             received.notified().await;
-            manager.logout().await
+            logout_manager.logout().await
         },);
     logged_out?;
     assert_eq!(switched.unwrap_err().kind(), io::ErrorKind::Interrupted);
+    manager.reload().await;
     assert!(manager.auth_cached().is_none());
     assert!(
         create_auth_storage(

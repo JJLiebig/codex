@@ -79,7 +79,7 @@ async fn compact_history_policy_keeps_complete_transcript_and_raw_output() {
             handler_type: codex_app_server_protocol::HookHandlerType::Command,
             execution_mode: codex_app_server_protocol::HookExecutionMode::Sync,
             scope: codex_app_server_protocol::HookScope::Turn,
-            source_path: hook_source_path.clone(),
+            source_path: hook_source_path.clone().into(),
             source: codex_app_server_protocol::HookSource::User,
             display_order: 0,
             status,

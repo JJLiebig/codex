@@ -9,14 +9,14 @@ fn wake_notice_fits_the_original_history_budget() {
             event_call_id: "call".into(),
             chunk_id: "chunk".into(),
             wall_time: Duration::ZERO,
-            raw_output: vec![b'x'; 4096],
+            raw_output: "x".repeat(4096).as_str().into(),
             truncation_policy: policy,
             max_output_tokens: Some(4096),
             process_id: Some(1000),
             exit_code: None,
             original_token_count: Some(1024),
-            output_omitted_bytes: None,
             hook_command: None,
+            tool_cwd: None,
         });
         let response = output.to_response_item(
             "call",

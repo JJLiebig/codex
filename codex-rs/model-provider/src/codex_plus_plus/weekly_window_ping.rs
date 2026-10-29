@@ -282,6 +282,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         | ApiError::ContentFilter
         | ApiError::Retryable { .. }
         | ApiError::ServerOverloaded { .. }
+        | ApiError::PolicyCapacityUnavailable { .. }
         | ApiError::ContextWindowExceeded => WeeklyWindowPingOutcome::Ambiguous { status: None },
     }
 }

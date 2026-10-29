@@ -157,6 +157,7 @@ async fn inference_status_tracks_scoped_success_and_failure_without_native_quota
                     codex_protocol::protocol::TokenUsageInfo {
                         total_token_usage: Default::default(),
                         last_token_usage: Default::default(),
+                        last_usage_includes_reasoning: None,
                         model_context_window: None,
                     },
                 ),

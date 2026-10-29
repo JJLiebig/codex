@@ -206,6 +206,8 @@ async fn daybreak_refusal_offers_enable_for_the_next_turn() {
     assert!(ops.try_recv().is_err());
 
     let error = AppServerTurnError {
+        inference_attribution: None,
+        usage_limit_observed_at_ns: None,
         message: "blocked".into(),
         codex_error_info: Some(CodexErrorInfo::CyberPolicy),
         misalignment: None,

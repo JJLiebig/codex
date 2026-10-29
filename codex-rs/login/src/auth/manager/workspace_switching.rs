@@ -218,7 +218,7 @@ impl AuthManager {
         // The exchange does not renew the session or issue refresh/ID tokens.
         updated.agent_identity = None;
         replace_if_current(auth.storage().as_ref(), &snapshot, &updated)?;
-        self.reload().await;
+        self.reload_unlocked(/*guard*/ None).await;
         Ok(WorkspaceSwitch {
             storage: auth.storage().clone(),
             previous: snapshot,
@@ -265,7 +265,7 @@ impl AuthManager {
             &switched.selected,
             &switched.previous,
         );
-        self.reload().await;
+        self.reload_unlocked(/*guard*/ None).await;
         result
     }
 

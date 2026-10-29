@@ -1,3 +1,4 @@
+use codex_exec_server::ExecOutputStream;
 use codex_exec_server::WriteStatus;
 use codex_sandboxing::SandboxType;
 use pretty_assertions::assert_eq;
@@ -72,7 +73,7 @@ async fn completion_output_retains_already_polled_output() {
     .await;
     {
         let mut output = process.output.output_buffer.lock().await;
-        output.push_chunk(b"already returned to the model");
+        output.push_chunk(ExecOutputStream::Stdout, b"already returned to the model");
         output.pending = Default::default();
     }
     process
