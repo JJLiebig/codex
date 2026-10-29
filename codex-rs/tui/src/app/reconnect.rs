@@ -530,7 +530,7 @@ impl App {
             self.active_thread_id = None;
             self.active_thread_rx = None;
             self.primary_thread_id = None;
-            crate::terminal_program_status::set_primary_session(None);
+            crate::terminal_program_status::set_primary_session(/*session*/ None);
             self.primary_session_configured = None;
             let init = self.chatwidget_init_for_forked_or_resumed_thread(
                 tui,
