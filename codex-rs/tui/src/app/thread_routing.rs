@@ -1441,6 +1441,7 @@ impl App {
             self.recap.reset_for_new_thread(Instant::now());
         }
         self.primary_thread_id = Some(thread_id);
+        crate::terminal_program_status::set_primary_session(Some(&session));
         self.agents_overview.hidden_threads.remove(&thread_id);
         self.agents_overview.threads.entry(thread_id).or_default();
         self.primary_session_configured = Some(session.clone());

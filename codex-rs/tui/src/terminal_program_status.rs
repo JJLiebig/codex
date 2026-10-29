@@ -19,6 +19,10 @@ use codex_terminal_detection::terminal_info;
 use crossterm::Command;
 use ratatui::crossterm::execute;
 
+#[path = "codex_plus_plus/herdr_session.rs"]
+mod herdr_session;
+pub(crate) use herdr_session::set_primary_session;
+
 static SESSION_STATUS_STATE: SessionStatusState = SessionStatusState::new();
 static TERMINAL_PROGRAM_STATUS_SUPPORT: OnceLock<TerminalProgramStatusSupport> = OnceLock::new();
 
@@ -32,6 +36,7 @@ struct SessionStatusState {
 struct EmittedSessionStatus {
     status: CachedStatus,
     detail: String,
+    herdr_session: Option<codex_protocol::ThreadId>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -47,6 +52,7 @@ impl SessionStatusState {
             last_emitted: Mutex::new(EmittedSessionStatus {
                 status: CachedStatus::Cleared,
                 detail: String::new(),
+                herdr_session: None,
             }),
         }
     }
@@ -55,7 +61,7 @@ impl SessionStatusState {
         &self,
         status: CachedStatus,
         detail: &str,
-        emit: impl FnOnce() -> io::Result<()>,
+        emit: impl FnOnce(&EmittedSessionStatus) -> io::Result<()>,
     ) -> io::Result<()> {
         // Keep the terminal write and cache mutation together so panic-hook cleanup cannot
         // interleave with a draw from another thread.
@@ -66,7 +72,7 @@ impl SessionStatusState {
         if last_emitted.status == status && last_emitted.detail == detail {
             return Ok(());
         }
-        emit()?;
+        emit(&last_emitted)?;
         last_emitted.status = status;
         detail.clone_into(&mut last_emitted.detail);
         Ok(())
@@ -151,13 +157,14 @@ pub(crate) fn set_terminal_program_status(
     } else {
         String::new()
     };
-    SESSION_STATUS_STATE.update(CachedStatus::Reported(status), &detail, || {
+    SESSION_STATUS_STATE.update(CachedStatus::Reported(status), &detail, |emitted| {
         execute!(
             stdout(),
             SetTerminalProgramStatus {
                 status,
                 iterm_detail: &detail,
                 emit_iterm_status: support.osc_21337,
+                herdr_session: emitted.herdr_session,
             }
         )
     })
@@ -173,7 +180,7 @@ pub(crate) fn clear_terminal_program_status() -> io::Result<()> {
         return Ok(());
     }
 
-    SESSION_STATUS_STATE.update(CachedStatus::Cleared, "", || {
+    SESSION_STATUS_STATE.update(CachedStatus::Cleared, "", |_| {
         execute!(
             stdout(),
             ClearTerminalProgramStatus {
@@ -242,6 +249,7 @@ fn terminal_program_status_support(
 struct SetTerminalProgramStatus<'a> {
     status: ProgramStatus,
     iterm_detail: &'a str,
+    herdr_session: Option<codex_protocol::ThreadId>,
     emit_iterm_status: bool,
 }
 
@@ -269,6 +277,7 @@ impl Command for SetTerminalProgramStatus<'_> {
             };
             write!(f, ":kind={kind}")?;
         }
+        herdr_session::write_session(f, self.herdr_session)?;
         write!(f, "\x1b\\")
     }
 

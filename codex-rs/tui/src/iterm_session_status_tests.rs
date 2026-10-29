@@ -33,6 +33,7 @@ fn encodes_iterm_session_status_fields() {
         SetTerminalProgramStatus {
             status,
             iterm_detail: detail,
+            herdr_session: None,
             emit_iterm_status: true,
         }
         .write_ansi(&mut value)
@@ -54,6 +55,7 @@ fn encodes_generic_program_status() {
     SetTerminalProgramStatus {
         status: ProgramStatus::Working,
         iterm_detail: "ignored",
+        herdr_session: None,
         emit_iterm_status: false,
     }
     .write_ansi(&mut encoded)
@@ -102,19 +104,19 @@ fn cache_changes_only_after_a_successful_write() {
     let mut emitted = Vec::new();
     let working = CachedStatus::Reported(ProgramStatus::Working);
     state
-        .update(working, "Thinking", || {
+        .update(working, "Thinking", |_| {
             Err(io::Error::other("write failed"))
         })
         .expect_err("failed write should be returned");
 
     state
-        .update(working, "Thinking", || {
+        .update(working, "Thinking", |_| {
             emitted.push(working);
             Ok(())
         })
         .expect("retry status write");
     state
-        .update(working, "Thinking", || {
+        .update(working, "Thinking", |_| {
             emitted.push(CachedStatus::Reported(ProgramStatus::Blocked(
                 ProgramStatusKind::Question,
             )));
@@ -122,20 +124,20 @@ fn cache_changes_only_after_a_successful_write() {
         })
         .expect("deduplicate status write");
     state
-        .update(working, "Reading", || {
+        .update(working, "Reading", |_| {
             emitted.push(working);
             Ok(())
         })
         .expect("emit changed detail");
     state.invalidate();
     state
-        .update(working, "Thinking", || {
+        .update(working, "Thinking", |_| {
             emitted.push(working);
             Ok(())
         })
         .expect("re-emit status after terminal handoff");
     state
-        .update(CachedStatus::Cleared, "", || {
+        .update(CachedStatus::Cleared, "", |_| {
             emitted.push(CachedStatus::Cleared);
             Ok(())
         })

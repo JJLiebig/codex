@@ -491,6 +491,7 @@ impl App {
             }
             if self.primary_thread_id == Some(id) {
                 self.primary_session_configured = Some(started.session.clone());
+                crate::terminal_program_status::set_primary_session(Some(&started.session));
             }
             if started.blocks_direct_input {
                 self.agent_navigation.mark_parent_owned(id);
@@ -535,6 +536,7 @@ impl App {
             self.active_thread_id = None;
             self.active_thread_rx = None;
             self.primary_thread_id = None;
+            crate::terminal_program_status::set_primary_session(/*session*/ None);
             self.primary_session_configured = None;
             let init = self.chatwidget_init_for_forked_or_resumed_thread(
                 tui,
