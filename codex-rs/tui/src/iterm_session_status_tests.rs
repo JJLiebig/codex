@@ -33,7 +33,6 @@ fn encodes_iterm_session_status_fields() {
             status,
             iterm_detail: detail,
             herdr_session: None,
-            herdr_session_token: None,
             emit_iterm_status: true,
         }
         .write_ansi(&mut value)
@@ -56,7 +55,6 @@ fn encodes_generic_program_status() {
         status: ProgramStatus::Working,
         iterm_detail: "ignored",
         herdr_session: None,
-        herdr_session_token: None,
         emit_iterm_status: false,
     }
     .write_ansi(&mut encoded)
