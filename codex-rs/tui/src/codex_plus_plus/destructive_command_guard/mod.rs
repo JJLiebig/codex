@@ -3,8 +3,8 @@ mod latest_release;
 use crate::app_server_session::AppServerSession;
 use crate::config_update::replace_config_value;
 use crate::config_update::write_config_batch;
+use crate::hooks_rpc::HooksListTarget;
 use crate::hooks_rpc::fetch_hooks_list;
-use crate::hooks_rpc::hooks_list_entry_for_cwd;
 use crate::legacy_core::config::Config;
 use anyhow::Context;
 use anyhow::Result;
@@ -499,10 +499,12 @@ impl DcgManager {
     }
 
     async fn managed_hook(&self, target: &DcgTarget) -> Result<Option<HookMetadata>> {
-        let response = fetch_hooks_list(self.request_handle.clone(), self.cwd.clone())
-            .await
-            .map_err(|err| anyhow::anyhow!("{err:#}"))?;
-        let entry = hooks_list_entry_for_cwd(response, &self.cwd);
+        let entry = fetch_hooks_list(
+            self.request_handle.clone(),
+            &HooksListTarget::Cwd(self.cwd.clone()),
+        )
+        .await
+        .map_err(|err| anyhow::anyhow!("{err:#}"))?;
         if !entry.errors.is_empty() {
             bail!("hook discovery reported errors");
         }

@@ -164,7 +164,7 @@ async fn native_configured_request_keeps_its_model_and_auth() {
         .await
         .unwrap();
     let mut headers = http::HeaderMap::new();
-    prepared.auth.auth.add_auth_headers(&mut headers);
+    prepared.auth.auth.add_auth_headers(&mut headers).unwrap();
     assert_eq!(
         (
             prepared.model.as_str(),

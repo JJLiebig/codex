@@ -13,6 +13,7 @@ use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::NativeCredentialSource;
 use codex_model_provider_info::ModelProviderInfo;
+use codex_models_manager::ModelOrigin;
 use codex_models_manager::cache::ModelsCache;
 use codex_models_manager::manager::CliProxyModelsManager;
 use codex_models_manager::manager::ModelsEndpointClient;
@@ -222,7 +223,11 @@ impl ModelProvider for CliProxyModelProvider {
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
         if let Some(catalog) = config_model_catalog {
-            return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
+            return Arc::new(StaticModelsManager::new(
+                self.auth_manager(),
+                catalog,
+                ModelOrigin::ExplicitConfig,
+            ));
         }
         Arc::new(CliProxyModelsManager::new(
             codex_home.clone(),
@@ -235,7 +240,11 @@ impl ModelProvider for CliProxyModelProvider {
         config_model_catalog: Option<ModelsResponse>,
     ) -> SharedModelsManager {
         if let Some(catalog) = config_model_catalog {
-            return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
+            return Arc::new(StaticModelsManager::new(
+                self.auth_manager(),
+                catalog,
+                ModelOrigin::ExplicitConfig,
+            ));
         }
         let endpoint = self.models_endpoint(None);
         Arc::new(CliProxyModelsManager::new_with_cache(
@@ -249,7 +258,11 @@ impl ModelProvider for CliProxyModelProvider {
         cache: Arc<dyn ModelsCache>,
     ) -> SharedModelsManager {
         if let Some(catalog) = config_model_catalog {
-            return Arc::new(StaticModelsManager::new(self.auth_manager(), catalog));
+            return Arc::new(StaticModelsManager::new(
+                self.auth_manager(),
+                catalog,
+                ModelOrigin::ExplicitConfig,
+            ));
         }
         let endpoint = self.models_endpoint(None);
         Arc::new(CliProxyModelsManager::new_with_cache(Some(cache), endpoint))

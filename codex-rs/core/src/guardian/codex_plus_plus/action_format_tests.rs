@@ -37,7 +37,7 @@ fn format_guardian_action_pretty_caps_aggregate_nested_input() -> serde_json::Re
     let rendered = format_guardian_action_pretty(&action)?;
     let assessment = guardian_assessment_action(&action);
     assert!(approx_token_count(&serde_json::to_string(&assessment)?) <= 1_000);
-    let GuardianAssessmentAction::PreToolUse { tool_input, .. } = assessment else {
+    let Some(GuardianAssessmentAction::PreToolUse { tool_input, .. }) = assessment else {
         panic!("expected PreToolUse assessment action");
     };
 

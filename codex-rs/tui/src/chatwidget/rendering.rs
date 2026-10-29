@@ -244,7 +244,7 @@ impl ChatWidget {
             ))
         } else if self.external_writer_view && !self.bottom_pane.has_active_view() {
             RenderableItem::Owned(Box::new(ExternalWriterNotice {
-                command_center_available: self.remote_connection.is_some(),
+                command_center_available: self.bottom_pane.command_center_enabled(),
                 agents_navigation_key_available: self.agents_navigation_key_available(),
                 transcript_hint: self.bottom_pane.transcript_shortcut_hint(),
             }))
@@ -266,14 +266,17 @@ impl ChatWidget {
             let bottom_pane = self
                 .bottom_pane
                 .as_renderable_with_status_override(options, self.compact_transient_status());
-            if !self.quick_dial_menu {
+            let above_composer = if self.quick_dial_menu {
+                RenderableItem::Owned(Box::new(self.quick_dial_hud()))
+            } else if let Some(pending) = &self.safety_recourse
+                && !self.bottom_pane.has_active_view()
+            {
+                RenderableItem::Borrowed(&pending.notice)
+            } else {
                 return bottom_pane;
-            }
+            };
             let mut column = FlexRenderable::new();
-            column.push(
-                /*flex*/ 1,
-                RenderableItem::Owned(Box::new(self.quick_dial_hud())),
-            );
+            column.push(/*flex*/ 1, above_composer);
             column.push(/*flex*/ 0, bottom_pane);
             RenderableItem::Owned(Box::new(column))
         }

@@ -450,6 +450,7 @@ mod tests {
         assert_eq!(
             CoreToolRuntime::post_tool_use_payload(&handler, &invocation, &output),
             Some(PostToolUsePayload {
+                tool_cwd: None,
                 tool_name: HookToolName::new("extension_echo"),
                 tool_use_id: "call-extension".to_string(),
                 tool_input: json!({ "message": "hello" }),
@@ -660,6 +661,7 @@ mod tests {
                     failure: None,
                     saved_path: Some(expected_path.clone()),
                     input_images: Vec::new(),
+                    generation_id: None,
                 })],
             },
         )

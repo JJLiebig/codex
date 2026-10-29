@@ -79,6 +79,7 @@ async fn owned_session(fixture: &OwnedFixture, model: &str) -> (Arc<Session>, Ar
                 })
                 .into(),
         },
+        codex_models_manager::ModelOrigin::ExplicitConfig,
     ));
     let context = Arc::get_mut(&mut turn).unwrap();
     context.provider = provider;
@@ -246,6 +247,7 @@ async fn owned_switch_and_threshold_compaction_preserve_pending_input() -> anyho
                         total_tokens: 12_000,
                         ..Default::default()
                     }),
+                    /*includes_reasoning*/ false,
                 )
                 .await?;
         }

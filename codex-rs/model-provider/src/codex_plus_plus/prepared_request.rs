@@ -159,9 +159,10 @@ pub async fn prepare_configured_request(
     if let Some(prepared) = provider.prepare_request(model).await? {
         return Ok(prepared);
     }
+    let (api_provider, auth) = provider.api_provider_and_auth().await?;
     Ok(PreparedModelRequest {
-        provider: provider.api_provider().await?,
-        auth: ResolvedProviderAuth::new(provider.api_auth().await?),
+        provider: api_provider,
+        auth: ResolvedProviderAuth::new(auth),
         http_client: provider.api_http_client()?,
         model: model.to_owned(),
         route: None,

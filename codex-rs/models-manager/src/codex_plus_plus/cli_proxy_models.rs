@@ -116,21 +116,27 @@ impl CliProxyModelsManager {
 }
 
 impl ModelsManager for CliProxyModelsManager {
-    fn raw_model_catalog(
+    fn model_catalog_with_origins(
         &self,
         refresh_strategy: RefreshStrategy,
         http_client_factory: HttpClientFactory,
-    ) -> ModelsManagerFuture<'_, ModelsResponse> {
+    ) -> ModelsManagerFuture<'_, Vec<CatalogModel>> {
         Box::pin(async move {
-            if let Err(error) = self
-                .refresh_catalogue(refresh_strategy, http_client_factory)
-                .await
+            if refresh_strategy != RefreshStrategy::InMemory
+                && let Err(error) = self
+                    .refresh_catalogue(refresh_strategy, http_client_factory)
+                    .await
             {
                 error!("failed to refresh owned model catalogue: {error}");
             }
-            ModelsResponse {
-                models: self.get_remote_models().await,
-            }
+            self.get_remote_models()
+                .await
+                .into_iter()
+                .map(|model| CatalogModel {
+                    model,
+                    origin: ModelOrigin::Provider,
+                })
+                .collect()
         })
     }
 

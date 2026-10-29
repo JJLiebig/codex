@@ -357,6 +357,22 @@ async fn ambiguous_outcomes_are_not_replayed_and_the_attempt_is_bounded() {
         assert_eq!(activation_requests(&server).await.len(), 1);
     }
 
+    server.reset().await;
+    Mock::given(method("POST"))
+        .and(path("/codex/responses"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string("event: response.failed\ndata: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"policy_capacity_unavailable\"}}}\n\n"),
+        )
+        .mount(&server)
+        .await;
+    assert_eq!(
+        ping_weekly_window_with_timeout(account.request(&server), PING_TIMEOUT).await,
+        WeeklyWindowPingOutcome::Ambiguous { status: None }
+    );
+    assert_eq!(activation_requests(&server).await.len(), 1);
+
     for response in [
         ResponseTemplate::new(200)
             .insert_header("content-type", "text/event-stream")

@@ -27,7 +27,11 @@ pub(crate) async fn run_turn_loop(
     cancellation_token: CancellationToken,
     mut turn_state: TurnRunState,
 ) -> SessionTaskResult {
-    let run_turn_span = trace_span!("run_turn");
+    let run_turn_span = trace_span!(
+        "run_turn",
+        conversation.id = %sess.thread_id,
+        turn.id = %ctx.sub_id,
+    );
     loop {
         let turn_result = run_turn(
             Arc::clone(&sess),
