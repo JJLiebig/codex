@@ -17,6 +17,7 @@ async fn inference_status_tracks_scoped_success_and_failure_without_native_quota
     chat.status_account_display = Some(StatusAccountDisplay::ChatGpt {
         email: Some("maintenance@example.com".into()),
         plan: None,
+        workspace: None,
     });
     let maintenance = (
         chat.status_account_display.clone(),

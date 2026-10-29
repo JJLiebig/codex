@@ -293,9 +293,12 @@ impl ModelClientSession {
                     auth_owner_generation: None,
                     auth_revision: revision,
                     api_provider: prepared.provider,
+                    http_client_factory: self.client.http_client_factory.clone(),
+                    api_http_client: None,
                     redirect_policy: ClientRedirectPolicy::Reject,
                     api_auth: prepared.auth.auth,
                     agent_identity_telemetry: prepared.auth.agent_identity_telemetry,
+                    runtime_id: None,
                 },
                 transport,
                 prepared.model,
@@ -305,11 +308,7 @@ impl ModelClientSession {
             .client
             .current_client_setup(ClientRouting::Workspace)
             .await?;
-        let transport = self.client.build_api_transport(
-            &setup.api_provider,
-            "/responses",
-            setup.redirect_policy,
-        )?;
+        let transport = setup.build_api_transport("/responses")?;
         Ok((setup, transport, model.to_owned()))
     }
 

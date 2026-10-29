@@ -1,6 +1,6 @@
 use super::approval_request::GuardianApprovalRequest;
-use super::approval_request::guardian_approval_request_to_json;
-use super::prompt::guardian_truncate_text;
+use codex_guardian_reviewer::guardian_approval_request_to_json;
+use codex_guardian_reviewer::guardian_truncate_text;
 use serde::ser::Error as _;
 use serde_json::Value;
 const GUARDIAN_MAX_ACTION_TOKENS: usize = 1_000;

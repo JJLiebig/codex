@@ -86,7 +86,7 @@ async fn auth_manager_with_api_key() -> Arc<AuthManager> {
 #[tokio::test]
 async fn loader_registers_refresher_for_account_picker() {
     let codex_home = tempdir().expect("tempdir");
-    let loader = crate::cloud_config_bundle_loader(
+    let loader = crate::chatgpt_config_bundle_loader(
         auth_manager_with_api_key().await,
         "https://chatgpt.com/backend-api/".to_string(),
         codex_home.path().to_path_buf(),

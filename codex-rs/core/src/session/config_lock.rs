@@ -595,6 +595,54 @@ enabled = false
     }
 
     #[tokio::test]
+    async fn lock_replay_applies_provider_validation_before_materialization() -> anyhow::Result<()>
+    {
+        let codex_home = tempfile::tempdir()?;
+        let lock_path = codex_home.path().join("session.config.lock.toml");
+        std::fs::write(
+            &lock_path,
+            toml::to_string(&config_lockfile(ConfigToml {
+                model_provider: Some("openai".to_string()),
+                ..Default::default()
+            }))?,
+        )?;
+
+        let error = crate::config::ConfigBuilder::without_managed_config_for_tests()
+            .codex_home(codex_home.path().to_path_buf())
+            .fallback_cwd(Some(codex_home.path().to_path_buf()))
+            .cli_overrides(vec![
+                (
+                    "model_provider".to_string(),
+                    toml::Value::String("gcp".to_string()),
+                ),
+                (
+                    "debug.config_lockfile.load_path".to_string(),
+                    toml::Value::String(lock_path.display().to_string()),
+                ),
+            ])
+            .build_with_validation(|config, _, _| {
+                if config.model_provider.as_deref() == Some("openai") {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::PermissionDenied,
+                        "locked provider is not permitted",
+                    ));
+                }
+                Ok(())
+            })
+            .await
+            .expect_err("provider validation must reject the locked configuration");
+
+        assert_eq!(
+            (error.kind(), error.to_string()),
+            (
+                std::io::ErrorKind::PermissionDenied,
+                "locked provider is not permitted".to_string(),
+            )
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn lock_validation_reports_config_diff() {
         let sc = crate::session::tests::make_session_configuration_for_tests().await;
         let expected = sc.to_config_lockfile_toml().expect("lock should serialize");

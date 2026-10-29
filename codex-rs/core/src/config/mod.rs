@@ -1667,6 +1667,11 @@ impl ConfigBuilder {
                 config_layer_stack.requirements().clone(),
                 config_layer_stack.requirements_toml().clone(),
             )?;
+            validate(
+                &lock_config_toml,
+                &harness_overrides,
+                &lock_config_layer_stack,
+            )?;
             let mut config = Config::load_config_with_layer_stack(
                 LOCAL_FS.as_ref(),
                 lock_config_toml,

@@ -983,8 +983,8 @@ mod tests {
 
     #[test]
     fn wait_completion_requires_a_terminal_agent_state() {
-        let item =
-            |call_status, status: Option<CollabAgentStatus>| ThreadItemPayload::CollabAgentToolCall {
+        let item = |call_status, status: Option<CollabAgentStatus>| {
+            ThreadItemPayload::CollabAgentToolCall {
                 id: "wait".to_string(),
                 tool: CollabAgentTool::Wait,
                 status: call_status,
@@ -1001,7 +1001,8 @@ mod tests {
                         )])
                     })
                     .unwrap_or_default(),
-            };
+            }
+        };
 
         assert!(!wait_completion_is_noop(&item(
             CollabAgentToolCallStatus::Completed,

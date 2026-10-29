@@ -856,7 +856,7 @@ async fn completion_wait_survives_thread_switch_and_refresh_without_reviving_fin
         let mut turn = test_turn(
             "turn",
             TurnStatus::InProgress,
-            vec![ThreadItem::AgentMessage {
+            vec![ThreadItemPayload::AgentMessage {
                 id: "answer".into(),
                 text: "I will resume when the command completes.".into(),
                 phase: Some(codex_protocol::models::MessagePhase::FinalAnswer),

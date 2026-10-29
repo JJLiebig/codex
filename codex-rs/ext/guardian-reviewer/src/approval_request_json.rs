@@ -120,6 +120,20 @@ pub fn guardian_approval_request_to_json(
 ) -> serde_json::Result<Value> {
     let mut value = match action {
         GuardianApprovalRequest::NativeToolCall { call, .. } => serde_json::to_value(call.as_ref()),
+        GuardianApprovalRequest::PreToolUse {
+            tool_name,
+            tool_input,
+            execution_target,
+            reason,
+            cwd,
+            ..
+        } => crate::pre_tool_use::action_json(
+            tool_name,
+            tool_input,
+            execution_target.as_ref(),
+            reason,
+            cwd,
+        ),
         GuardianApprovalRequest::ExecCommand {
             id: _,
             environment_id: _,

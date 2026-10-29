@@ -72,6 +72,7 @@ async fn status_command_warns_when_account_identity_may_be_stale_snapshot() {
     chat.status_account_display = Some(StatusAccountDisplay::ChatGpt {
         email: Some("user@example.com".to_string()),
         plan: Some("Plus".to_string()),
+        workspace: None,
     });
     chat.handle_server_notification(
         app_server_error(

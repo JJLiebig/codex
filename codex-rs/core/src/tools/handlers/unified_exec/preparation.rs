@@ -64,6 +64,7 @@ impl PreparedExecCommand {
         &self,
         session: &Session,
         step: &StepContext,
+        exact_pre_tool_use_approval: bool,
     ) -> ExecApprovalRequirement {
         let environment = &self.turn_environment;
         let session_shell = session.user_shell();
@@ -78,7 +79,7 @@ impl PreparedExecCommand {
         session
             .services
             .exec_policy
-            .create_exec_approval_requirement_for_shell(
+            .create_exec_approval_requirement_for_shell_with_guardian(
                 ExecApprovalRequest {
                     command: &self.resolved.command,
                     approval_policy: step.settings.approval_policy(),
@@ -98,6 +99,7 @@ impl PreparedExecCommand {
                 },
                 configured_shell,
                 command_platform,
+                exact_pre_tool_use_approval,
             )
             .await
     }

@@ -6,6 +6,8 @@ mod approval_request;
 mod approval_request_json;
 mod assessment;
 mod blocking;
+#[path = "codex_plus_plus/pre_tool_use.rs"]
+mod pre_tool_use;
 pub use blocking::ReviewBlocking;
 pub use blocking::ReviewBlockingTurn;
 mod circuit_breaker;

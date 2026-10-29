@@ -988,7 +988,8 @@ mod tests {
         session_source: SessionSource,
         channel_capacity: usize,
     ) -> InProcessClientHandle {
-        start_test_client_with_options(session_source, channel_capacity, /*capabilities*/ None).await
+        start_test_client_with_options(session_source, channel_capacity, /*capabilities*/ None)
+            .await
     }
 
     async fn start_test_client_with_options(
@@ -996,7 +997,8 @@ mod tests {
         channel_capacity: usize,
         capabilities: Option<codex_app_server_protocol::InitializeCapabilities>,
     ) -> InProcessClientHandle {
-        let (codex_home, args) = build_test_start_args(session_source, channel_capacity, capabilities).await;
+        let (codex_home, args) =
+            build_test_start_args(session_source, channel_capacity, capabilities).await;
         let mut client = start(args).await.expect("in-process runtime should start");
         client._test_codex_home = Some(codex_home);
         client
@@ -1075,8 +1077,12 @@ mod tests {
 
     #[tokio::test]
     async fn unavailable_selected_account_falls_back_without_aborting_startup() {
-        let (codex_home, args) =
-            build_test_start_args(SessionSource::Cli, DEFAULT_IN_PROCESS_CHANNEL_CAPACITY, /*capabilities*/ None).await;
+        let (codex_home, args) = build_test_start_args(
+            SessionSource::Cli,
+            DEFAULT_IN_PROCESS_CHANNEL_CAPACITY,
+            /*capabilities*/ None,
+        )
+        .await;
         let mut client = start_with_initial_account(args, "missing-account".to_string())
             .await
             .expect("in-process runtime should fall back to automatic account selection");
