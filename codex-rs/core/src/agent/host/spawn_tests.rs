@@ -51,6 +51,7 @@ async fn spawn_fixture() -> anyhow::Result<(tempfile::TempDir, Config, ThreadMan
 
 fn child_request(fork_mode: Option<SpawnAgentForkMode>) -> ThreadCreateRequest {
     ThreadCreateRequest {
+        cwd: None,
         task_name: "worker".into(),
         fork_mode,
         agent_type: None,

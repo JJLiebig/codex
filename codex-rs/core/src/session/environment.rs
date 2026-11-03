@@ -249,16 +249,19 @@ impl Session {
         inherited: &TurnEnvironmentSnapshot,
         selected: &[TurnEnvironmentSelection],
     ) {
-        for starting in inherited.starting().filter(|starting| {
-            selected.iter().any(|selection| {
-                selection.has_same_workspace(&starting.selection)
-                    && matches!(selection.config, EnvironmentConfigState::Pending)
-            })
+        for (starting, selection) in inherited.starting().filter_map(|starting| {
+            selected
+                .iter()
+                .find(|selection| {
+                    selection.environment_id == starting.selection.environment_id
+                        && matches!(selection.config, EnvironmentConfigState::Pending)
+                })
+                .map(|selection| (starting, selection.clone()))
         }) {
             let Some(configuration) = starting.owner_configuration() else {
                 continue;
             };
-            let selection = starting.selection.clone();
+            let previous_cwd = starting.selection.cwd.clone();
             let session = Arc::downgrade(self);
             let mut status = self.agent_status.subscribe();
             drop(tokio::spawn(async move {
@@ -269,6 +272,14 @@ impl Session {
                 let Some(session) = session.upgrade() else {
                     return;
                 };
+                let result = result.map(|mut config| {
+                    crate::agent::codex_plus_plus::spawn_cwd::rebind_roots(
+                        &mut config.workspace_roots,
+                        &previous_cwd,
+                        &selection.cwd,
+                    );
+                    config
+                });
                 let apply = |result| {
                     session.update_environment_configuration(
                         &selection,

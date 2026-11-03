@@ -78,6 +78,7 @@ pub fn create_spawn_agent_tool_v1(options: SpawnAgentToolOptions) -> ToolSpec {
     let return_value_description =
         "Returns the spawned agent id plus the user-facing nickname when available.";
     let mut properties = spawn_agent_common_properties_v1(&options.agent_type_description);
+    crate::agent::codex_plus_plus::spawn_cwd::add_property(&mut properties);
     if !options.expose_agent_type {
         properties.remove("agent_type");
     }
@@ -123,6 +124,7 @@ pub fn create_spawn_agent_tool_v2(
             .then_some(SPAWN_AGENT_INHERITED_MODEL_GUIDANCE)
     };
     let mut properties = spawn_agent_common_properties_v2(&options.agent_type_description);
+    crate::agent::codex_plus_plus::spawn_cwd::add_property(&mut properties);
     if !options.expose_agent_type {
         properties.remove("agent_type");
     }

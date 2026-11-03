@@ -37,6 +37,7 @@ pub(crate) enum SpawnConfigVersion {
 
 pub(crate) struct SpawnConfigOptions<'a> {
     pub(crate) version: SpawnConfigVersion,
+    pub(crate) cwd: Option<&'a str>,
     pub(crate) full_history_fork: bool,
     pub(crate) role_name: Option<&'a str>,
     pub(crate) model: Option<&'a str>,
@@ -46,6 +47,7 @@ pub(crate) struct SpawnConfigOptions<'a> {
 pub(crate) struct PreparedSpawnConfig {
     pub(crate) config: Config,
     pub(crate) role_name: Option<String>,
+    pub(crate) environment_requests: Option<Vec<codex_protocol::protocol::TurnEnvironmentRequest>>,
 }
 
 /// Resolves child settings before starting the thread, retaining the invoking tool's precedence.
@@ -84,6 +86,12 @@ pub(crate) async fn prepare_agent_spawn_config(
     apply_spawn_agent_service_tier(session, &mut config).await?;
     apply_spawn_agent_runtime_overrides(&mut config, turn)?;
 
+    let environment_requests = super::codex_plus_plus::spawn_cwd::apply(
+        &mut config,
+        &step_context.inherited_environments,
+        options.cwd,
+    )?;
+
     // Remember an applied configured default so cold reload reapplies its restrictions.
     let role_name = options
         .role_name
@@ -97,7 +105,11 @@ pub(crate) async fn prepare_agent_spawn_config(
             .then_some(DEFAULT_ROLE_NAME)
         })
         .map(str::to_owned);
-    Ok(PreparedSpawnConfig { config, role_name })
+    Ok(PreparedSpawnConfig {
+        config,
+        role_name,
+        environment_requests,
+    })
 }
 
 /// Builds the base config snapshot for a newly spawned sub-agent.

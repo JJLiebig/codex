@@ -18,6 +18,8 @@ pub(crate) enum PendingSpawnCase {
     Failure,
     FirstResultOnly,
     ChildConfiguredFirst,
+    Cwd,
+    CwdFailure,
 }
 
 fn call_output<'a>(body: &'a Value, call_id: &str) -> Option<&'a str> {
@@ -60,7 +62,11 @@ pub(crate) async fn pending_subagent_scenario(
     configure_scenario: impl FnOnce(&mut Config) + Send + 'static,
 ) -> Result<Vec<Value>> {
     let v1 = matches!(case, PendingSpawnCase::V1Fork);
-    let failed = matches!(case, PendingSpawnCase::Failure);
+    let failed = matches!(
+        case,
+        PendingSpawnCase::Failure | PendingSpawnCase::CwdFailure
+    );
+    let change_cwd = matches!(case, PendingSpawnCase::Cwd | PendingSpawnCase::CwdFailure);
     let server = start_mock_server().await;
     let test = test_codex_with_wait_for_environment()
         .with_config(move |config| {
@@ -116,11 +122,14 @@ pub(crate) async fn pending_subagent_scenario(
             let item = match stage {
                 0 => {
                     let message = "Wait for the shared workspace to become ready.";
-                    let args = if v1 {
+                    let mut args = if v1 {
                         json!({"message": message, "fork_context": true})
                     } else {
                         json!({"task_name": "worker", "message": message, "fork_turns": "none"})
                     };
+                    if change_cwd {
+                        args["cwd"] = json!("..");
+                    }
                     tool(SPAWN, namespace, "spawn_agent", args)
                 }
                 1 => {
@@ -174,7 +183,15 @@ pub(crate) async fn pending_subagent_scenario(
         tokio::join!(parent_requested.notified(), child_requested.notified());
     })
     .await?;
-    assert_eq!(child.environment_selections().await, vec![pending.clone()]);
+    let mut child_pending = pending.clone();
+    if change_cwd {
+        child_pending.cwd = pending.cwd.join("..")?;
+        child_pending.workspace_roots = vec![child_pending.cwd.clone()];
+    }
+    assert_eq!(
+        child.environment_selections().await,
+        vec![child_pending.clone()]
+    );
 
     let mut first = environment_config_for_selection(&test.config, &selection);
     if test.config.permissions.permission_profile() != &PermissionProfile::read_only() {
@@ -184,13 +201,17 @@ pub(crate) async fn pending_subagent_scenario(
     if matches!(case, PendingSpawnCase::FirstResultOnly) {
         first.allow_login_shell = false;
     }
+    let mut expected_first = first.clone();
+    if change_cwd {
+        expected_first.workspace_roots = child_pending.workspace_roots.clone();
+    }
     let expected = TurnEnvironmentSelection {
         config: if failed {
             EnvironmentConfigState::Failed(FAILURE.to_string())
         } else {
-            EnvironmentConfigState::Ready(first.clone())
+            EnvironmentConfigState::Ready(expected_first)
         },
-        ..selection
+        ..child_pending
     };
     if matches!(case, PendingSpawnCase::ChildConfiguredFirst) {
         child.environment_ready(&pending, first.clone()).await?;
@@ -210,12 +231,14 @@ pub(crate) async fn pending_subagent_scenario(
                 .await?;
             assert_eq!(outcome.await?, TurnSettingsUpdateOutcome::Applied);
         }
-        PendingSpawnCase::Failure | PendingSpawnCase::ChildConfiguredFirst => {
+        PendingSpawnCase::Failure
+        | PendingSpawnCase::ChildConfiguredFirst
+        | PendingSpawnCase::CwdFailure => {
             root.thread
                 .environment_failed(&pending, FAILURE.to_string())
                 .await?
         }
-        PendingSpawnCase::V1Fork | PendingSpawnCase::FirstResultOnly => {
+        PendingSpawnCase::V1Fork | PendingSpawnCase::FirstResultOnly | PendingSpawnCase::Cwd => {
             root.thread
                 .environment_ready(&pending, first.clone())
                 .await?;
@@ -284,6 +307,8 @@ pub(crate) async fn pending_subagent_scenario(
     Ok(requests)
 }
 
+#[test_case(PendingSpawnCase::Cwd; "v2_new_cwd") ]
+#[test_case(PendingSpawnCase::CwdFailure; "v2_new_cwd_owner_failure") ]
 #[test_case(PendingSpawnCase::V1Fork; "v1_fork")]
 #[test_case(PendingSpawnCase::FirstResultOnly; "v2_fresh_ignores_later_owner_update_across_turns")]
 #[test_case(PendingSpawnCase::Failure; "v2_owner_failure")]

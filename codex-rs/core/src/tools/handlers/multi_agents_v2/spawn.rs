@@ -127,6 +127,7 @@ async fn handle_spawn_agent(
         &call_id,
         ThreadSpawnRequest {
             task_name: args.task_name,
+            cwd: args.cwd,
             message: agent_message_from_tool(message, &source),
             fork_mode: fork_mode.clone(),
             agent_type: args.agent_type.clone(),
@@ -206,6 +207,7 @@ struct SpawnAgentArgs {
     agent_type: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
+    cwd: Option<String>,
     fork_turns: Option<String>,
     fork_context: Option<bool>,
 }

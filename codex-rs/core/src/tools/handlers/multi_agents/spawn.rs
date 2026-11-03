@@ -100,6 +100,7 @@ async fn handle_spawn_agent(
         step_context.as_ref(),
         SpawnConfigOptions {
             version: SpawnConfigVersion::V1,
+            cwd: args.cwd.as_deref(),
             full_history_fork: args.fork_context,
             role_name,
             model: args.model.as_deref(),
@@ -132,6 +133,7 @@ async fn handle_spawn_agent(
                 root_turn_id: turn.turn_metadata_state.root_turn_id(),
                 turn_trigger: turn.turn_metadata_state.current_turn_trigger(),
                 environments: Some(step_context.inherited_environments.clone()),
+                environment_requests: prepared.environment_requests,
                 disabled_plugin_ids: Some(turn.disabled_plugin_ids.clone()),
                 multi_agent_v2_usage_hints: None,
                 cyber_access_program: turn.cyber_access_program,
@@ -223,6 +225,7 @@ struct SpawnAgentArgs {
     agent_type: Option<String>,
     model: Option<String>,
     reasoning_effort: Option<ReasoningEffort>,
+    cwd: Option<String>,
     #[serde(default)]
     fork_context: bool,
 }
