@@ -163,6 +163,7 @@ async fn finish_spawn_tool(
 
 fn create_request(name: &str, fork_history: bool) -> ThreadCreateRequest {
     ThreadCreateRequest {
+        cwd: None,
         task_name: name.into(),
         fork_mode: fork_history.then_some(SpawnAgentForkMode::FullHistory),
         agent_type: None,
@@ -638,5 +639,64 @@ async fn cancelled_creation_cleans_registered_child() -> Result<()> {
         .context("cancelled child's runtime did not terminate")?;
     assert!(test.thread_manager.get_thread(child_id).await.is_err());
     parent.shutdown_and_wait().await?;
+    Ok(())
+}
+
+#[test_case::test_case(false; "fresh")]
+#[test_case::test_case(true; "forked")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let server = start_mock_server().await;
+    let (test, parent, controller) = host_spawn_fixture(
+        &server,
+        test_codex(),
+        NetworkPolicy::default(),
+        PromptCacheKey::SessionDerived,
+        None,
+    )
+    .await?;
+    let original = parent.config_snapshot().await;
+    let worktree = tempfile::tempdir()?;
+    let invocation = host_spawn_invocation(
+        &server,
+        &parent,
+        "spawn-cwd",
+        "Start a worker in the worktree.",
+    )
+    .await?;
+    let context = parent.tool_invocation(&invocation.turn_id, &invocation.call_id)?;
+    let mut request = create_request("worker", fork_history);
+    request.cwd = Some(worktree.path().to_string_lossy().into_owned());
+    let child_id = ThreadId::new();
+    let spawned = parent
+        .create_child(
+            &context,
+            request,
+            HostThreadSpawnReservation {
+                thread_id: child_id,
+                control: controller,
+            },
+        )
+        .await?;
+    let child = test.thread_manager.get_thread(child_id).await?;
+    let snapshot = child.config_snapshot().await;
+    let expected = codex_utils_path_uri::PathUri::from_abs_path(
+        &codex_utils_absolute_path::AbsolutePathBuf::try_from(worktree.path())?,
+    );
+    let local = snapshot
+        .environments
+        .iter()
+        .find(|environment| environment.environment_id == codex_exec_server::LOCAL_ENVIRONMENT_ID)
+        .expect("local child environment");
+    assert_eq!(local.cwd, expected);
+    assert_eq!(spawned.config.environments, snapshot.environments);
+    assert_eq!(snapshot.approval_policy, original.approval_policy);
+    assert_eq!(snapshot.permission_profile, original.permission_profile);
+    assert_eq!(
+        parent.config_snapshot().await.environments,
+        original.environments
+    );
+    finish_spawn_tool(&server, &parent, &invocation).await?;
     Ok(())
 }

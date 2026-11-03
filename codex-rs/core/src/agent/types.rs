@@ -34,6 +34,8 @@ pub struct SpawnAgentOptions {
     pub root_turn_id: Option<String>,
     /// Inheritable bindings captured by the step that requested the child.
     pub environments: Option<TurnEnvironmentSnapshot>,
+    /// Explicit child environment selections; captured bindings remain available for reuse.
+    pub environment_requests: Option<Vec<codex_protocol::protocol::TurnEnvironmentRequest>>,
     /// Plugin choices from the turn requesting the child. Omission inherits the parent's
     /// current choices; an explicit list, including an empty one, overrides them and history.
     pub disabled_plugin_ids: Option<Vec<String>>,
