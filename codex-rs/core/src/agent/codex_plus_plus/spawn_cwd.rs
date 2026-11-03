@@ -3,19 +3,16 @@
 use crate::config::Config;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
+use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_tools::JsonSchema;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 use std::collections::BTreeMap;
 
 pub(crate) fn add_property(properties: &mut BTreeMap<String, JsonSchema>) {
-    properties.insert(
-        "cwd".to_string(),
-        JsonSchema::string(Some(
-            "Working directory for the new agent. Relative paths resolve against the parent's local working directory. Omit to inherit.".to_string(),
-        )),
-    );
+    properties.insert("cwd".to_string(), JsonSchema::string(Some(
+        "Working directory for the new agent. Relative paths resolve against the caller's working directory. Omit to inherit.".to_string(),
+    )));
 }
 
 pub(crate) fn apply(
@@ -26,41 +23,47 @@ pub(crate) fn apply(
     let Some(cwd) = cwd else {
         return Ok(None);
     };
-    if cwd.is_empty() {
-        return Err("spawn_agent cwd must not be empty".to_string());
-    }
-    let base = environments
-        .local_environment_cwd()
-        .unwrap_or_else(|| config.cwd.clone());
-    let cwd = AbsolutePathBuf::resolve_path_against_base(cwd, &base);
-    if !cwd.is_dir() {
-        return Err(format!(
-            "spawn_agent cwd must be an existing directory: {}",
-            cwd.display()
-        ));
-    }
     let mut requests = environments.inheritable_requests();
-    let local = requests
-        .iter_mut()
-        .find(|request| request.environment_id == LOCAL_ENVIRONMENT_ID)
-        .ok_or_else(|| "spawn_agent cwd requires a local execution environment".to_string())?;
-    // Follow the existing cwd-change behavior without changing the permission profile.
-    config.workspace_roots = codex_utils_path::replace_path_and_deduplicate(
-        config.workspace_roots.clone(),
-        config.cwd.as_path(),
-        cwd.clone(),
-    );
-    config
-        .permissions
-        .set_workspace_roots(config.workspace_roots.clone());
-    for root in &mut local.workspace_roots {
-        if *root == PathUri::from_abs_path(&base) {
-            *root = PathUri::from_abs_path(&cwd);
+    let base = requests
+        .first()
+        .map(|environment| environment.cwd.clone())
+        .unwrap_or_else(|| PathUri::from_abs_path(&config.cwd));
+    let cwd = base.join(cwd).map_err(|err| err.to_string())?;
+    let update_host_cwd = requests
+        .first()
+        .is_none_or(|environment| environment.environment_id == LOCAL_ENVIRONMENT_ID);
+    if let Some(environment) = requests.first_mut() {
+        let configured_roots = match &mut environment.config {
+            EnvironmentConfigState::Ready(config) => Some(&mut config.workspace_roots),
+            EnvironmentConfigState::FromThread
+            | EnvironmentConfigState::Pending
+            | EnvironmentConfigState::Failed(_) => None,
+        };
+        for root in environment
+            .workspace_roots
+            .iter_mut()
+            .chain(configured_roots.into_iter().flatten())
+        {
+            if *root == base {
+                *root = cwd.clone();
+            }
         }
+        environment.cwd = cwd.clone();
     }
-    local.cwd = PathUri::from_abs_path(&cwd);
-    config.cwd = cwd;
-    Ok(Some(requests))
+    if update_host_cwd {
+        let cwd = cwd.to_abs_path().map_err(|err| err.to_string())?;
+        // Match the existing cwd-change behavior while retaining the configured policy.
+        config.workspace_roots = codex_utils_path::replace_path_and_deduplicate(
+            config.workspace_roots.clone(),
+            config.cwd.as_path(),
+            cwd.clone(),
+        );
+        config
+            .permissions
+            .set_workspace_roots(config.workspace_roots.clone());
+        config.cwd = cwd;
+    }
+    Ok((!requests.is_empty()).then_some(requests))
 }
 
 #[cfg(test)]
