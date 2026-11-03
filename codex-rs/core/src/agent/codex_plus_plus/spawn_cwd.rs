@@ -33,20 +33,9 @@ pub(crate) fn apply(
         .first()
         .is_none_or(|environment| environment.environment_id == LOCAL_ENVIRONMENT_ID);
     if let Some(environment) = requests.first_mut() {
-        let configured_roots = match &mut environment.config {
-            EnvironmentConfigState::Ready(config) => Some(&mut config.workspace_roots),
-            EnvironmentConfigState::FromThread
-            | EnvironmentConfigState::Pending
-            | EnvironmentConfigState::Failed(_) => None,
-        };
-        for root in environment
-            .workspace_roots
-            .iter_mut()
-            .chain(configured_roots.into_iter().flatten())
-        {
-            if *root == base {
-                *root = cwd.clone();
-            }
+        rebind_roots(&mut environment.workspace_roots, &base, &cwd);
+        if let EnvironmentConfigState::Ready(config) = &mut environment.config {
+            rebind_roots(&mut config.workspace_roots, &base, &cwd);
         }
         environment.cwd = cwd.clone();
     }
@@ -64,6 +53,14 @@ pub(crate) fn apply(
         config.cwd = cwd;
     }
     Ok((!requests.is_empty()).then_some(requests))
+}
+
+pub(crate) fn rebind_roots(roots: &mut [PathUri], previous: &PathUri, cwd: &PathUri) {
+    for root in roots {
+        if root == previous {
+            *root = cwd.clone();
+        }
+    }
 }
 
 #[cfg(test)]
