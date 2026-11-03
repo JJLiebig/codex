@@ -650,7 +650,13 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
     let server = start_mock_server().await;
     let (test, parent, controller) = host_spawn_fixture(
         &server,
-        test_codex(),
+        test_codex().with_config(|config| {
+            // The fixture overrides cwd after loading the default workspace roots.
+            config.workspace_roots = vec![config.cwd.clone()];
+            config
+                .permissions
+                .set_workspace_roots(config.workspace_roots.clone());
+        }),
         NetworkPolicy::default(),
         PromptCacheKey::SessionDerived,
         None,
