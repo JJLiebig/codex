@@ -925,9 +925,6 @@ pub struct Config {
     /// Whether runtime workspace roots were supplied explicitly by the caller
     /// or legacy config, rather than defaulting to `cwd`.
     pub workspace_roots_explicit: bool,
-    /// Whether the cwd root was implicit rather than a complete caller override.
-    pub workspace_roots_include_cwd: bool,
-    pub(crate) subagent_cwd_override: bool,
 
     /// Preferred store for CLI auth credentials.
     /// file (default): Use a file in the Codex home directory.
@@ -1811,7 +1808,6 @@ impl Config {
         &mut self,
         sandbox_policy: SandboxPolicy,
     ) -> ConstraintResult<()> {
-        self.workspace_roots_include_cwd = true;
         self.workspace_roots_explicit = matches!(
             &sandbox_policy,
             SandboxPolicy::WorkspaceWrite { writable_roots, .. } if !writable_roots.is_empty()
@@ -2844,7 +2840,6 @@ pub struct ConfigOverrides {
     /// Explicit absolute runtime workspace roots for this session. When set,
     /// this is the full runtime root list rather than an additive override.
     pub workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    pub workspace_roots_include_cwd: Option<bool>,
 }
 
 fn dedupe_absolute_paths(paths: &mut Vec<AbsolutePathBuf>) {
@@ -3584,7 +3579,6 @@ impl Config {
             bypass_hook_trust,
             additional_writable_roots,
             workspace_roots: workspace_roots_override,
-            workspace_roots_include_cwd,
         } = overrides;
         let bypass_hook_trust = bypass_hook_trust.unwrap_or_default();
 
@@ -3851,7 +3845,6 @@ impl Config {
         let workspace_roots_explicit = workspace_roots_override.is_some()
             || !requested_additional_writable_roots.is_empty()
             || legacy_workspace_roots_explicit;
-        let workspace_roots_include_cwd = workspace_roots_include_cwd.unwrap_or(workspace_roots_override.is_none());
         let mut workspace_roots = match workspace_roots_override {
             Some(workspace_roots) => workspace_roots,
             None => {
@@ -4624,8 +4617,6 @@ impl Config {
             cwd: resolved_cwd,
             workspace_roots: workspace_roots.clone(),
             workspace_roots_explicit,
-            workspace_roots_include_cwd,
-            subagent_cwd_override: false,
             startup_warnings,
             permissions: Permissions {
                 approval_policy: constrained_approval_policy.value,

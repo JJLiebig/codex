@@ -281,7 +281,6 @@ async fn thread_list_repeated_cursor_returns_internal_error() -> Result<()> {
     let thread_id = ThreadId::new();
     thread_store
         .create_thread(StoreCreateThreadParams {
-            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
@@ -528,7 +527,6 @@ async fn thread_delete_with_non_local_thread_store_does_not_create_local_persist
     let unloaded_thread_id = ThreadId::from_string(&Uuid::new_v4().to_string())?;
     thread_store
         .create_thread(StoreCreateThreadParams {
-            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,

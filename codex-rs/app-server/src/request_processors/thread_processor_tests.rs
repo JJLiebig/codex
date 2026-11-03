@@ -710,7 +710,6 @@ mod thread_processor_behavior_tests {
     fn collect_resume_override_mismatches_includes_service_tier() {
         let cwd = test_path_buf("/tmp").abs();
         let request = ThreadResumeParams {
-            runtime_workspace_roots_include_cwd: None,
             thread_id: "thread-1".to_string(),
             history: None,
             path: None,

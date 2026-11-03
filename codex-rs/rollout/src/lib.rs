@@ -172,5 +172,3 @@ pub use writer_lock::WriterLockGuard;
 
 #[cfg(test)]
 mod tests;
-
-mod codex_plus_plus;

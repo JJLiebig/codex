@@ -3375,9 +3375,6 @@ pub struct HistoryPosition {
 /// and should be used when there is no config override.
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, TS)]
 pub struct SessionMeta {
-    /// Codex++ child location was explicitly selected at spawn.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub codex_plus_plus_spawn_cwd: bool,
     /// ChatGPT user that created this thread; absent when unavailable or for older threads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator_user_id: Option<String>,
@@ -3461,7 +3458,6 @@ impl Default for SessionMeta {
     fn default() -> Self {
         let id = ThreadId::default();
         SessionMeta {
-            codex_plus_plus_spawn_cwd: false,
             creator_user_id: None,
             creator_account_id: None,
             session_id: id.into(),

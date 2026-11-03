@@ -657,9 +657,6 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
     )
     .await?;
     let original = parent.config_snapshot().await;
-    parent
-        .restore_thread_settings(parent.restorable_thread_settings().await)
-        .await?;
     let worktree = tempfile::tempdir()?;
     let invocation = host_spawn_invocation(
         &server,
@@ -688,7 +685,7 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
         &codex_utils_absolute_path::AbsolutePathBuf::try_from(worktree.path())?,
     );
     let local = snapshot
-        .environment_selections()
+        .environments
         .iter()
         .find(|environment| environment.environment_id == codex_exec_server::LOCAL_ENVIRONMENT_ID)
         .expect("local child environment");
@@ -701,18 +698,6 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
         parent.config_snapshot().await.environments,
         original.environments
     );
-    child.ensure_rollout_materialized().await;
-    child.flush_rollout().await?;
-    let saved = test
-        .thread_store
-        .load_latest_model_context(LoadThreadHistoryParams {
-            thread_id: child_id,
-            include_archived: false,
-        })
-        .await?;
-    assert!(saved.items.iter().any(|item| matches!(item,
-        RolloutItem::SessionMeta(meta) if meta.meta.id == child_id && meta.meta.codex_plus_plus_spawn_cwd
-    )));
     finish_spawn_tool(&server, &parent, &invocation).await?;
     Ok(())
 }

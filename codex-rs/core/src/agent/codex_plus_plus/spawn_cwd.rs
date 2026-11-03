@@ -3,11 +3,9 @@
 use crate::config::Config;
 use crate::environment_selection::TurnEnvironmentSnapshot;
 use codex_exec_server::LOCAL_ENVIRONMENT_ID;
-use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_tools::JsonSchema;
 use codex_utils_absolute_path::AbsolutePathBuf;
-use codex_utils_path::replace_path_and_deduplicate;
 use codex_utils_path_uri::PathUri;
 use std::collections::BTreeMap;
 
@@ -26,7 +24,6 @@ pub(crate) fn apply(
     cwd: Option<&str>,
 ) -> Result<Option<Vec<TurnEnvironmentRequest>>, String> {
     let Some(cwd) = cwd else {
-        config.subagent_cwd_override = false;
         return Ok(None);
     };
     if cwd.is_empty() {
@@ -47,33 +44,22 @@ pub(crate) fn apply(
         .iter_mut()
         .find(|request| request.environment_id == LOCAL_ENVIRONMENT_ID)
         .ok_or_else(|| "spawn_agent cwd requires a local execution environment".to_string())?;
-    let old_roots: Vec<_> = config
-        .workspace_roots
-        .iter()
-        .map(PathUri::from_abs_path)
-        .collect();
-    if config.workspace_roots_include_cwd {
-        config.workspace_roots = replace_path_and_deduplicate(
-            config.workspace_roots.clone(),
-            config.cwd.as_path(),
-            cwd.clone(),
-        );
-        config
-            .permissions
-            .set_workspace_roots(config.workspace_roots.clone());
-        if matches!(local.config, EnvironmentConfigState::FromThread)
-            && local.workspace_roots == old_roots
-        {
-            local.workspace_roots = config
-                .workspace_roots
-                .iter()
-                .map(PathUri::from_abs_path)
-                .collect();
+    // Follow the existing cwd-change behavior without changing the permission profile.
+    config.workspace_roots = codex_utils_path::replace_path_and_deduplicate(
+        config.workspace_roots.clone(),
+        config.cwd.as_path(),
+        cwd.clone(),
+    );
+    config
+        .permissions
+        .set_workspace_roots(config.workspace_roots.clone());
+    for root in &mut local.workspace_roots {
+        if *root == PathUri::from_abs_path(&base) {
+            *root = PathUri::from_abs_path(&cwd);
         }
     }
     local.cwd = PathUri::from_abs_path(&cwd);
     config.cwd = cwd;
-    config.subagent_cwd_override = true;
     Ok(Some(requests))
 }
 

@@ -104,7 +104,6 @@ struct ThreadListFilters {
 struct ResumeConfigState {
     history_cwd: Option<PathBuf>,
     workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    workspace_roots_include_cwd: Option<bool>,
     persisted_metadata: Option<ThreadMetadata>,
     persisted_settings: Option<PersistedResumeSettings>,
 }
@@ -1250,7 +1249,6 @@ impl ThreadRequestProcessor {
             service_tier,
             cwd,
             runtime_workspace_roots,
-            runtime_workspace_roots_include_cwd,
             approval_policy,
             approvals_reviewer,
             sandbox,
@@ -1322,7 +1320,6 @@ impl ThreadRequestProcessor {
             developer_instructions,
             personality,
         );
-        typesafe_overrides.workspace_roots_include_cwd = runtime_workspace_roots_include_cwd;
         typesafe_overrides.ephemeral = ephemeral;
         let listener_task_context = ListenerTaskContext {
             thread_manager: Arc::clone(&self.thread_manager),
@@ -3992,7 +3989,6 @@ impl ThreadRequestProcessor {
             service_tier,
             cwd,
             runtime_workspace_roots,
-            runtime_workspace_roots_include_cwd,
             approval_policy,
             approvals_reviewer,
             sandbox,
@@ -4213,7 +4209,6 @@ impl ThreadRequestProcessor {
             developer_instructions,
             personality,
         );
-        typesafe_overrides.workspace_roots_include_cwd = runtime_workspace_roots_include_cwd;
         if typesafe_overrides.approval_policy.is_none()
             && let Some(value) = request_overrides
                 .as_mut()
@@ -4259,7 +4254,6 @@ impl ThreadRequestProcessor {
         let config_state = ResumeConfigState {
             history_cwd: history_cwd.clone(),
             workspace_roots: typesafe_overrides.workspace_roots.clone(),
-            workspace_roots_include_cwd: typesafe_overrides.workspace_roots_include_cwd,
             persisted_metadata,
             persisted_settings,
         };
@@ -5301,7 +5295,6 @@ impl ThreadRequestProcessor {
             service_tier,
             cwd,
             runtime_workspace_roots,
-            runtime_workspace_roots_include_cwd,
             approval_policy,
             approvals_reviewer,
             sandbox,
@@ -5536,7 +5529,6 @@ impl ThreadRequestProcessor {
             developer_instructions,
             /*personality*/ None,
         );
-        typesafe_overrides.workspace_roots_include_cwd = runtime_workspace_roots_include_cwd;
         typesafe_overrides.ephemeral = ephemeral.then_some(true);
         let restore_approval_policy = typesafe_overrides.approval_policy.is_none();
         let restore_approvals_reviewer = typesafe_overrides.approvals_reviewer.is_none()

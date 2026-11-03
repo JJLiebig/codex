@@ -166,7 +166,6 @@ mod tests {
         ] {
             store
                 .create_thread(CreateThreadParams {
-                    codex_plus_plus_spawn_cwd: false,
                     attached_thread: false,
                     creator_user_id: None,
                     creator_account_id: None,
@@ -444,7 +443,6 @@ mod tests {
         history_mode: ThreadHistoryMode,
     ) -> CreateThreadParams {
         CreateThreadParams {
-            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
@@ -587,7 +585,6 @@ impl InMemoryThreadStore {
         let mut state = self.state.lock().await;
         state.calls.create_thread += 1;
         let session_meta = SessionMeta {
-            codex_plus_plus_spawn_cwd: params.codex_plus_plus_spawn_cwd,
             attached_thread: params.attached_thread,
             session_id: params.session_id,
             id: params.thread_id,

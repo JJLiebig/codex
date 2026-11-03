@@ -975,8 +975,6 @@ impl Session {
         per_turn_config.permissions.approval_policy =
             session_configuration.step_settings.approval_policy.clone();
         per_turn_config.workspace_roots = workspace_roots.clone();
-        per_turn_config.workspace_roots_include_cwd =
-            session_configuration.workspace_roots_include_cwd;
         per_turn_config
             .permissions
             .set_workspace_roots(workspace_roots);

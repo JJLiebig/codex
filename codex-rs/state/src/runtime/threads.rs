@@ -2924,7 +2924,6 @@ mod tests {
         );
         let items = vec![RolloutItem::SessionMeta(Box::new(SessionMetaLine {
             meta: SessionMeta {
-                codex_plus_plus_spawn_cwd: false,
                 attached_thread: false,
                 creator_user_id: None,
                 creator_account_id: None,
@@ -3000,7 +2999,6 @@ mod tests {
         );
         let items = vec![RolloutItem::SessionMeta(Box::new(SessionMetaLine {
             meta: SessionMeta {
-                codex_plus_plus_spawn_cwd: false,
                 attached_thread: false,
                 creator_user_id: None,
                 creator_account_id: None,

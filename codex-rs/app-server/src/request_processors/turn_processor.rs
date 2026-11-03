@@ -880,7 +880,6 @@ impl TurnRequestProcessor {
                     disabled_plugin_ids: disabled_plugin_ids.clone(),
                     environments: environment_requests.clone(),
                     runtime_workspace_roots: runtime_workspace_roots.clone(),
-                    workspace_roots_include_cwd: None,
                     approval_policy,
                     approvals_reviewer,
                     sandbox_policy: sandbox_policy.clone(),

@@ -72,8 +72,6 @@ pub struct ExtraConfig {}
 /// Parameters required to create a persisted thread.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CreateThreadParams {
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub codex_plus_plus_spawn_cwd: bool,
     /// ChatGPT user that created this thread; absent when unavailable or for older threads.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creator_user_id: Option<String>,

@@ -83,10 +83,6 @@ pub struct ThreadStartParams {
     #[experimental("thread/start.runtimeWorkspaceRoots")]
     #[ts(optional = nullable)]
     pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    /// Whether the supplied roots include a cwd-derived root that follows child cwd changes.
-    #[experimental("thread/start.runtimeWorkspaceRootsIncludeCwd")]
-    #[ts(optional = nullable)]
-    pub runtime_workspace_roots_include_cwd: Option<bool>,
     #[experimental(nested)]
     #[ts(optional = nullable)]
     pub approval_policy: Option<AskForApproval>,
@@ -396,10 +392,6 @@ pub struct ThreadResumeParams {
     #[experimental("thread/resume.runtimeWorkspaceRoots")]
     #[ts(optional = nullable)]
     pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    /// Whether the supplied roots include a cwd-derived root that follows child cwd changes.
-    #[experimental("thread/resume.runtimeWorkspaceRootsIncludeCwd")]
-    #[ts(optional = nullable)]
-    pub runtime_workspace_roots_include_cwd: Option<bool>,
     #[experimental(nested)]
     #[ts(optional = nullable)]
     pub approval_policy: Option<AskForApproval>,
@@ -609,10 +601,6 @@ pub struct ThreadForkParams {
     #[experimental("thread/fork.runtimeWorkspaceRoots")]
     #[ts(optional = nullable)]
     pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
-    /// Whether the supplied roots include a cwd-derived root that follows child cwd changes.
-    #[experimental("thread/fork.runtimeWorkspaceRootsIncludeCwd")]
-    #[ts(optional = nullable)]
-    pub runtime_workspace_roots_include_cwd: Option<bool>,
     #[experimental(nested)]
     #[ts(optional = nullable)]
     pub approval_policy: Option<AskForApproval>,
