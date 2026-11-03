@@ -2377,6 +2377,7 @@ mod tests {
 
     fn create_thread_params(thread_id: ThreadId) -> CreateThreadParams {
         CreateThreadParams {
+            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,

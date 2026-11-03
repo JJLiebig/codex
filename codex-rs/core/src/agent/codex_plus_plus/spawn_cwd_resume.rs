@@ -16,10 +16,17 @@ pub(crate) fn restore(
     thread_id: ThreadId,
     stored_cwd: &Path,
 ) -> Result<Option<Vec<TurnEnvironmentSelection>>, String> {
+    let explicit = history.get_rollout_items().iter().any(|item| matches!(item,
+        RolloutItem::SessionMeta(meta) if meta.meta.id == thread_id && meta.meta.codex_plus_plus_spawn_cwd
+    ));
+    config.subagent_cwd_override = explicit;
+    if !explicit {
+        return Ok(None);
+    }
     let Some(environments) = environments else {
         return Ok(None);
     };
-    let Some(current_cwd) = environments.local_environment_cwd() else {
+    let Some(_) = environments.local_environment_cwd() else {
         return Ok(None);
     };
     let cwd = history
@@ -35,9 +42,6 @@ pub(crate) fn restore(
             _ => None,
         })
         .unwrap_or(stored_cwd);
-    if current_cwd.as_path() == cwd {
-        return Ok(None);
-    }
     let cwd = cwd
         .to_str()
         .ok_or_else(|| "saved child cwd is not UTF-8".to_string())?;

@@ -26,6 +26,7 @@ pub(crate) fn apply(
     cwd: Option<&str>,
 ) -> Result<Option<Vec<TurnEnvironmentRequest>>, String> {
     let Some(cwd) = cwd else {
+        config.subagent_cwd_override = false;
         return Ok(None);
     };
     if cwd.is_empty() {
@@ -51,25 +52,28 @@ pub(crate) fn apply(
         .iter()
         .map(PathUri::from_abs_path)
         .collect();
-    config.workspace_roots = replace_path_and_deduplicate(
-        config.workspace_roots.clone(),
-        config.cwd.as_path(),
-        cwd.clone(),
-    );
-    config
-        .permissions
-        .set_workspace_roots(config.workspace_roots.clone());
-    if matches!(local.config, EnvironmentConfigState::FromThread)
-        && local.workspace_roots == old_roots
-    {
-        local.workspace_roots = config
-            .workspace_roots
-            .iter()
-            .map(PathUri::from_abs_path)
-            .collect();
+    if config.workspace_roots_include_cwd {
+        config.workspace_roots = replace_path_and_deduplicate(
+            config.workspace_roots.clone(),
+            config.cwd.as_path(),
+            cwd.clone(),
+        );
+        config
+            .permissions
+            .set_workspace_roots(config.workspace_roots.clone());
+        if matches!(local.config, EnvironmentConfigState::FromThread)
+            && local.workspace_roots == old_roots
+        {
+            local.workspace_roots = config
+                .workspace_roots
+                .iter()
+                .map(PathUri::from_abs_path)
+                .collect();
+        }
     }
     local.cwd = PathUri::from_abs_path(&cwd);
     config.cwd = cwd;
+    config.subagent_cwd_override = true;
     Ok(Some(requests))
 }
 

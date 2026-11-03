@@ -115,6 +115,7 @@ pub enum RolloutRecorderParams {
         dynamic_tools: Vec<DynamicToolSpec>,
         selected_capability_roots: Vec<SelectedCapabilityRoot>,
         runtime_workspace_roots: Option<Vec<PathBuf>>,
+        codex_plus_plus_spawn_cwd: bool,
         multi_agent_version: Option<MultiAgentVersion>,
         history_mode: ThreadHistoryMode,
         history_base: Option<HistoryPosition>,
@@ -236,6 +237,7 @@ impl RolloutRecorderParams {
             dynamic_tools,
             selected_capability_roots: Vec::new(),
             runtime_workspace_roots: None,
+            codex_plus_plus_spawn_cwd: false,
             multi_agent_version: None,
             history_mode: Default::default(),
             history_base: None,
@@ -943,6 +945,7 @@ impl RolloutRecorder {
                 dynamic_tools,
                 selected_capability_roots,
                 runtime_workspace_roots,
+                codex_plus_plus_spawn_cwd,
                 multi_agent_version,
                 history_mode,
                 history_base,
@@ -963,6 +966,7 @@ impl RolloutRecorder {
                     .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
 
                 let session_meta = SessionMeta {
+                    codex_plus_plus_spawn_cwd,
                     session_id,
                     id: conversation_id,
                     forked_from_id,

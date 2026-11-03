@@ -139,6 +139,7 @@ pub(crate) struct SessionConfiguration {
     pub(super) legacy_fallback_cwd: AbsolutePathBuf,
     /// Top-level runtime workspace roots, independent of explicit environment selections.
     pub(super) runtime_workspace_roots: Vec<AbsolutePathBuf>,
+    pub(super) workspace_roots_include_cwd: bool,
     /// Directory containing all Codex state for this session.
     pub(super) codex_home: AbsolutePathBuf,
     /// Optional user-facing name for the thread, updated during the session.
@@ -355,6 +356,7 @@ impl SessionConfiguration {
                     .collect(),
             )),
             runtime_workspace_roots: Some(self.runtime_workspace_roots.clone()),
+            workspace_roots_include_cwd: Some(self.workspace_roots_include_cwd),
             profile_workspace_roots: Some(
                 self.permission_profile_state
                     .profile_workspace_roots()
@@ -447,6 +449,8 @@ impl SessionConfiguration {
         let cwd_changed = next_configuration.legacy_fallback_cwd != current_cwd;
         if let Some(runtime_workspace_roots) = &updates.runtime_workspace_roots {
             next_configuration.runtime_workspace_roots = runtime_workspace_roots.clone();
+            next_configuration.workspace_roots_include_cwd =
+                updates.workspace_roots_include_cwd.unwrap_or(false);
         } else if cwd_changed {
             next_configuration.runtime_workspace_roots = replace_path_and_deduplicate(
                 next_configuration.runtime_workspace_roots,
@@ -621,6 +625,7 @@ pub(crate) struct SessionSettingsUpdate {
     pub(crate) turn_extension_init: Option<ExtensionDataInit>,
     pub(crate) environments: Option<TurnEnvironmentSelections>,
     pub(crate) runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
+    pub(crate) workspace_roots_include_cwd: Option<bool>,
     pub(crate) profile_workspace_roots: Option<Vec<ProfileWorkspaceRoot>>,
     pub(crate) sandbox_policy: Option<SandboxPolicy>,
     pub(crate) permission_profile: Option<PermissionProfile>,
@@ -1096,6 +1101,7 @@ impl Session {
                     InitialHistory::New | InitialHistory::Cleared | InitialHistory::Forked(_) => {
                         let auth = persistence_auth.await;
                         let params = CreateThreadParams {
+                            codex_plus_plus_spawn_cwd: config.subagent_cwd_override,
                             attached_thread,
                             creator_user_id: auth.as_ref().and_then(CodexAuth::get_chatgpt_user_id),
                             creator_account_id: auth.as_ref().and_then(CodexAuth::get_account_id),

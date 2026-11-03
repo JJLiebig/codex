@@ -534,6 +534,7 @@ mod tests {
             &mut metadata,
             &RolloutItem::SessionMeta(Box::new(SessionMetaLine {
                 meta: SessionMeta {
+                    codex_plus_plus_spawn_cwd: false,
                     creator_user_id: None,
                     attached_thread: false,
                     creator_account_id: None,
@@ -785,6 +786,7 @@ mod tests {
             &mut metadata,
             &RolloutItem::SessionMeta(Box::new(SessionMetaLine {
                 meta: SessionMeta {
+                    codex_plus_plus_spawn_cwd: false,
                     creator_user_id: None,
                     attached_thread: false,
                     creator_account_id: None,

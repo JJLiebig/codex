@@ -31,9 +31,12 @@ async fn cwd_preserves_explicit_workspace_roots_and_permissions() {
     let (_session, turn) = make_session_and_context().await;
     let mut config = (*turn.config).clone();
     config.workspace_roots_explicit = true;
+    config.workspace_roots_include_cwd = false;
     let explicit_root = tempfile::tempdir().expect("explicit root");
-    config.workspace_roots =
-        vec![AbsolutePathBuf::try_from(explicit_root.path()).expect("absolute root")];
+    config.workspace_roots = vec![
+        config.cwd.clone(),
+        AbsolutePathBuf::try_from(explicit_root.path()).expect("absolute root"),
+    ];
     config
         .permissions
         .set_workspace_roots(config.workspace_roots.clone());
@@ -54,6 +57,7 @@ async fn cwd_preserves_explicit_workspace_roots_and_permissions() {
         .cwd = PathUri::from_abs_path(&config.cwd);
     assert_eq!(requests, expected);
     config.cwd = original.cwd.clone();
+    config.subagent_cwd_override = false;
     assert_eq!(config, original);
 }
 

@@ -657,6 +657,9 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
     )
     .await?;
     let original = parent.config_snapshot().await;
+    parent
+        .restore_thread_settings(parent.restorable_thread_settings().await)
+        .await?;
     let worktree = tempfile::tempdir()?;
     let invocation = host_spawn_invocation(
         &server,
@@ -690,6 +693,7 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
         .find(|environment| environment.environment_id == codex_exec_server::LOCAL_ENVIRONMENT_ID)
         .expect("local child environment");
     assert_eq!(local.cwd, expected);
+    assert_eq!(local.workspace_roots, vec![expected]);
     assert_eq!(spawned.config.environments, snapshot.environments);
     assert_eq!(snapshot.approval_policy, original.approval_policy);
     assert_eq!(snapshot.permission_profile, original.permission_profile);
@@ -697,6 +701,18 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
         parent.config_snapshot().await.environments,
         original.environments
     );
+    child.ensure_rollout_materialized().await;
+    child.flush_rollout().await?;
+    let saved = test
+        .thread_store
+        .load_latest_model_context(LoadThreadHistoryParams {
+            thread_id: child_id,
+            include_archived: false,
+        })
+        .await?;
+    assert!(saved.items.iter().any(|item| matches!(item,
+        RolloutItem::SessionMeta(meta) if meta.meta.id == child_id && meta.meta.codex_plus_plus_spawn_cwd
+    )));
     finish_spawn_tool(&server, &parent, &invocation).await?;
     Ok(())
 }

@@ -157,6 +157,8 @@ pub struct CodexThreadSettingsOverrides {
     pub turn_extension_init: Option<codex_extension_api::ExtensionDataInit>,
     pub environments: Option<TurnEnvironmentRequests>,
     pub runtime_workspace_roots: Option<Vec<AbsolutePathBuf>>,
+    /// Retains root provenance during internal runtime replacement.
+    pub workspace_roots_include_cwd: Option<bool>,
     pub profile_workspace_roots: Option<Vec<ProfileWorkspaceRoot>>,
     pub approval_policy: Option<AskForApproval>,
     pub approvals_reviewer: Option<ApprovalsReviewer>,
@@ -802,6 +804,7 @@ impl CodexThread {
             turn_extension_init,
             environments: environment_requests,
             runtime_workspace_roots,
+            workspace_roots_include_cwd,
             profile_workspace_roots,
             approval_policy,
             approvals_reviewer,
@@ -832,6 +835,7 @@ impl CodexThread {
             environments: environment_requests
                 .map(|requests| requests.select(&self.session.services.selected_capability_roots)),
             runtime_workspace_roots,
+            workspace_roots_include_cwd,
             profile_workspace_roots,
             sandbox_policy,
             permission_profile,

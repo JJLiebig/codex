@@ -508,16 +508,15 @@ impl LocalAgentControl {
                 None,
             )
         };
-        if environment_selections.is_none() {
-            environment_selections = crate::agent::codex_plus_plus::spawn_cwd_resume::restore(
-                &mut config,
-                inherited_environments.as_ref(),
-                &initial_history,
-                thread_id,
-                &stored_thread.cwd,
-            )
-            .map_err(CodexErr::InvalidRequest)?;
-        }
+        let restored_selections = crate::agent::codex_plus_plus::spawn_cwd_resume::restore(
+            &mut config,
+            inherited_environments.as_ref(),
+            &initial_history,
+            thread_id,
+            &stored_thread.cwd,
+        )
+        .map_err(CodexErr::InvalidRequest)?;
+        environment_selections = environment_selections.or(restored_selections);
         let inherited_parent = if let Some((parent, _)) = parent.as_ref() {
             Some(Arc::clone(parent))
         } else if let Some(parent_thread_id) = parent_thread_id {

@@ -4647,6 +4647,7 @@ async fn set_rate_limits_retains_previous_credits() {
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -4770,6 +4771,7 @@ async fn set_rate_limits_updates_plan_type_when_present() {
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -5070,6 +5072,7 @@ async fn open_thread_persistence(session: &mut Session) -> PathBuf {
     let live_thread = LiveThread::create(
         Arc::clone(&session.services.thread_store),
         CreateThreadParams {
+            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
@@ -5395,6 +5398,7 @@ pub(crate) async fn make_session_configuration_for_tests() -> SessionConfigurati
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -6974,6 +6978,7 @@ pub(crate) async fn make_session_and_context() -> (Session, TurnContext) {
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -7295,6 +7300,7 @@ async fn make_session_with_config_and_rx(
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -7432,6 +7438,7 @@ async fn make_session_with_history_source_and_agent_control_and_rx(
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -8836,6 +8843,7 @@ async fn shutdown_complete_does_not_append_to_thread_store_after_shutdown() {
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
+            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
@@ -8957,6 +8965,7 @@ async fn submission_loop_channel_close_runs_full_thread_teardown() {
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
+            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,
@@ -9269,6 +9278,7 @@ where
         use_legacy_landlock: config.features.use_legacy_landlock(),
         legacy_fallback_cwd: config.cwd.clone(),
         runtime_workspace_roots: config.workspace_roots.clone(),
+        workspace_roots_include_cwd: config.workspace_roots_include_cwd,
         codex_home: config.codex_home.clone(),
         thread_name: None,
         disabled_plugin_ids: Vec::new(),
@@ -11936,6 +11946,7 @@ async fn attach_in_memory_thread_store(
     let live_thread = LiveThread::create(
         Arc::clone(&thread_store),
         CreateThreadParams {
+            codex_plus_plus_spawn_cwd: false,
             attached_thread: false,
             creator_user_id: None,
             creator_account_id: None,

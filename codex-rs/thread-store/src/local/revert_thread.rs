@@ -184,6 +184,7 @@ async fn create_replacement_recorder(
     .with_attached_thread(source_meta.attached_thread)
     .with_rollout_id(rollout_id)
     .with_selected_capability_roots(source_meta.selected_capability_roots)
+    .with_subagent_cwd_override(source_meta.codex_plus_plus_spawn_cwd)
     .with_runtime_workspace_roots(source_meta.runtime_workspace_roots)
     .with_multi_agent_version(source_meta.multi_agent_version)
     .with_history_mode(ThreadHistoryMode::Paginated)

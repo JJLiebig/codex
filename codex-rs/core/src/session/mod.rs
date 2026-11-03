@@ -962,6 +962,7 @@ impl Session {
             use_legacy_landlock: config.features.use_legacy_landlock(),
             legacy_fallback_cwd: config.cwd.clone(),
             runtime_workspace_roots: config.workspace_roots.clone(),
+            workspace_roots_include_cwd: config.workspace_roots_include_cwd,
             codex_home: config.codex_home.clone(),
             thread_name: None,
             disabled_plugin_ids,

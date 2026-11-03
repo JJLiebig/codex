@@ -39,6 +39,7 @@ pub(super) async fn create_thread(
             params.base_instructions,
             params.dynamic_tools,
         )
+        .with_subagent_cwd_override(params.codex_plus_plus_spawn_cwd)
         .with_creator(params.creator_user_id, params.creator_account_id)
         .with_session_id(params.session_id)
         .with_attached_thread(params.attached_thread)
