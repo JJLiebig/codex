@@ -128,7 +128,7 @@ pub(crate) async fn pending_subagent_scenario(
                         json!({"task_name": "worker", "message": message, "fork_turns": "none"})
                     };
                     if change_cwd {
-                        args["cwd"] = json!("child-worktree");
+                        args["cwd"] = json!("..");
                     }
                     tool(SPAWN, namespace, "spawn_agent", args)
                 }
@@ -185,7 +185,7 @@ pub(crate) async fn pending_subagent_scenario(
     .await?;
     let mut child_pending = pending.clone();
     if change_cwd {
-        child_pending.cwd = pending.cwd.join("child-worktree")?;
+        child_pending.cwd = pending.cwd.join("..")?;
         child_pending.workspace_roots = vec![child_pending.cwd.clone()];
     }
     assert_eq!(
