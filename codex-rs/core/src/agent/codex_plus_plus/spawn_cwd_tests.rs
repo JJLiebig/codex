@@ -85,3 +85,35 @@ async fn cwd_rebases_parent_root_beside_additional_writable_roots() {
     );
     assert_eq!(config.permissions.workspace_roots(), config.workspace_roots);
 }
+
+#[tokio::test]
+async fn cwd_rebases_roots_forwarded_by_native_startup() {
+    let (_session, turn) = make_session_and_context().await;
+    let extra = tempfile::tempdir().expect("extra root");
+    let extra = AbsolutePathBuf::try_from(extra.path()).expect("absolute root");
+    let mut config = crate::config::ConfigBuilder::without_managed_config_for_tests()
+        .codex_home(turn.config.codex_home.to_path_buf())
+        .harness_overrides(crate::config::ConfigOverrides {
+            cwd: Some(turn.config.cwd.to_path_buf()),
+            workspace_roots: Some(vec![turn.config.cwd.clone(), extra.clone()]),
+            workspace_roots_include_cwd: Some(true),
+            ..Default::default()
+        })
+        .build()
+        .await
+        .expect("forwarded native config");
+    let directory = tempfile::tempdir().expect("child directory");
+    apply(
+        &mut config,
+        &turn.initial_environments,
+        Some(directory.path().to_str().expect("path")),
+    )
+    .expect("override");
+    assert_eq!(
+        config.workspace_roots,
+        vec![
+            AbsolutePathBuf::try_from(directory.path()).expect("absolute cwd"),
+            extra
+        ]
+    );
+}

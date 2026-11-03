@@ -39,10 +39,15 @@ async fn restore_uses_child_owned_location_with_current_permissions(explicit: bo
         },
         git: None,
     }));
-    let parent_meta = RolloutItem::SessionMeta(Box::new(codex_protocol::protocol::SessionMetaLine {
-        meta: codex_protocol::protocol::SessionMeta { id: session.thread_id, codex_plus_plus_spawn_cwd: true, ..Default::default() },
-        git: None,
-    }));
+    let parent_meta =
+        RolloutItem::SessionMeta(Box::new(codex_protocol::protocol::SessionMetaLine {
+            meta: codex_protocol::protocol::SessionMeta {
+                id: session.thread_id,
+                codex_plus_plus_spawn_cwd: true,
+                ..Default::default()
+            },
+            git: None,
+        }));
     let history = InitialHistory::Resumed(ResumedHistory {
         conversation_id: child,
         history_revision: None,

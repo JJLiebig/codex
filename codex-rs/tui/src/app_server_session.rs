@@ -2290,6 +2290,11 @@ fn thread_start_params_with_reviewer(
         service_tier: service_tier_override_from_config(config),
         cwd: thread_cwd_from_config(config, thread_params_mode, remote_cwd_override),
         runtime_workspace_roots: thread_params_mode.workspace_roots_from_config(config),
+        runtime_workspace_roots_include_cwd: matches!(
+            thread_params_mode,
+            ThreadParamsMode::Embedded
+        )
+        .then_some(config.workspace_roots_include_cwd),
         approval_policy: match policy_source {
             startup_launch::StartupApprovalPolicy::ResolvedConfig => {
                 Some(config.permissions.approval_policy.value().into())
@@ -2368,6 +2373,11 @@ fn thread_resume_params_from_config(
         service_tier: service_tier_override_from_config(&config),
         cwd: thread_cwd_from_config(&config, thread_params_mode, remote_cwd_override),
         runtime_workspace_roots: thread_params_mode.workspace_roots_from_config(&config),
+        runtime_workspace_roots_include_cwd: matches!(
+            thread_params_mode,
+            ThreadParamsMode::Embedded
+        )
+        .then_some(config.workspace_roots_include_cwd),
         approval_policy: Some(config.permissions.approval_policy.value().into()),
         approvals_reviewer: approvals_reviewer_override_from_config(&config),
         sandbox,
@@ -2418,6 +2428,11 @@ fn thread_fork_params_from_config(
         service_tier: service_tier_override_from_config(&config),
         cwd: thread_cwd_from_config(&config, thread_params_mode, remote_cwd_override),
         runtime_workspace_roots: thread_params_mode.workspace_roots_from_config(&config),
+        runtime_workspace_roots_include_cwd: matches!(
+            thread_params_mode,
+            ThreadParamsMode::Embedded
+        )
+        .then_some(config.workspace_roots_include_cwd),
         approval_policy: Some(config.permissions.approval_policy.value().into()),
         approvals_reviewer: approvals_reviewer_override_from_config(&config),
         sandbox,
