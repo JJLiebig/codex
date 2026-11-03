@@ -7,6 +7,7 @@ use codex_protocol::protocol::EnvironmentConfigState;
 use codex_protocol::protocol::TurnEnvironmentRequest;
 use codex_tools::JsonSchema;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path::replace_path_and_deduplicate;
 use codex_utils_path_uri::PathUri;
 use std::collections::BTreeMap;
 
@@ -50,16 +51,22 @@ pub(crate) fn apply(
         .iter()
         .map(PathUri::from_abs_path)
         .collect();
-    if !config.workspace_roots_explicit {
-        config.workspace_roots = vec![cwd.clone()];
-        config
-            .permissions
-            .set_workspace_roots(config.workspace_roots.clone());
-        if matches!(local.config, EnvironmentConfigState::FromThread)
-            && local.workspace_roots == old_roots
-        {
-            local.workspace_roots = vec![PathUri::from_abs_path(&cwd)];
-        }
+    config.workspace_roots = replace_path_and_deduplicate(
+        config.workspace_roots.clone(),
+        config.cwd.as_path(),
+        cwd.clone(),
+    );
+    config
+        .permissions
+        .set_workspace_roots(config.workspace_roots.clone());
+    if matches!(local.config, EnvironmentConfigState::FromThread)
+        && local.workspace_roots == old_roots
+    {
+        local.workspace_roots = config
+            .workspace_roots
+            .iter()
+            .map(PathUri::from_abs_path)
+            .collect();
     }
     local.cwd = PathUri::from_abs_path(&cwd);
     config.cwd = cwd;

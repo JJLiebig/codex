@@ -685,7 +685,7 @@ async fn child_cwd_reaches_execution_environment(fork_history: bool) -> Result<(
         &codex_utils_absolute_path::AbsolutePathBuf::try_from(worktree.path())?,
     );
     let local = snapshot
-        .environments
+        .environment_selections()
         .iter()
         .find(|environment| environment.environment_id == codex_exec_server::LOCAL_ENVIRONMENT_ID)
         .expect("local child environment");

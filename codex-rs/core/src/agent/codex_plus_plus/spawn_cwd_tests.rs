@@ -31,6 +31,12 @@ async fn cwd_preserves_explicit_workspace_roots_and_permissions() {
     let (_session, turn) = make_session_and_context().await;
     let mut config = (*turn.config).clone();
     config.workspace_roots_explicit = true;
+    let explicit_root = tempfile::tempdir().expect("explicit root");
+    config.workspace_roots =
+        vec![AbsolutePathBuf::try_from(explicit_root.path()).expect("absolute root")];
+    config
+        .permissions
+        .set_workspace_roots(config.workspace_roots.clone());
     let original = config.clone();
     let directory = tempfile::tempdir().expect("directory");
     let requests = apply(
@@ -49,4 +55,29 @@ async fn cwd_preserves_explicit_workspace_roots_and_permissions() {
     assert_eq!(requests, expected);
     config.cwd = original.cwd.clone();
     assert_eq!(config, original);
+}
+
+#[tokio::test]
+async fn cwd_rebases_parent_root_beside_additional_writable_roots() {
+    let (_session, turn) = make_session_and_context().await;
+    let mut config = (*turn.config).clone();
+    let extra = tempfile::tempdir().expect("extra root");
+    let extra = AbsolutePathBuf::try_from(extra.path()).expect("absolute root");
+    config.workspace_roots_explicit = true;
+    config.workspace_roots = vec![config.cwd.clone(), extra.clone()];
+    let directory = tempfile::tempdir().expect("directory");
+    apply(
+        &mut config,
+        &turn.initial_environments,
+        Some(directory.path().to_str().expect("path")),
+    )
+    .expect("override");
+    assert_eq!(
+        config.workspace_roots,
+        vec![
+            AbsolutePathBuf::try_from(directory.path()).expect("absolute cwd"),
+            extra
+        ]
+    );
+    assert_eq!(config.permissions.workspace_roots(), config.workspace_roots);
 }
