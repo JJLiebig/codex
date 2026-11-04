@@ -78,3 +78,36 @@ fn every_root_report_preserves_session_without_changing_record_address_or_clear(
     .unwrap();
     assert_eq!(clear, "\x1b]7501;state=clear\x1b\\");
 }
+
+#[test]
+fn registration_reemits_the_last_actual_status_when_a_new_primary_invalidated_it() {
+    let state = SessionStatusState::new();
+    state
+        .update(CachedStatus::Reported(ProgramStatus::Working), "", |_| {
+            Ok(())
+        })
+        .unwrap();
+    state.set_herdr_session(Some(ThreadId::from_u128(/*value*/ 42)));
+    let mut output = String::new();
+    state
+        .reemit_recovery_binding(|status, emitted| {
+            SetTerminalProgramStatus {
+                status,
+                iterm_detail: "",
+                emit_iterm_status: false,
+                herdr_session: emitted.herdr_session,
+            }
+            .write_ansi(&mut output)
+            .unwrap();
+            Ok(())
+        })
+        .unwrap();
+    assert_eq!(
+        output,
+        "\x1b]7501;state=working:app=codex:session=00000000-0000-0000-0000-00000000002a\x1b\\"
+    );
+    state.update(CachedStatus::Cleared, "", |_| Ok(())).unwrap();
+    state
+        .reemit_recovery_binding(|_, _| panic!("must not resurrect a cleared report"))
+        .unwrap();
+}

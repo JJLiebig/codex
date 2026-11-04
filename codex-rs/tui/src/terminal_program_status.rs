@@ -38,6 +38,7 @@ struct EmittedSessionStatus {
     status: CachedStatus,
     detail: String,
     herdr_session: Option<codex_protocol::ThreadId>,
+    herdr_reported_status: Option<ProgramStatus>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,6 +55,7 @@ impl SessionStatusState {
                 status: CachedStatus::Cleared,
                 detail: String::new(),
                 herdr_session: None,
+                herdr_reported_status: None,
             }),
         }
     }
@@ -74,6 +76,7 @@ impl SessionStatusState {
             return Ok(());
         }
         emit(&last_emitted)?;
+        herdr_session::record_status(&mut last_emitted, status);
         last_emitted.status = status;
         detail.clone_into(&mut last_emitted.detail);
         Ok(())
