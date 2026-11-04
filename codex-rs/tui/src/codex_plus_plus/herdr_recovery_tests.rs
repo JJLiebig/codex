@@ -161,6 +161,18 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
                     "argv":["codex.exe", "--no-daemon", "resume", id, "--cd", cwd], "cwd":cwd
                 })
             );
+            // Losing the main attachment must disarm a deleted/reset thread and permit rearming.
+            tx.send_replace(Update::Pending);
+            assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.get");
+            assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], false);
+            assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
+            tx.send_replace(Update::Session {
+                id: id.into(),
+                cwd: cwd.to_string_lossy().into_owned(),
+            });
+            assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.get");
+            assert_eq!(requests_rx.recv().await.unwrap()["method"], "rpc.discover");
+            assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.keep");
         }
     }
     if deliberate {

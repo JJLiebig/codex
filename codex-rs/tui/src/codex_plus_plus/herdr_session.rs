@@ -25,6 +25,29 @@ pub(crate) fn set_primary_session(session: Option<&ThreadSessionState>) {
     }
 }
 
+// Registration is asynchronous: the first OSC report can reach core before recovery is armed.
+// Repeat an already reported status after the durable registration acknowledgement.
+pub(crate) fn refresh_recovery_binding() {
+    if cfg!(test) {
+        return;
+    }
+    let emitted = SESSION_STATUS_STATE
+        .last_emitted
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let CachedStatus::Reported(status) = emitted.status {
+        let _ = crossterm::execute!(
+            std::io::stdout(),
+            super::SetTerminalProgramStatus {
+                status,
+                iterm_detail: &emitted.detail,
+                herdr_session: emitted.herdr_session,
+                emit_iterm_status: super::current_terminal_program_status_support().osc_21337,
+            }
+        );
+    }
+}
+
 impl SessionStatusState {
     fn set_herdr_session(&self, session: Option<ThreadId>) {
         let mut emitted = self

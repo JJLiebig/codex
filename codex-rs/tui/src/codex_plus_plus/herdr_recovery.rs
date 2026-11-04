@@ -69,13 +69,13 @@ pub(crate) fn start(cli: &Cli, remote: Option<&crate::RemoteAppServerEndpoint>) 
 }
 
 pub(crate) fn set_primary(session: Option<&ThreadSessionState>) {
-    if let Some(worker) = WORKER.get()
-        && let Some(session) = session.filter(|session| session.rollout_path.is_some())
-    {
-        let next = Update::Session {
-            id: session.thread_id.to_string(),
-            cwd: session.cwd.to_string(),
-        };
+    if let Some(worker) = WORKER.get() {
+        let next = session
+            .filter(|session| session.rollout_path.is_some())
+            .map_or(Update::Pending, |session| Update::Session {
+                id: session.thread_id.to_string(),
+                cwd: session.cwd.to_string(),
+            });
         worker.tx.send_if_modified(|current| {
             if *current == Update::Quit || *current == next {
                 return false;
@@ -193,7 +193,6 @@ async fn run(
         let quit = update == Update::Quit;
         let result = tokio::time::timeout(DEADLINE, async {
             match update {
-                Update::Pending => {}
                 Update::Session { id, cwd } => {
                     let record =
                         rpc(&socket, "terminal.get", json!({"terminal": terminal})).await?;
@@ -227,8 +226,9 @@ async fn run(
                         "keep": true, "recovery": {"argv": command, "cwd": cwd}}),
                     )
                     .await?;
+                    crate::terminal_program_status::refresh_recovery_binding();
                 }
-                Update::Quit if owned => {
+                Update::Quit | Update::Pending if owned => {
                     let record =
                         rpc(&socket, "terminal.get", json!({"terminal": terminal})).await?;
                     if record["keep"] != true {
@@ -247,8 +247,9 @@ async fn run(
                         json!({"terminal": terminal, "expected_scope": scope, "keep": true}),
                     )
                     .await?;
+                    owned = false;
                 }
-                Update::Quit => {}
+                Update::Quit | Update::Pending => {}
             }
             Ok::<_, anyhow::Error>(())
         })

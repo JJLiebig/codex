@@ -21,6 +21,7 @@ use ratatui::crossterm::execute;
 
 #[path = "codex_plus_plus/herdr_session.rs"]
 mod herdr_session;
+pub(crate) use herdr_session::refresh_recovery_binding;
 pub(crate) use herdr_session::set_primary_session;
 
 static SESSION_STATUS_STATE: SessionStatusState = SessionStatusState::new();
