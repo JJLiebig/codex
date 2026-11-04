@@ -72,10 +72,22 @@ async fn rpc_accepts_extra_fields_and_rejects_core_errors() {
 // Use a real local control socket: exercise keep gating, latest-session replacement and cleanup.
 #[tokio::test]
 async fn kept_terminal_tracks_main_session_and_disarms_only_on_request() {
-    exercise_worker(true, true, true).await;
-    exercise_worker(true, true, false).await;
-    exercise_worker(true, false, true).await;
-    exercise_worker(false, true, true).await;
+    exercise_worker(
+        /*kept*/ true, /*deliberate*/ true, /*supported*/ true,
+    )
+    .await;
+    exercise_worker(
+        /*kept*/ true, /*deliberate*/ true, /*supported*/ false,
+    )
+    .await;
+    exercise_worker(
+        /*kept*/ true, /*deliberate*/ false, /*supported*/ true,
+    )
+    .await;
+    exercise_worker(
+        /*kept*/ false, /*deliberate*/ true, /*supported*/ true,
+    )
+    .await;
 }
 
 async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
