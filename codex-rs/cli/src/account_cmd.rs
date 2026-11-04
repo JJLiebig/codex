@@ -69,6 +69,7 @@ pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Resu
             }
 
             if args.device_auth {
+                config.config_layer_stack.ensure_config_server_applied()?;
                 config.auth_config().validate()?;
                 if !config
                     .auth_config()
