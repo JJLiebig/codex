@@ -26,6 +26,9 @@ const MINUTES_PER_WEEK: i64 = 7 * 24 * 60;
 #[path = "codex_plus_plus/account_usage_cooldown.rs"]
 mod cooldown;
 
+#[path = "codex_plus_plus/account_usage_report.rs"]
+pub(crate) mod report;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub(crate) struct AccountUsage {
     pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
@@ -34,6 +37,7 @@ pub(crate) struct AccountUsage {
     pub(crate) five_hour_reset_at: Option<i64>,
     pub(crate) five_hour_remaining_percent: Option<u8>,
     pub(crate) five_hour_exhausted: bool,
+    pub(crate) weekly_window_minutes: Option<i64>,
     pub(crate) weekly_reset_at: Option<i64>,
     pub(crate) weekly_unused: Option<bool>,
     pub(crate) weekly_remaining_percent: Option<u8>,
@@ -186,13 +190,17 @@ async fn fetch_with_auth(
     chatgpt_base_url: &str,
     auth_route_config: &AuthRouteConfig,
 ) -> Result<AccountUsage> {
-    let response = BackendClient::from_auth(
-        chatgpt_base_url,
-        auth,
-        auth_route_config.http_client_factory().clone(),
+    let response = tokio::time::timeout(
+        FETCH_TIMEOUT,
+        BackendClient::from_auth(
+            chatgpt_base_url,
+            auth,
+            auth_route_config.http_client_factory().clone(),
+        )
+        .get_rate_limits_with_reset_credits(),
     )
-    .get_rate_limits_with_reset_credits()
-    .await?;
+    .await
+    .context("rate-limit request timed out")??;
     Ok(account_usage(&response))
 }
 
@@ -257,6 +265,7 @@ fn account_usage_from_snapshot(snapshot: &RateLimitSnapshot) -> AccountUsage {
         five_hour_reset_at: five_hour.and_then(|window| window.resets_at),
         five_hour_remaining_percent: five_hour.map(|window| remaining_percent(window.used_percent)),
         five_hour_exhausted: five_hour.is_some_and(|window| window.used_percent >= 100.0),
+        weekly_window_minutes: weekly.and_then(|window| window.window_minutes),
         weekly_reset_at: weekly.and_then(|window| window.resets_at),
         weekly_unused: weekly.map(|window| window.used_percent == 0.0),
         weekly_remaining_percent: weekly.map(|window| remaining_percent(window.used_percent)),

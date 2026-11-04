@@ -3690,6 +3690,24 @@ enabled = true
     }
 
     #[test]
+    fn account_usage_parses_output_format() {
+        for (args, expected_json) in [
+            (vec!["codex", "account", "usage"], false),
+            (vec!["codex", "account", "usage", "--json"], true),
+        ] {
+            let cli = MultitoolCli::try_parse_from(args).expect("parse");
+            let Some(Subcommand::Account(AccountCli {
+                subcommand: crate::account_cmd::AccountSubcommand::Usage(args),
+                ..
+            })) = cli.subcommand
+            else {
+                panic!("expected account usage");
+            };
+            assert_eq!(args.json, expected_json);
+        }
+    }
+
+    #[test]
     fn update_parses_as_update_subcommand() {
         let cli = MultitoolCli::try_parse_from(["codex", "update"]).expect("parse");
         assert!(matches!(
