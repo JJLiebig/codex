@@ -88,11 +88,13 @@ pub(crate) fn set_primary(session: Option<&ThreadSessionState>) {
 
 // Event dispatch returns explicit user exits, including logout/archive/delete and offline quit.
 // EOF and signals exit through the terminal event path; fatal app events retain recovery too.
-pub(crate) async fn after_app_event(result: &color_eyre::Result<crate::app::AppRunControl>) {
+pub(crate) async fn after_app_event(
+    result: color_eyre::Result<crate::app::AppRunControl>,
+) -> color_eyre::Result<crate::app::AppRunControl> {
     use crate::app::AppRunControl;
     use crate::app::ExitReason;
     if matches!(
-        result,
+        &result,
         Ok(AppRunControl::Exit(
             ExitReason::UserRequested
                 | ExitReason::Archived(_)
@@ -102,6 +104,7 @@ pub(crate) async fn after_app_event(result: &color_eyre::Result<crate::app::AppR
     ) {
         deliberate_exit().await;
     }
+    result
 }
 
 async fn deliberate_exit() {
