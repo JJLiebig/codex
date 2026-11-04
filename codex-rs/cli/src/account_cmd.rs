@@ -31,6 +31,9 @@ pub(crate) enum AccountSubcommand {
     /// List imported accounts.
     List,
 
+    /// Show remaining usage and reset times for every imported account.
+    Usage(UsageArgs),
+
     /// Choose an imported account to remove.
     Remove,
 }
@@ -38,6 +41,13 @@ pub(crate) enum AccountSubcommand {
 #[derive(Debug, Args)]
 pub(crate) struct ImportCurrentArgs {
     pub label: Option<String>,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct UsageArgs {
+    /// Print JSON with Unix reset timestamps instead of TOON.
+    #[arg(long)]
+    pub json: bool,
 }
 
 pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Result<()> {
@@ -85,6 +95,14 @@ pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Resu
             print_accounts(store.list().context("failed to list accounts")?);
         }
         AccountSubcommand::Remove => account_remove::run(&config).await?,
+        AccountSubcommand::Usage(args) => {
+            let report = codex_tui::account_usage_report(&config).await?;
+            if args.json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                print!("{report}");
+            }
+        }
     }
     Ok(())
 }

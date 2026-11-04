@@ -1,0 +1,104 @@
+---
+source: codex-rs/tui/src/codex_plus_plus/account_usage_report_tests.rs
+expression: serde_json::to_string_pretty(&report).unwrap()
+---
+{
+  "accounts": [
+    {
+      "id": "failed",
+      "label": "failed,\nlabel",
+      "primary": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "weekly": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "status": "error",
+      "error": "usage_unavailable"
+    },
+    {
+      "id": "missing",
+      "label": "missing,\nlabel",
+      "primary": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "weekly": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "status": "unknown",
+      "error": null
+    },
+    {
+      "id": "no-auth",
+      "label": "no-auth,\nlabel",
+      "primary": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "weekly": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "status": "error",
+      "error": "usage_unavailable"
+    },
+    {
+      "id": "ok",
+      "label": "ok,\nlabel",
+      "primary": {
+        "remaining_percent": 75,
+        "resets_at": 1750000000,
+        "window_minutes": 240
+      },
+      "weekly": {
+        "remaining_percent": 40,
+        "resets_at": 1750000000,
+        "window_minutes": 10080
+      },
+      "status": "ok",
+      "error": null
+    },
+    {
+      "id": "slow",
+      "label": "slow,\nlabel",
+      "primary": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "weekly": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "status": "error",
+      "error": "usage_unavailable"
+    },
+    {
+      "id": "weekly",
+      "label": "weekly,\nlabel",
+      "primary": {
+        "remaining_percent": null,
+        "resets_at": null,
+        "window_minutes": null
+      },
+      "weekly": {
+        "remaining_percent": 90,
+        "resets_at": 1750000000,
+        "window_minutes": 10080
+      },
+      "status": "ok",
+      "error": null
+    }
+  ]
+}

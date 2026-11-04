@@ -1,0 +1,11 @@
+---
+source: codex-rs/tui/src/codex_plus_plus/account_usage_report_tests.rs
+expression: report.to_string()
+---
+accounts[6]{id,label,primary_window_minutes,primary_remaining_percent,primary_resets_at,weekly_remaining_percent,weekly_window_minutes,weekly_resets_at,status,error}:
+  "failed","failed,\nlabel",null,null,null,null,null,null,"error","usage_unavailable"
+  "missing","missing,\nlabel",null,null,null,null,null,null,"unknown",null
+  "no-auth","no-auth,\nlabel",null,null,null,null,null,null,"error","usage_unavailable"
+  "ok","ok,\nlabel",240,75,"2025-06-15T15:06:40Z",40,10080,"2025-06-15T15:06:40Z","ok",null
+  "slow","slow,\nlabel",null,null,null,null,null,null,"error","usage_unavailable"
+  "weekly","weekly,\nlabel",null,null,null,90,10080,"2025-06-15T15:06:40Z","ok",null

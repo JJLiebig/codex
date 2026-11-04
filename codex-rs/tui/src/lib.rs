@@ -23,6 +23,8 @@ use crate::session_resume::effective_resume_cwd_mode;
 use crate::session_resume::read_session_cwd;
 use crate::session_resume::resolve_cwd_for_resume_or_fork;
 pub use crate::startup_error::LocalStateDbStartupError;
+pub use account_usage::report::AccountUsageReport;
+pub use account_usage::report::account_usage_report;
 use additional_dirs::add_dir_warning_message;
 use app::App;
 pub use app::AppExitInfo;
