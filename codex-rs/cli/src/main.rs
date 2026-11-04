@@ -3679,14 +3679,20 @@ enabled = true
 
     #[test]
     fn account_add_parses() {
-        let cli = MultitoolCli::try_parse_from(["codex", "account", "add"]).expect("parse");
-        assert!(matches!(
-            cli.subcommand,
-            Some(Subcommand::Account(AccountCli {
-                subcommand: crate::account_cmd::AccountSubcommand::Add,
+        for (argv, expected_device_auth) in [
+            (vec!["codex", "account", "add"], false),
+            (vec!["codex", "account", "add", "--device-auth"], true),
+        ] {
+            let cli = MultitoolCli::try_parse_from(argv).expect("parse");
+            let Some(Subcommand::Account(AccountCli {
+                subcommand: crate::account_cmd::AccountSubcommand::Add(args),
                 ..
-            }))
-        ));
+            })) = cli.subcommand
+            else {
+                panic!("expected account add");
+            };
+            assert_eq!(args.device_auth, expected_device_auth);
+        }
     }
 
     #[test]

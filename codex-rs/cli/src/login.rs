@@ -43,6 +43,9 @@ const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
     "ChatGPT login is disabled. Use API key login instead.";
 #[path = "codex_plus_plus/cli_proxy_logout.rs"]
 mod cli_proxy_logout;
+#[path = "codex_plus_plus/device_code_login.rs"]
+mod device_code_login;
+pub use device_code_login::login_with_device_code;
 const API_KEY_LOGIN_DISABLED_MESSAGE: &str =
     "API key login is disabled. Use ChatGPT login instead.";
 const ACCESS_TOKEN_LOGIN_DISABLED_MESSAGE: &str =
@@ -389,14 +392,6 @@ pub async fn run_login_with_device_code(
             eprintln!("{CHATGPT_LOGIN_DISABLED_MESSAGE}");
             std::process::exit(1);
         }
-        let auth_route_config = config.auth_route_config();
-        clear_existing_auth_before_login(
-            &config.codex_home,
-            config.cli_auth_credentials_store_mode,
-            config.auth_keyring_backend_kind(),
-            &auth_route_config,
-        )
-        .await;
         let effective_chatgpt_workspaces = config.auth_config().effective_chatgpt_workspaces();
         let mut opts = ServerOptions::new(
             config.codex_home.to_path_buf(),
@@ -404,12 +399,12 @@ pub async fn run_login_with_device_code(
             effective_chatgpt_workspaces,
             config.cli_auth_credentials_store_mode,
             config.auth_keyring_backend_kind(),
-            auth_route_config,
+            config.auth_route_config(),
         );
         if let Some(iss) = issuer_base_url {
             opts.issuer = iss;
         }
-        run_device_code_login(opts).await
+        login_with_device_code(opts).await
     })
     .await
 }

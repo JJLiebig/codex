@@ -2,6 +2,7 @@ use anyhow::Context;
 use clap::Args;
 use clap::Parser;
 use codex_cli::login_with_chatgpt;
+use codex_cli::login_with_device_code;
 use codex_core::config::Config;
 use codex_login::AccountProfile;
 use codex_login::AccountStore;
@@ -23,7 +24,7 @@ pub(crate) struct AccountCli {
 #[derive(Debug, clap::Subcommand)]
 pub(crate) enum AccountSubcommand {
     /// Log in with ChatGPT and save it as an account.
-    Add,
+    Add(AddArgs),
 
     /// Import the current ChatGPT login as an account.
     ImportCurrent(ImportCurrentArgs),
@@ -36,6 +37,13 @@ pub(crate) enum AccountSubcommand {
 
     /// Choose an imported account to remove.
     Remove,
+}
+
+#[derive(Debug, Args)]
+pub(crate) struct AddArgs {
+    /// Log in using a device code.
+    #[arg(long)]
+    pub device_auth: bool,
 }
 
 #[derive(Debug, Args)]
@@ -55,20 +63,40 @@ pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Resu
     let store = AccountStore::new(config.codex_home.to_path_buf());
 
     match account_cli.subcommand {
-        AccountSubcommand::Add => {
+        AccountSubcommand::Add(args) => {
             if matches!(config.forced_login_method, Some(ForcedLoginMethod::Api)) {
                 anyhow::bail!("ChatGPT login is disabled. Use API key login instead.");
             }
 
-            login_with_chatgpt(
-                config.codex_home.to_path_buf(),
-                config.forced_chatgpt_workspace_id.clone(),
-                config.cli_auth_credentials_store_mode,
-                config.auth_keyring_backend_kind(),
-                config.auth_route_config(),
-            )
-            .await
-            .context("failed to log in")?;
+            if args.device_auth {
+                config.auth_config().validate()?;
+                if !config
+                    .auth_config()
+                    .is_login_method_allowed(ForcedLoginMethod::Chatgpt)
+                {
+                    anyhow::bail!("ChatGPT login is disabled. Use API key login instead.");
+                }
+                login_with_device_code(codex_login::ServerOptions::new(
+                    config.codex_home.to_path_buf(),
+                    codex_login::CLIENT_ID.to_string(),
+                    config.auth_config().effective_chatgpt_workspaces(),
+                    config.cli_auth_credentials_store_mode,
+                    config.auth_keyring_backend_kind(),
+                    config.auth_route_config(),
+                ))
+                .await
+                .context("failed to log in")?;
+            } else {
+                login_with_chatgpt(
+                    config.codex_home.to_path_buf(),
+                    config.forced_chatgpt_workspace_id.clone(),
+                    config.cli_auth_credentials_store_mode,
+                    config.auth_keyring_backend_kind(),
+                    config.auth_route_config(),
+                )
+                .await
+                .context("failed to log in")?;
+            }
 
             let store_mode = config.cli_auth_credentials_store_mode;
             let keyring_backend_kind = config.auth_keyring_backend_kind();
