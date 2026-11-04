@@ -205,13 +205,16 @@ async fn logout_cleanup_deletes_running_native_copies_and_serializes_relogin() {
     let snapshot = manager.export_native_credentials().await.unwrap();
     let (name, record) = native_record(&snapshot.credentials()[0]);
     drop(snapshot);
-    let claude = json!({"type": "claude", "access_token": "synthetic-claude"});
+    let foreign = json!({"type": "foreign", "access_token": "synthetic-foreign"});
     let unowned = json!({"type": "codex", "access_token": "unowned"});
     fixture.files.lock().unwrap().extend([
         (name.clone(), record),
-        ("claude.json".to_string(), claude.clone()),
+        ("foreign.json".to_string(), foreign.clone()),
         ("codex.json".to_string(), unowned.clone()),
-        ("codex-native-root-foreign.json".to_string(), claude.clone()),
+        (
+            "codex-native-root-foreign.json".to_string(),
+            foreign.clone(),
+        ),
     ]);
     assert!(manager.logout_with_revoke().await.unwrap());
     let cleanup = tokio::spawn({
@@ -231,9 +234,9 @@ async fn logout_cleanup_deletes_running_native_copies_and_serializes_relogin() {
     assert_eq!(
         *fixture.files.lock().unwrap(),
         BTreeMap::from([
-            ("claude.json".to_string(), claude.clone()),
+            ("foreign.json".to_string(), foreign.clone()),
             ("codex.json".to_string(), unowned),
-            ("codex-native-root-foreign.json".to_string(), claude),
+            ("codex-native-root-foreign.json".to_string(), foreign),
         ])
     );
     // A relogin that wins before cleanup is authoritative, even for a stale manager cache.
@@ -260,7 +263,7 @@ async fn logout_cleanup_deletes_running_native_copies_and_serializes_relogin() {
 }
 
 #[tokio::test]
-async fn logout_cleanup_stopped_api_only_preserves_claude_and_fails_on_unreadable_native() {
+async fn logout_cleanup_stopped_api_only_preserves_foreign_and_fails_on_unreadable_native() {
     use super::super::cli_proxy_logout::cleanup_cli_proxy_credentials;
     use codex_protocol::config_types::ForcedLoginMethod;
     let home = tempfile::tempdir().unwrap();
@@ -285,11 +288,11 @@ async fn logout_cleanup_stopped_api_only_preserves_claude_and_fails_on_unreadabl
     let dir = home.path().join("cli-proxy/auth");
     std::fs::create_dir_all(&dir).unwrap();
     let native = dir.join("codex-native-root-old.json");
-    let claude = dir.join("claude.json");
-    let reserved_claude = dir.join("codex-native-root-claude.json");
+    let foreign = dir.join("foreign.json");
+    let reserved_foreign = dir.join("codex-native-root-foreign.json");
     std::fs::write(&native, json!({"type":"codex"}).to_string()).unwrap();
-    std::fs::write(&claude, json!({"type":"claude"}).to_string()).unwrap();
-    std::fs::write(&reserved_claude, json!({"type":"claude"}).to_string()).unwrap();
+    std::fs::write(&foreign, json!({"type":"foreign"}).to_string()).unwrap();
+    std::fs::write(&reserved_foreign, json!({"type":"foreign"}).to_string()).unwrap();
     std::fs::write(home.path().join("auth.json"), "unreadable json").unwrap();
     assert!(
         cleanup_cli_proxy_credentials(home.path(), &manager, factory())
@@ -304,7 +307,7 @@ async fn logout_cleanup_stopped_api_only_preserves_claude_and_fails_on_unreadabl
         .await
         .unwrap();
     assert!(!native.exists());
-    assert!(claude.exists() && reserved_claude.exists());
+    assert!(foreign.exists() && reserved_foreign.exists());
     assert!(!home.path().join("cli-proxy/runtime.json").exists());
     assert!(!home.path().join("cli-proxy/config.yaml").exists());
     assert!(!home.path().join("cli-proxy/certificate.pem").exists());
@@ -532,10 +535,10 @@ async fn setup_and_catalogue_reconcile_disk_without_resetting_unchanged_cooldown
         ModelProviderInfo::create_cli_proxy_provider(),
         Some(manager.clone()),
     );
-    let claude = json!({"type": "claude", "access_token": "synthetic-claude", "cooldown": 123});
+    let foreign = json!({"type": "foreign", "access_token": "synthetic-foreign", "cooldown": 123});
     let unowned = json!({"type": "codex", "access_token": "synthetic-unowned"});
     fixture.files.lock().unwrap().extend([
-        ("claude.json".into(), claude.clone()),
+        ("foreign.json".into(), foreign.clone()),
         ("manual-codex.json".into(), unowned.clone()),
     ]);
     let generation = *manager.auth_change_receiver().borrow();
@@ -578,7 +581,7 @@ async fn setup_and_catalogue_reconcile_disk_without_resetting_unchanged_cooldown
     assert_eq!(
         *fixture.files.lock().unwrap(),
         BTreeMap::from([
-            ("claude.json".into(), claude),
+            ("foreign.json".into(), foreign),
             ("manual-codex.json".into(), unowned),
         ])
     );
@@ -707,14 +710,14 @@ async fn catalogue_auth_change_during_download_does_not_publish_stale_generation
 }
 
 #[tokio::test]
-async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejects_setup() {
+async fn empty_native_pool_preserves_foreign_and_unacknowledged_publication_rejects_setup() {
     let fixture = Fixture::new(Duration::ZERO).await;
-    let claude = json!({"type": "claude", "access_token": "synthetic-claude"});
+    let foreign = json!({"type": "foreign", "access_token": "synthetic-foreign"});
     fixture
         .files
         .lock()
         .unwrap()
-        .insert("claude.json".into(), claude.clone());
+        .insert("foreign.json".into(), foreign.clone());
     let manager = fixture.manager().await;
     let provider = create_model_provider(
         ModelProviderInfo::create_cli_proxy_provider(),
@@ -727,7 +730,7 @@ async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejec
     assert!(provider.api_auth().await.is_err());
     assert_eq!(
         *fixture.files.lock().unwrap(),
-        BTreeMap::from([("claude.json".into(), claude.clone())])
+        BTreeMap::from([("foreign.json".into(), foreign.clone())])
     );
     fixture.reject.store(false, Ordering::SeqCst);
     provider.api_auth().await.unwrap();
@@ -749,7 +752,7 @@ async fn empty_native_pool_preserves_claude_and_unacknowledged_publication_rejec
     );
     assert_eq!(
         *fixture.files.lock().unwrap(),
-        BTreeMap::from([("claude.json".into(), claude)])
+        BTreeMap::from([("foreign.json".into(), foreign)])
     );
 }
 

@@ -280,7 +280,7 @@ impl CliProxyModelsEndpoint {
     fn new(runtime: Option<CliProxyRuntime>, auth_manager: Option<Arc<AuthManager>>) -> Self {
         let identity = runtime.as_ref().map(|runtime| {
             let mut digest = Sha256::new();
-            digest.update(b"cli-proxy-models-v3-claude-generations");
+            digest.update(b"cli-proxy-models-v4");
             digest.update(runtime.home().as_os_str().as_encoded_bytes());
             format!("{:x}", digest.finalize())
         });

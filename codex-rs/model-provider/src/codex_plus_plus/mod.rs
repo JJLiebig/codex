@@ -1,4 +1,3 @@
-mod cli_proxy_claude;
 mod cli_proxy_credentials;
 mod cli_proxy_executable;
 mod cli_proxy_inventory;
@@ -9,9 +8,6 @@ mod cli_proxy_runtime;
 mod prepared_request;
 mod weekly_window_ping;
 
-pub use cli_proxy_claude::ClaudeAccount;
-pub use cli_proxy_claude::list_cli_proxy_claude_accounts;
-pub use cli_proxy_claude::prepare_cli_proxy_claude_login;
 pub use cli_proxy_logout::cleanup_cli_proxy_credentials;
 pub(crate) use cli_proxy_provider::CliProxyModelProvider;
 pub use cli_proxy_reset::cli_proxy_reset_ready;
@@ -19,7 +15,6 @@ pub use cli_proxy_reset::reconcile_cli_proxy_reset;
 pub use prepared_request::PreparedModelRequest;
 pub use prepared_request::ProxyRequestRoute;
 pub use prepared_request::prepare_configured_request;
-pub use prepared_request::remote_compaction_for_model;
 
 pub use weekly_window_ping::WeeklyWindowPingOutcome;
 pub use weekly_window_ping::WeeklyWindowPingRequest;

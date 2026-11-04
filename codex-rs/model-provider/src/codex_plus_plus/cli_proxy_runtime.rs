@@ -253,21 +253,6 @@ impl CliProxyRuntime {
         pinned_client(factory, self.tls_config()?, &state.endpoint().base_url)
     }
 
-    pub(super) fn claude_login_command(&self) -> io::Result<Command> {
-        let dir = self.home.join("cli-proxy");
-        let state = read_state(&dir.join("runtime.json"))?
-            .ok_or_else(|| io::Error::other("Claude sign-in needs the owned runtime"))?;
-        let executable = super::cli_proxy_executable::installed_executable(
-            /*explicit*/ None,
-            [state.executable],
-        )?
-        .ok_or_else(|| io::Error::other("The saved sign-in executable is incompatible"))?;
-        let mut command = Command::new(&executable);
-        configure_owned_command(&mut command, &dir);
-        command.arg("-claude-login");
-        Ok(command)
-    }
-
     fn tls_config(&self) -> io::Result<HttpClientTlsConfig> {
         let dir = self.home.join("cli-proxy");
         fs::metadata(dir.join("private-key.pem"))?;
@@ -325,7 +310,7 @@ fn write_config(path: &Path, dir: &Path, state: &RuntimeState) -> io::Result<()>
     let cert = yaml_path("certificate.pem")?;
     let key = yaml_path("private-key.pem")?;
     let text = format!(
-        "host: \"127.0.0.1\"\nport: {}\ntls:\n  enable: true\n  cert: {cert}\n  key: {key}\nauth-dir: {auth_dir}\napi-keys: [\"{}\"]\nremote-management:\n  allow-remote: false\n  secret-key: \"{}\"\n  disable-control-panel: true\nforce-model-prefix: true\ndisable-claude-cloak-mode: true\ndisable-image-generation: \"passthrough\"\nrequest-retry: 0\nmax-retry-interval: 0\nrequest-log: false\nlogging-to-file: false\nrouting:\n  session-affinity: true\nstreaming:\n  keepalive-seconds: 0\n  bootstrap-retries: 0\ncodex:\n  optimize-multi-agent-v2: true\n  identity-confuse: false\n",
+        "host: \"127.0.0.1\"\nport: {}\ntls:\n  enable: true\n  cert: {cert}\n  key: {key}\nauth-dir: {auth_dir}\napi-keys: [\"{}\"]\nremote-management:\n  allow-remote: false\n  secret-key: \"{}\"\n  disable-control-panel: true\nforce-model-prefix: true\ndisable-image-generation: \"passthrough\"\nrequest-retry: 0\nmax-retry-interval: 0\nrequest-log: false\nlogging-to-file: false\nrouting:\n  session-affinity: true\nstreaming:\n  keepalive-seconds: 0\n  bootstrap-retries: 0\ncodex:\n  optimize-multi-agent-v2: true\n  identity-confuse: false\n",
         state.port, state.inference_key, state.management_key
     );
     write_private(path, text.as_bytes())

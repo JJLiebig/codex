@@ -11,7 +11,6 @@ use codex_protocol::error::Result;
 use super::cli_proxy_credentials::owned_filename;
 use super::cli_proxy_inventory::CredentialModels;
 use crate::ModelProvider;
-use crate::RemoteCompactionSupport;
 use crate::ResolvedProviderAuth;
 
 /// Endpoint, credentials and wire model resolved together, before body encoding.
@@ -38,18 +37,6 @@ pub struct ProxyRequestRoute {
 }
 
 impl ProxyRequestRoute {
-    /// Identify only the provider advertised for this exact frozen wire model, not its account.
-    pub fn is_claude_model(&self, wire_model: &str) -> bool {
-        self.inventory.iter().any(|credential| {
-            !credential.disabled
-                && credential.source.is_none()
-                && credential.provider.as_deref() == Some("claude")
-                && credential.models.iter().any(|member| {
-                    member.id == wire_model && member.provider.as_deref() == Some("claude")
-                })
-        })
-    }
-
     pub fn is_suspended_auth_error(error: &codex_api::TransportError) -> bool {
         let codex_api::TransportError::Http {
             status,
@@ -125,30 +112,6 @@ impl ProxyRequestRoute {
             .auth_index
             .as_deref()
     }
-}
-
-/// Narrow owned compaction support using the exact prepared model's provider membership.
-pub async fn remote_compaction_for_model(
-    provider: &dyn ModelProvider,
-    model: &str,
-) -> Result<RemoteCompactionSupport> {
-    let support = provider.capabilities().remote_compaction;
-    if !provider.info().is_cli_proxy() {
-        return Ok(support);
-    }
-    let unavailable =
-        || CodexErr::UnsupportedOperation("Compaction is unavailable for this model".into());
-    let prepared = provider
-        .prepare_request(model)
-        .await?
-        .ok_or_else(unavailable)?;
-    let route = prepared.route.ok_or_else(unavailable)?;
-    Ok(if route.is_claude_model(&prepared.model) {
-        // Claude does not implement the Responses compaction_trigger protocol.
-        RemoteCompactionSupport::Unsupported
-    } else {
-        support
-    })
 }
 
 /// Preserve the configured-provider path for tools without session-scoped auth.

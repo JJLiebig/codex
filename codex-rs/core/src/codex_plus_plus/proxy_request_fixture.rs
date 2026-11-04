@@ -60,8 +60,8 @@ impl OwnedFixture {
             }
         });
         let files = Arc::new(Mutex::new(BTreeMap::from([(
-            "claude.json".into(),
-            json!({"type":"claude"}),
+            "foreign.json".into(),
+            json!({"type":"foreign"}),
         )])));
         let state = files.clone();
         Mock::given(wiremock::matchers::header("authorization", format!("Bearer {}", "b".repeat(64))))
@@ -72,14 +72,14 @@ impl OwnedFixture {
                     ("GET", "/v0/management/auth-files") => ResponseTemplate::new(200)
                         .insert_header("X-CPA-VERSION", "7.3.14")
                         .set_body_json(json!({"files": files.iter().map(|(name, record)| {
-                            json!({"name": name, "type": record["type"], "auth_index": if name == "claude.json" {"0000000000000002"} else if record["account_id"] == "upstream-b" {"0000000000000003"} else {"0000000000000001"}, "disabled": false})
+                            json!({"name": name, "type": record["type"], "auth_index": if name == "foreign.json" {"0000000000000002"} else if record["account_id"] == "upstream-b" {"0000000000000003"} else {"0000000000000001"}, "disabled": false})
                         }).collect::<Vec<_>>()})),
                     ("GET", "/v0/management/auth-files/download") => files.get(name.as_deref().unwrap()).map_or(ResponseTemplate::new(404), |record| ResponseTemplate::new(200).set_body_json(record)),
                     ("GET", "/v0/management/auth-files/models") => {
                         let models: Vec<_> = files.get(name.as_deref().unwrap()).map(|record| {
                             match record["prefix"].as_str() {
                                 Some(prefix) => json!({"id":format!("{prefix}/future-9.7"),"type":"openai","owned_by":"openai"}),
-                                None => json!({"id":"claude-new","type":"claude","owned_by":"anthropic"}),
+                                None => json!({"id":"foreign-new","type":"foreign","owned_by":"foreign"}),
                             }
                         }).into_iter().collect();
                         ResponseTemplate::new(200).set_body_json(json!({"models":models}))

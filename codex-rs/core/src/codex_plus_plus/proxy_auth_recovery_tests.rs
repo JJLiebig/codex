@@ -43,7 +43,7 @@ async fn owned_auth_recovery_is_guarded_and_bounded() -> anyhow::Result<()> {
         "quota_then_refresh",
         "twice",
         "local",
-        "claude",
+        "foreign",
         "mismatch",
         "malformed",
         "suspended",
@@ -109,8 +109,8 @@ async fn owned_auth_recovery_is_guarded_and_bounded() -> anyhow::Result<()> {
                 } else {
                     let trace = if case == "quota_then_refresh" {
                         "20260930010000-0000000000000003-aabbccdd"
-                    } else if matches!(case, "claude" | "mismatch") {
-                        CLAUDE_TRACE
+                    } else if matches!(case, "foreign" | "mismatch") {
+                        FOREIGN_TRACE
                     } else {
                         NATIVE_TRACE
                     };
@@ -139,8 +139,8 @@ async fn owned_auth_recovery_is_guarded_and_bounded() -> anyhow::Result<()> {
             TestCodexResponsesRequestKind::Turn,
         );
         let mut model = test_model_info();
-        model.slug = if case == "claude" {
-            "claude-new"
+        model.slug = if case == "foreign" {
+            "foreign-new"
         } else {
             "future-9.7"
         }

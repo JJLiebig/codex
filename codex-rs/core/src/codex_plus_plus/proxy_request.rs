@@ -68,12 +68,6 @@ impl OwnedRequest {
                     display_label,
                 }
             }
-        } else if self
-            .route
-            .as_ref()
-            .is_some_and(|route| route.is_claude_model(&self.wire_model))
-        {
-            InferenceAttribution::Claude
         } else {
             InferenceAttribution::Unknown
         }

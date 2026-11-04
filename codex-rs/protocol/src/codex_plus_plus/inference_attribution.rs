@@ -37,6 +37,7 @@ pub enum InferenceAttribution {
         #[ts(rename = "displayLabel")]
         display_label: Option<String>,
     },
+    // Historical attribution retained for reading existing rollouts; no longer produced.
     /// The frozen inventory proves the provider, without asserting a Claude account identity.
     Claude,
     Unknown,
