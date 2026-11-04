@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+import base64
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -14,6 +16,7 @@ import zipfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "codex_plus_plus"))
 
 import release  # noqa: E402
+import github_release  # noqa: E402
 
 
 VERSION = "0.144.0-fork.1"
@@ -48,6 +51,146 @@ def manifest(version: str) -> bytes:
 def write_npm_tarballs(directory: Path) -> None:
     for path, package_version, _tag in release.release_entries(VERSION, directory):
         write_tarball(path, {"package/package.json": manifest(package_version)})
+
+
+class FakeGitHub:
+    """Persist releases and uploaded bytes, rejecting overwrite like GitHub."""
+
+    def __init__(self):
+        self.releases = {}
+        self.latest = None
+        self.commit = "tag-source"
+        self.installers = {}
+
+    def gh(self, *args, body=None, missing=False):
+        if args[0] == "release":
+            action, tag = args[1:3]
+            release = self.releases[tag]
+            if action == "upload":
+                for path in args[3 : args.index("--repo")]:
+                    path = Path(path)
+                    if path.name in release["files"]:
+                        raise RuntimeError("Refusing overwrite")
+                    release["files"][path.name] = path.read_bytes()
+            else:
+                name = args[args.index("--pattern") + 1]
+                directory = Path(args[args.index("--dir") + 1])
+                (directory / name).write_bytes(release["files"][name])
+            return None
+        endpoint = args[1].split("/", 3)[3]
+        if endpoint.startswith("commits/"):
+            return {"sha": self.commit}
+        if endpoint.startswith("contents/"):
+            path, ref = endpoint.removeprefix("contents/").split("?ref=")
+            if ref != self.commit:
+                raise RuntimeError("Wrong installer source")
+            data = self.installers.setdefault(path, ("exact-tag:" + path).encode())
+            return {"content": base64.b64encode(data).decode()}
+        if endpoint == "releases/latest":
+            return self.releases.get(self.latest)
+        if endpoint.startswith("releases/tags/"):
+            return self.releases.get(endpoint.removeprefix("releases/tags/"))
+        if endpoint == "releases":
+            result = {**body, "id": len(self.releases) + 1, "files": {}}
+            self.releases[body["tag_name"]] = result
+            return result
+        release_id = int(endpoint.split("/")[1])
+        result = next(r for r in self.releases.values() if r["id"] == release_id)
+        if "/assets?" in endpoint:
+            return [
+                [
+                    {"name": n, "digest": "sha256:" + hashlib.sha256(b).hexdigest()}
+                    for n, b in result["files"].items()
+                ]
+            ]
+        result.update(body)
+        if body["make_latest"] == "true":
+            self.latest = result["tag_name"]
+        return result
+
+
+class GitHubReleaseTest(unittest.TestCase):
+    def test_ready_platform_append_repeat_conflict_and_late_old_retry(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            archives = Path(temporary)
+            github = FakeGitHub()
+            version = "1.2.3-fork.2"
+            tag = "codex-plus-plus-v" + version
+            with patch.object(github_release, "gh", side_effect=github.gh):
+                for index, platform in enumerate(release.PLATFORMS):
+                    archive = release.archive_path(archives, version, platform)
+                    archive.write_bytes(platform.target.encode())
+                    github_release.publish(
+                        "owner/repo",
+                        version,
+                        "tag-source",
+                        archives,
+                        None,
+                        platform.target,
+                    )
+                    published = github.releases[tag]["files"].copy()
+                    self.assertEqual(github.latest, tag)
+                    self.assertFalse(github.releases[tag]["draft"])
+                    self.assertEqual(
+                        len([n for n in published if n.startswith("codex-plus-plus-")]),
+                        (index + 1) * 2,
+                    )
+                    self.assertEqual(published[archive.name], platform.target.encode())
+                    self.assertEqual(
+                        published["install-codex-plus-plus.sh"],
+                        b"exact-tag:scripts/install/install-codex-plus-plus.sh",
+                    )
+                    github_release.publish(
+                        "owner/repo",
+                        version,
+                        "tag-source",
+                        archives,
+                        None,
+                        platform.target,
+                    )
+                    self.assertEqual(github.releases[tag]["files"], published)
+                with tempfile.TemporaryDirectory() as npm_temporary:
+                    npm = Path(npm_temporary)
+                    (npm / "root.tgz").write_bytes(b"all-platform root")
+                    github_release.publish(
+                        "owner/repo", version, "tag-source", archives, npm, None
+                    )
+                    for name, data in published.items():
+                        self.assertEqual(github.releases[tag]["files"][name], data)
+                    published = github.releases[tag]["files"].copy()
+                    self.assertEqual(published["root.tgz"], b"all-platform root")
+                archive.write_bytes(b"conflicting bytes")
+                with self.assertRaisesRegex(RuntimeError, "Conflicting release asset"):
+                    github_release.publish(
+                        "owner/repo",
+                        version,
+                        "tag-source",
+                        archives,
+                        None,
+                        platform.target,
+                    )
+                self.assertEqual(github.releases[tag]["files"], published)
+                archive.write_bytes(platform.target.encode())
+                newer = "1.2.3-fork.10"
+                newer_archive = release.archive_path(archives, newer, platform)
+                newer_archive.write_bytes(b"newer")
+                github_release.publish(
+                    "owner/repo", newer, "tag-source", archives, None, platform.target
+                )
+                github_release.publish(
+                    "owner/repo", version, "tag-source", archives, None, platform.target
+                )
+                self.assertEqual(github.latest, "codex-plus-plus-v" + newer)
+                with self.assertRaisesRegex(RuntimeError, "validated source run"):
+                    github_release.publish(
+                        "owner/repo",
+                        version,
+                        "other-source",
+                        archives,
+                        None,
+                        platform.target,
+                    )
+                self.assertEqual(github.releases[tag]["files"], published)
 
 
 class CodexPlusPlusReleaseTest(unittest.TestCase):

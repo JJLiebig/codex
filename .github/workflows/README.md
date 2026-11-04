@@ -46,3 +46,28 @@ Exhausted or expired releases need operator investigation rather than more retri
 - If a build/test/clippy check can be expressed in Bazel, prefer putting the PR-time version in `bazel.yml`.
 - Keep `rust-ci.yml` fast enough that it usually does not dominate PR latency.
 - Reserve `rust-ci-full.yml` for heavyweight Cargo-native coverage that Bazel does not replace yet.
+
+## Ready Codex++ platform assets
+
+Each successful platform build publishes its standalone archive and SHA-256
+sidecar immediately, without waiting for other builds or npm publication. Common
+installers and their sidecars always come from the validated release-tag commit.
+Later platforms append missing assets; existing bytes must match and are never
+clobbered. The repository must allow mutable releases: immutable GitHub releases
+cannot accept subsequent platform assets; publication fails rather than changing
+repository security settings.
+
+All partial publishers and the final GitHub publisher share one repository-wide
+job concurrency group with `queue: max` and `cancel-in-progress: false`.
+Publication compares numeric release versions before setting GitHub latest, so an
+older platform finishing late cannot rewind it. Root npm staging and publication,
+including its shared latest tag, retain their existing all-platform gates. Only
+that finalization deletes intermediate artifacts, after partial publishers finish.
+
+Latest standalone installers fail before invoking the managed installer if the
+latest release lacks this machine's archive or checksum, preserving the installed
+generation. They do not select an older platform release. A partial GitHub latest
+therefore indicates release availability, not readiness for every platform; npm
+and the Rust update/status presentation are unchanged. Explicit failed-run recovery
+retains its exact tag/source-run identity checks. This change does not activate a
+release or re-enable the allocation-retry workflow.
