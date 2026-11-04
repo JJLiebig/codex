@@ -717,12 +717,10 @@ impl LocalAgentControl {
         let mut start_options = StartThreadOptions {
             session_source: session_source.clone(),
             thread_source: session_source.as_ref().map(|_| ThreadSource::Subagent),
-            environments: options.environment_requests.clone().or_else(|| {
-                options
-                    .environments
-                    .as_ref()
-                    .map(TurnEnvironmentSnapshot::inheritable_requests)
-            }),
+            environments: options
+                .environments
+                .as_ref()
+                .map(TurnEnvironmentSnapshot::inheritable_requests),
             inherited_environments,
             disabled_plugin_ids,
             ..StartThreadOptions::new(config.clone())
