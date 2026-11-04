@@ -74,24 +74,41 @@ async fn rpc_accepts_extra_fields_and_rejects_core_errors() {
 async fn kept_terminal_tracks_main_session_and_disarms_only_on_request() {
     exercise_worker(
         /*kept*/ true, /*deliberate*/ true, /*supported*/ true,
+        /*initially_persisted*/ true,
     )
     .await;
     exercise_worker(
         /*kept*/ true, /*deliberate*/ true, /*supported*/ false,
+        /*initially_persisted*/ true,
     )
     .await;
     exercise_worker(
         /*kept*/ true, /*deliberate*/ false, /*supported*/ true,
+        /*initially_persisted*/ true,
     )
     .await;
     exercise_worker(
         /*kept*/ false, /*deliberate*/ true, /*supported*/ true,
+        /*initially_persisted*/ true,
     )
     .await;
 }
 
-async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
+#[tokio::test]
+async fn empty_threads_relaunch_fresh_and_upgrade_after_history_is_persisted() {
+    exercise_worker(
+        /*kept*/ true, /*deliberate*/ true, /*supported*/ true,
+        /*initially_persisted*/ false,
+    )
+    .await;
+}
+
+async fn exercise_worker(kept: bool, deliberate: bool, supported: bool, initially_persisted: bool) {
     let root = tempfile::tempdir().unwrap();
+    let rollout_path = root.path().join("rollout.jsonl");
+    if initially_persisted {
+        std::fs::write(&rollout_path, "persisted").unwrap();
+    }
     #[cfg(unix)]
     let socket = root.path().join("core.sock").to_string_lossy().into_owned();
     #[cfg(windows)]
@@ -165,10 +182,11 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
         ("main-b", root.path()),
         ("main-b", second_cwd.as_path()),
     ] {
-        tx.send_replace(Update::Session {
+        tx.send_replace(Update::Session(RecoverySession {
             id: id.into(),
             cwd: cwd.to_string_lossy().into_owned(),
-        });
+            rollout_path: rollout_path.clone(),
+        }));
         let request = tokio::time::timeout(Duration::from_secs(2), requests_rx.recv())
             .await
             .unwrap()
@@ -180,22 +198,47 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
                 continue;
             }
             let registration = requests_rx.recv().await.unwrap();
-            assert_eq!(
-                registration["params"]["recovery"],
-                json!({
-                    "argv":["codex.exe", "--no-daemon", "resume", id, "--cd", cwd], "cwd":cwd
-                })
-            );
+            if !rollout_path.exists() {
+                assert_eq!(
+                    registration["params"]["recovery"],
+                    json!({
+                        "argv":["codex.exe", "--no-daemon", "--cd", cwd], "cwd":cwd
+                    })
+                );
+                // First durable history upgrades the plain relaunch without changing session/cwd.
+                std::fs::write(&rollout_path, "persisted").unwrap();
+                assert_eq!(
+                    tokio::time::timeout(Duration::from_secs(3), requests_rx.recv())
+                        .await
+                        .unwrap()
+                        .unwrap()["method"],
+                    "terminal.get"
+                );
+                assert_eq!(requests_rx.recv().await.unwrap()["method"], "rpc.discover");
+                let upgrade = requests_rx.recv().await.unwrap();
+                assert_eq!(
+                    upgrade["params"]["recovery"],
+                    json!({"argv":["codex.exe", "--no-daemon", "resume", id, "--cd", cwd], "cwd":cwd})
+                );
+            } else {
+                assert_eq!(
+                    registration["params"]["recovery"],
+                    json!({
+                        "argv":["codex.exe", "--no-daemon", "resume", id, "--cd", cwd], "cwd":cwd
+                    })
+                );
+            }
             // Losing the main attachment must disarm a deleted/reset thread and permit rearming.
             tx.send_replace(Update::Pending);
             assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.get");
             assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], false);
             assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
             assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
-            tx.send_replace(Update::Session {
+            tx.send_replace(Update::Session(RecoverySession {
                 id: id.into(),
                 cwd: cwd.to_string_lossy().into_owned(),
-            });
+                rollout_path: rollout_path.clone(),
+            }));
             assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.get");
             assert_eq!(requests_rx.recv().await.unwrap()["method"], "rpc.discover");
             assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.keep");

@@ -32,11 +32,15 @@ struct Worker {
 enum Update {
     #[default]
     Pending,
-    Session {
-        id: String,
-        cwd: String,
-    },
+    Session(RecoverySession),
     Quit,
+}
+
+#[derive(Clone, PartialEq)]
+struct RecoverySession {
+    id: String,
+    cwd: String,
+    rollout_path: std::path::PathBuf,
 }
 
 pub(crate) fn start(cli: &Cli, remote: Option<&crate::RemoteAppServerEndpoint>) {
@@ -71,11 +75,16 @@ pub(crate) fn start(cli: &Cli, remote: Option<&crate::RemoteAppServerEndpoint>) 
 pub(crate) fn set_primary(session: Option<&ThreadSessionState>) {
     if let Some(worker) = WORKER.get() {
         let next = session
-            .filter(|session| session.rollout_path.is_some())
-            .map_or(Update::Pending, |session| Update::Session {
-                id: session.thread_id.to_string(),
-                cwd: session.cwd.to_string_lossy().into_owned(),
-            });
+            .and_then(|session| {
+                session.rollout_path.as_ref().map(|path| {
+                    Update::Session(RecoverySession {
+                        id: session.thread_id.to_string(),
+                        cwd: session.cwd.to_string_lossy().into_owned(),
+                        rollout_path: path.clone(),
+                    })
+                })
+            })
+            .unwrap_or(Update::Pending);
         worker.tx.send_if_modified(|current| {
             if *current == Update::Quit || *current == next {
                 return false;
@@ -191,10 +200,26 @@ async fn run(
     mut rx: watch::Receiver<Update>,
 ) {
     let mut owned = false;
-    while rx.changed().await.is_ok() {
-        let update = rx.borrow_and_update().clone();
+    let mut pending_persistence: Option<RecoverySession> = None;
+    loop {
+        let update = tokio::select! {
+            biased;
+            changed = rx.changed() => {
+                if changed.is_err() { break; }
+                rx.borrow_and_update().clone()
+            }
+            _ = tokio::time::sleep(Duration::from_secs(1)), if pending_persistence.is_some() => {
+                let session = pending_persistence.as_ref().expect("timer requires a pending session");
+                if !matches!(tokio::time::timeout(DEADLINE, tokio::fs::try_exists(&session.rollout_path)).await, Ok(Ok(true))) {
+                    continue;
+                }
+                // A main switch or quit can arrive while the filesystem check is pending.
+                rx.borrow_and_update().clone()
+            }
+        };
         let quit = update == Update::Quit;
         if matches!(update, Update::Quit | Update::Pending) {
+            pending_persistence = None;
             if owned {
                 let result = clear_registration(&socket, &terminal, &scope).await;
                 if result.is_ok() {
@@ -210,10 +235,12 @@ async fn run(
         }
         let result = tokio::time::timeout(DEADLINE, async {
             match update {
-                Update::Session { id, cwd } => {
+                Update::Session(session) => {
                     let record =
                         rpc(&socket, "terminal.get", json!({"terminal": terminal})).await?;
                     if record["keep"] != true || record["state"] != "live" {
+                        pending_persistence = None;
+                        owned = false;
                         return Ok(());
                     }
                     // Stock core ignores unknown fields: discover before sending a private request.
@@ -231,8 +258,12 @@ async fn run(
                     if !supported {
                         return Ok(());
                     }
+                    let persisted = tokio::fs::try_exists(&session.rollout_path).await?;
                     let mut command = argv.clone();
-                    command.extend(["resume".into(), id, "--cd".into(), cwd.clone()]);
+                    if persisted {
+                        command.extend(["resume".into(), session.id.clone()]);
+                    }
+                    command.extend(["--cd".into(), session.cwd.clone()]);
                     // Managed Codex launchers register once before launching us. Taking over with
                     // the actual main ID/cwd preserves recovery across /new and cwd changes.
                     owned = true;
@@ -240,10 +271,11 @@ async fn run(
                         &socket,
                         "terminal.keep",
                         json!({"terminal": terminal, "expected_scope": scope,
-                        "keep": true, "recovery": {"argv": command, "cwd": cwd}}),
+                        "keep": true, "recovery": {"argv": command, "cwd": session.cwd}}),
                     )
                     .await?;
                     crate::terminal_program_status::refresh_recovery_binding();
+                    pending_persistence = (!persisted).then_some(session);
                 }
                 Update::Quit | Update::Pending => {}
             }
@@ -252,9 +284,6 @@ async fn run(
         .await;
         if !matches!(result, Ok(Ok(()))) {
             tracing::debug!(?result, "Herdr recovery registration unavailable");
-        }
-        if quit {
-            break;
         }
     }
 }
