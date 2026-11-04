@@ -1343,7 +1343,8 @@ See the Codex keymap documentation for supported actions and examples."
                     app.pending_open_resume_picker = false;
                     let result = Box::pin(
                         app.open_resume_picker(tui, backends.session_at_mut(displayed_session)),
-                    ).await;
+                    )
+                    .await;
                     match crate::codex_plus_plus::herdr_recovery::after_event(result).await {
                         Ok(AppRunControl::Continue) => {}
                         Ok(AppRunControl::Exit(reason)) => break Ok(reason),
