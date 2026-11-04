@@ -219,18 +219,24 @@ class RetryTest(unittest.TestCase):
         self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/40/rerun"])
 
     def test_deleted_tag_is_skipped_but_other_api_errors_are_not_hidden(self):
-        for status in (404, 403, 502):
-            with self.subTest(status=status):
+        for status, message, missing in (
+            (404, "Not Found", True),
+            (422, "No commit found for SHA: codex-plus-plus-v0.166.0-fork.5", True),
+            (422, "Validation Failed", False),
+            (403, "Forbidden", False),
+            (502, "Bad Gateway", False),
+        ):
+            with self.subTest(status=status, message=message):
                 api = FakeGitHub()
                 api.runs.append(
                     source_run(id=101, head_branch="codex-plus-plus-v0.166.0-fork.5")
                 )
                 api.commits["codex-plus-plus-v0.166.0-fork.5"] = (
                     subprocess.CalledProcessError(
-                        1, ["gh", "api"], stderr=f"gh: request failed (HTTP {status})"
+                        1, ["gh", "api"], stderr=f"gh: {message} (HTTP {status})"
                     )
                 )
-                if status == 404:
+                if missing:
                     self.assertEqual(
                         self.run_controller(api),
                         {"status": "retried", "run": 100, "job": 40},

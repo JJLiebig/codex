@@ -50,7 +50,10 @@ def retry_latest(api, repository, now):
         try:
             commit = api(f"{root}/commits/{run['head_branch']}")
         except subprocess.CalledProcessError as error:
-            if "(HTTP 404)" not in error.stderr:
+            missing_ref = "(HTTP 422)" in error.stderr and (
+                "No commit found for SHA:" in error.stderr
+            )
+            if "(HTTP 404)" not in error.stderr and not missing_ref:
                 raise
             continue
         if commit["sha"] == run["head_sha"]:
