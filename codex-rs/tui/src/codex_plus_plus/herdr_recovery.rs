@@ -74,7 +74,7 @@ pub(crate) fn set_primary(session: Option<&ThreadSessionState>) {
             .filter(|session| session.rollout_path.is_some())
             .map_or(Update::Pending, |session| Update::Session {
                 id: session.thread_id.to_string(),
-                cwd: session.cwd.to_string(),
+                cwd: session.cwd.to_string_lossy().into_owned(),
             });
         worker.tx.send_if_modified(|current| {
             if *current == Update::Quit || *current == next {

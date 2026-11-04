@@ -124,7 +124,7 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
             let request: Value = serde_json::from_str(&line).unwrap();
             let result = match request["method"].as_str().unwrap() {
                 "terminal.get" => json!({"keep":kept, "state":"live"}),
-                "rpc.discover" => {
+                "rpc.discover" if supported => {
                     json!({"methods":[{"name":"terminal.keep", "params":[{"name":"recovery"},{"name":"expected_scope"}]}]})
                 }
                 "rpc.discover" => json!({"methods":[]}),
