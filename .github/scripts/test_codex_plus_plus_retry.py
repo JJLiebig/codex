@@ -95,6 +95,7 @@ class RetryTest(unittest.TestCase):
     def test_next_pass_retries_untouched_voice_after_app_succeeds(self):
         api = FakeGitHub()
         api.runs[0]["run_attempt"] = 2
+        api.runs[0]["conclusion"] = "success"
         api.jobs.append(job("build-macos / app", 60, attempt=2))
         self.assertEqual(self.run_controller(api)["job"], 30)
         self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/30/rerun"])
@@ -115,11 +116,10 @@ class RetryTest(unittest.TestCase):
         self.assertEqual(self.run_controller(api)["status"], "skipped")
         self.assertEqual(api.posts, [])
 
-    def test_active_queued_successful_expired_and_capped_runs_do_not_retry(self):
+    def test_active_queued_expired_and_capped_runs_do_not_retry(self):
         for changes in (
             {"status": "in_progress"},
             {"status": "queued"},
-            {"conclusion": "success"},
             {"run_attempt": 4},
             {"created_at": (NOW - timedelta(days=1)).isoformat()},
             {"created_at": (NOW - timedelta(days=2)).isoformat()},
@@ -129,6 +129,15 @@ class RetryTest(unittest.TestCase):
                 api.runs[0].update(changes)
                 self.assertEqual(self.run_controller(api)["status"], "skipped")
                 self.assertEqual(api.posts, [])
+
+    def test_successful_macos_jobs_do_not_retry(self):
+        api = FakeGitHub()
+        api.runs[0]["conclusion"] = "success"
+        for entry in api.jobs:
+            if entry["name"] in ("build-macos / app", "build-macos / voice"):
+                entry["conclusion"] = "success"
+        self.assertEqual(self.run_controller(api)["status"], "skipped")
+        self.assertEqual(api.posts, [])
 
     def test_identity_requires_exact_workflow_push_tag_and_sha(self):
         for changes, commit in (

@@ -49,8 +49,6 @@ def retry_latest(api, repository, now):
     _, _, run = max(candidates)
     if run["status"] != "completed":
         return {"status": "skipped", "reason": "latest release still active"}
-    if run["conclusion"] not in ("failure", "cancelled"):
-        return {"status": "skipped", "reason": "latest release needs no retry"}
     # Three extra run attempts total, shared by app and voice; never reset on a new job.
     if run["run_attempt"] >= 4:
         return {"status": "skipped", "reason": "three extra attempts exhausted"}
