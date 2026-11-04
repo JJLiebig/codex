@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -22,6 +24,30 @@ from build_codex_plus_plus import versioned_package_manifest  # noqa: E402
 
 
 class BuildCodexPlusPlusTest(unittest.TestCase):
+    def test_build_commands_accept_default_root_and_explicit_override(self) -> None:
+        env = dict(os.environ)
+        env.pop("CODEX_REPO_ROOT", None)
+        with tempfile.TemporaryDirectory() as temp:
+            for script in ("build_codex_package.py", "build_codex_plus_plus.py"):
+                for cwd, overrides in (
+                    (REPO_ROOT, {}),
+                    (Path(temp), {"CODEX_REPO_ROOT": str(REPO_ROOT)}),
+                ):
+                    with self.subTest(script=script, cwd=cwd):
+                        result = subprocess.run(
+                            [
+                                sys.executable,
+                                str(REPO_ROOT / "scripts" / script),
+                                "--help",
+                            ],
+                            cwd=cwd,
+                            env={**env, **overrides},
+                            capture_output=True,
+                            text=True,
+                        )
+                        self.assertEqual(result.returncode, 0, result.stderr)
+                        self.assertIn("usage:", result.stdout)
+
     def test_default_version_advances_the_fork_release(self) -> None:
         with patch("build_codex_plus_plus.subprocess.run") as run:
             run.return_value.stdout = "\n".join(
