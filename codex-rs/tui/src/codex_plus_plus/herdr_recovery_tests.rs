@@ -106,6 +106,7 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
     #[cfg(windows)]
     let server_socket = socket.clone();
     let peer = tokio::spawn(async move {
+        let mut fail_restore = true;
         loop {
             #[cfg(unix)]
             let (stream, _) = listener.accept().await.unwrap();
@@ -130,8 +131,20 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
                 "terminal.keep" => json!({}),
                 other => panic!("unexpected method: {other}"),
             };
+            let is_restore = request["method"] == "terminal.keep"
+                && request["params"]["keep"] == true
+                && request["params"].get("recovery").is_none();
+            let reply = if is_restore && fail_restore {
+                fail_restore = false;
+                json!({"id":1,"error":{"code":-32603}})
+            } else {
+                if is_restore {
+                    fail_restore = true;
+                }
+                json!({"id":1,"result":result})
+            };
             stream
-                .write_all(format!("{}\n", json!({"id":1, "result":result})).as_bytes())
+                .write_all(format!("{reply}\n").as_bytes())
                 .await
                 .unwrap();
             requests_tx.send(request).unwrap();
@@ -178,6 +191,7 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
             assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.get");
             assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], false);
             assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
+            assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
             tx.send_replace(Update::Session {
                 id: id.into(),
                 cwd: cwd.to_string_lossy().into_owned(),
@@ -198,6 +212,7 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
     if kept && deliberate && supported {
         assert_eq!(requests_rx.recv().await.unwrap()["method"], "terminal.get");
         assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], false);
+        assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
         assert_eq!(requests_rx.recv().await.unwrap()["params"]["keep"], true);
     }
     assert!(requests_rx.try_recv().is_err());

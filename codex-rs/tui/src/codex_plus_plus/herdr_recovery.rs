@@ -113,7 +113,7 @@ async fn deliberate_exit() {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .take();
         if let Some(task) = task {
-            let _ = tokio::time::timeout(DEADLINE * 3, task).await;
+            let _ = tokio::time::timeout(DEADLINE * 6, task).await;
         }
     }
 }
@@ -191,6 +191,20 @@ async fn run(
     while rx.changed().await.is_ok() {
         let update = rx.borrow_and_update().clone();
         let quit = update == Update::Quit;
+        if matches!(update, Update::Quit | Update::Pending) {
+            if owned {
+                let result = clear_registration(&socket, &terminal, &scope).await;
+                if result.is_ok() {
+                    owned = false;
+                } else {
+                    tracing::debug!(?result, "Herdr recovery cleanup unavailable");
+                }
+            }
+            if quit {
+                break;
+            }
+            continue;
+        }
         let result = tokio::time::timeout(DEADLINE, async {
             match update {
                 Update::Session { id, cwd } => {
@@ -228,27 +242,6 @@ async fn run(
                     .await?;
                     crate::terminal_program_status::refresh_recovery_binding();
                 }
-                Update::Quit | Update::Pending if owned => {
-                    let record =
-                        rpc(&socket, "terminal.get", json!({"terminal": terminal})).await?;
-                    if record["keep"] != true {
-                        return Ok(());
-                    }
-                    rpc(
-                        &socket,
-                        "terminal.keep",
-                        json!({"terminal": terminal, "expected_scope": scope, "keep": false}),
-                    )
-                    .await?;
-                    // Clearing recovery currently requires keep=false; restore the user's kept shell.
-                    rpc(
-                        &socket,
-                        "terminal.keep",
-                        json!({"terminal": terminal, "expected_scope": scope, "keep": true}),
-                    )
-                    .await?;
-                    owned = false;
-                }
                 Update::Quit | Update::Pending => {}
             }
             Ok::<_, anyhow::Error>(())
@@ -261,6 +254,35 @@ async fn run(
             break;
         }
     }
+}
+
+// Clearing and restoration are separate API calls. Always attempt restoration, even when
+// the clear acknowledgement times out after its write, using fresh bounded request budgets.
+async fn clear_registration(socket: &str, terminal: &str, scope: &str) -> anyhow::Result<()> {
+    let record = bounded_rpc(socket, "terminal.get", json!({"terminal": terminal})).await?;
+    if record["keep"] != true {
+        return Ok(());
+    }
+    let cleared = bounded_rpc(
+        socket,
+        "terminal.keep",
+        json!({"terminal": terminal, "expected_scope": scope, "keep": false}),
+    )
+    .await;
+    let params = json!({"terminal": terminal, "expected_scope": scope, "keep": true});
+    let mut restored = bounded_rpc(socket, "terminal.keep", params.clone()).await;
+    if restored.is_err() {
+        restored = bounded_rpc(socket, "terminal.keep", params).await;
+    }
+    cleared?;
+    restored?;
+    Ok(())
+}
+
+async fn bounded_rpc(socket: &str, method: &str, params: Value) -> anyhow::Result<Value> {
+    tokio::time::timeout(DEADLINE, rpc(socket, method, params))
+        .await
+        .context("Herdr request timed out")?
 }
 
 async fn rpc(socket: &str, method: &str, params: Value) -> anyhow::Result<Value> {
