@@ -1600,17 +1600,6 @@ async fn maybe_run_previous_model_inline_compact(
         .capture_speculative_step_context(Arc::clone(turn_context), cancellation_token)
         .await?;
 
-    if crate::compact::proxy_compaction::maybe_run_readable_handoff(
-        sess,
-        &previous_model_turn_context,
-        &replacement_step_context,
-        usage_limit_account_attempts,
-    )
-    .await?
-    {
-        return Ok(());
-    }
-
     let reason = if should_compact_for_comp_hash_change {
         CompactionReason::CompHashChanged
     } else {
@@ -1710,12 +1699,7 @@ async fn run_auto_compact(
         return Ok(true);
     }
 
-    match codex_model_provider::remote_compaction_for_model(
-        turn_context.provider.as_ref(),
-        &turn_context.model_info().slug,
-    )
-    .await?
-    {
+    match turn_context.provider.capabilities().remote_compaction {
         RemoteCompactionSupport::V2 => {
             let has_candidate = candidate.is_some();
             if !has_candidate {

@@ -97,23 +97,23 @@ fn exact_route_rejects_missing_selected_membership_and_conflicting_ownership() {
             .is_err()
         );
     }
-    let claude = CredentialModels {
+    let foreign = CredentialModels {
         source: None,
-        auth_index: Some("claude-a".into()),
-        name: "claude.json".into(),
-        provider: Some("claude".into()),
+        auth_index: Some("foreign-a".into()),
+        name: "foreign.json".into(),
+        provider: Some("foreign".into()),
         prefix: None,
         disabled: false,
         models: vec![RegisteredModel {
-            id: "new/claude".into(),
-            provider: Some("claude".into()),
-            owned_by: Some("anthropic".into()),
+            id: "new/foreign".into(),
+            provider: Some("foreign".into()),
+            owned_by: Some("foreign".into()),
         }],
     };
     let (wire, route) = resolve_route(
-        "new/claude",
+        "new/foreign",
         Some(&sources[0]),
-        vec![claude.clone(), claude],
+        vec![foreign.clone(), foreign],
         /*auth_revision*/ 7,
     )
     .unwrap();
@@ -123,31 +123,8 @@ fn exact_route_rejects_missing_selected_membership_and_conflicting_ownership() {
             route.native_source(),
             route.native_auth_index()
         ),
-        ("new/claude", None, None)
+        ("new/foreign", None, None)
     );
-}
-
-#[tokio::test]
-async fn non_owned_compaction_keeps_capabilities_without_resolving_auth() {
-    for (name, expected) in [
-        ("OpenAI", RemoteCompactionSupport::V2),
-        ("Custom", RemoteCompactionSupport::Unsupported),
-    ] {
-        let provider = crate::create_model_provider(
-            codex_model_provider_info::ModelProviderInfo {
-                name: name.into(),
-                env_key: Some("CODEX_TEST_MISSING_COMPACTION_KEY".into()),
-                ..Default::default()
-            },
-            /*auth_manager*/ None,
-        );
-        assert_eq!(
-            remote_compaction_for_model(provider.as_ref(), "claude-new")
-                .await
-                .unwrap(),
-            expected
-        );
-    }
 }
 
 #[tokio::test]

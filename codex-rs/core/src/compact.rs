@@ -62,10 +62,6 @@ pub use codex_prompts::SUMMARIZATION_PROMPT;
 pub use codex_prompts::SUMMARY_PREFIX;
 const COMPACT_USER_MESSAGE_MAX_TOKENS: usize = 20_000;
 
-#[path = "codex_plus_plus/proxy_compaction.rs"]
-pub(crate) mod proxy_compaction;
-use proxy_compaction::LocalCompactionMode;
-
 /// Thread-local policy that preserves inherited context without changing model or skill budgets.
 /// Insert into `StartThreadOptions::thread_extension_init` to disable automatic compaction.
 pub struct AutoCompactionDisabled;
@@ -152,7 +148,6 @@ pub(crate) async fn run_inline_auto_compact_task(
             phase,
         ),
         Some(usage_limit_account_attempts),
-        LocalCompactionMode::Standard,
     )
     .await?;
     Ok(())
@@ -177,7 +172,6 @@ pub(crate) async fn run_compact_task(
             CompactionPhase::StandaloneTurn,
         ),
         /*usage_limit_account_attempts*/ None,
-        LocalCompactionMode::Standard,
     )
     .await?;
     Ok(())
@@ -192,7 +186,6 @@ async fn run_compact_task_inner(
     world_state: Arc<WorldState>,
     compaction_metadata: CompactionTurnMetadata,
     usage_limit_account_attempts: Option<&mut HashSet<String>>,
-    mode: LocalCompactionMode,
 ) -> CodexResult<()> {
     let trigger = compaction_metadata.trigger();
     let reason = compaction_metadata.reason();
@@ -230,7 +223,6 @@ async fn run_compact_task_inner(
         world_state,
         compaction_metadata,
         usage_limit_account_attempts,
-        mode,
     )
     .await;
     let status = compaction_status_from_result(&result);
@@ -283,7 +275,6 @@ async fn run_compact_task_inner_impl(
     world_state: Arc<WorldState>,
     compaction_metadata: CompactionTurnMetadata,
     usage_limit_account_attempts: Option<&mut HashSet<String>>,
-    mode: LocalCompactionMode,
 ) -> CodexResult<String> {
     let compaction_item = TurnItem::ContextCompaction(ContextCompactionItem::new());
     sess.emit_turn_item_started(&turn_context, &compaction_item)
@@ -356,7 +347,6 @@ async fn run_compact_task_inner_impl(
             &prompt,
             usage_limit_account_attempts,
             compaction_metadata.phase(),
-            mode,
         )
         .await;
 
@@ -364,7 +354,6 @@ async fn run_compact_task_inner_impl(
             Ok(response) => {
                 break response;
             }
-            Err(err) if mode == LocalCompactionMode::ReadableHandoff => return Err(err),
             Err(err)
                 if matches!(
                     err.details(),
@@ -435,17 +424,23 @@ async fn run_compact_task_inner_impl(
 
     let history_snapshot = sess.clone_history().await;
     let history_items = history_snapshot.annotated_items();
-    let summary_suffix = if mode.buffers_output(compaction_metadata.phase()) {
+    let summary_suffix = if matches!(compaction_metadata.phase(), CompactionPhase::PostTurn) {
         get_last_assistant_message_from_turn(compaction_response.output.iter())
             .filter(|summary| !summary.trim().is_empty())
-            .ok_or_else(|| client_session.attribute_owned_error(mode.missing_summary_error()))?
+            .ok_or_else(|| {
+                client_session.attribute_owned_error(CodexErr::Stream(
+                    "Post-turn compaction completed without an assistant summary".into(),
+                ))
+            })?
     } else {
         get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default()
     };
     let summary_text = format!("{SUMMARY_PREFIX}\n{summary_suffix}");
-    let mut new_history = mode
-        .replacement_history(history_items, &summary_text)
-        .map_err(|err| client_session.attribute_owned_error(err))?;
+    let mut new_history = build_compacted_history(
+        Vec::new(),
+        &collect_annotated_user_messages(history_items),
+        &summary_text,
+    );
     if let Some(summary_item) = new_history.last_mut() {
         // This replacement history skips `record_conversation_items`; only the appended summary
         // belongs to this compaction turn.
@@ -869,7 +864,6 @@ async fn drain_to_completed(
     prompt: &Prompt,
     usage_limit_account_attempts: &mut HashSet<String>,
     phase: CompactionPhase,
-    mode: LocalCompactionMode,
 ) -> CodexResult<CompactionResponse> {
     client_session.begin_usage_limit_failover_tracking(usage_limit_account_attempts);
     let mut includes_reasoning = turn_context.model_info().use_responses_lite;
@@ -923,7 +917,7 @@ async fn drain_to_completed(
                 usage_metadata,
                 ..
             }) => {
-                if !mode.buffers_output(phase) {
+                if !matches!(phase, CompactionPhase::PostTurn) {
                     for item in std::mem::take(&mut output) {
                         sess.record_annotated_conversation_items(
                             turn_context,

@@ -18,7 +18,7 @@ mod auth_recovery;
 mod compaction;
 
 const NATIVE_TRACE: &str = "20260930010000-0000000000000001-aabbccdd";
-const CLAUDE_TRACE: &str = "20260930010000-0000000000000002-aabbccdd";
+const FOREIGN_TRACE: &str = "20260930010000-0000000000000002-aabbccdd";
 const COMPLETED: &str =
     "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"done\",\"output\":[]}}\n\n";
 const QUOTA: &str = "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"type\":\"usage_limit_reached\"}}}\n\n";
@@ -29,8 +29,8 @@ async fn owned_compaction_failures_preserve_source_in_terminal_event() -> anyhow
     for (remote, model, body, trace) in [
         (false, "future-9.7", PARTIAL, NATIVE_TRACE),
         (true, "future-9.7", PARTIAL, NATIVE_TRACE),
-        (false, "claude-new", QUOTA, CLAUDE_TRACE),
-        (true, "claude-new", QUOTA, CLAUDE_TRACE),
+        (false, "foreign-new", QUOTA, FOREIGN_TRACE),
+        (true, "foreign-new", QUOTA, FOREIGN_TRACE),
     ] {
         let fixture = OwnedFixture::new().await?;
         let source = fixture
@@ -42,8 +42,8 @@ async fn owned_compaction_failures_preserve_source_in_terminal_event() -> anyhow
         let Some(NativeCredentialSource::Root(id)) = source else {
             panic!("synthetic root account");
         };
-        let expected = Some(if model == "claude-new" {
-            InferenceAttribution::Claude
+        let expected = Some(if model == "foreign-new" {
+            InferenceAttribution::Unknown
         } else {
             InferenceAttribution::ServedNative {
                 source: InferenceNativeSource::Root,
@@ -146,8 +146,8 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
     let oversized_trace = "x".repeat(129);
     for (model, trace) in [
         ("future-9.7", Some(NATIVE_TRACE)),
-        ("claude-new", Some(CLAUDE_TRACE)),
-        ("future-9.7", Some(CLAUDE_TRACE)),
+        ("foreign-new", Some(FOREIGN_TRACE)),
+        ("future-9.7", Some(FOREIGN_TRACE)),
         ("future-9.7", Some("malformed")),
         ("future-9.7", Some(oversized_trace.as_str())),
         ("future-9.7", None),
@@ -186,13 +186,13 @@ async fn owned_http_uses_public_preparation_and_frozen_trace_membership() -> any
             .files
             .lock()
             .unwrap()
-            .retain(|name, _| name == "claude.json");
+            .retain(|name, _| name == "foreign.json");
         while let Some(event) = stream.next().await {
             event?;
         }
         turn.begin_inference_request(&session).await;
-        let expected = Some(if model == "claude-new" {
-            InferenceAttribution::Claude
+        let expected = Some(if model == "foreign-new" {
+            InferenceAttribution::Unknown
         } else if trace == Some(NATIVE_TRACE) {
             InferenceAttribution::ServedNative {
                 source: InferenceNativeSource::Root,
@@ -288,7 +288,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
         TestCodexResponsesRequestKind::Turn,
     );
     let mut messages = Vec::new();
-    for model in ["future-9.7", "claude-new"] {
+    for model in ["future-9.7", "foreign-new"] {
         for case in [
             "http_quota",
             "local_401",
@@ -320,7 +320,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                     if model == "future-9.7" {
                         NATIVE_TRACE
                     } else {
-                        CLAUDE_TRACE
+                        FOREIGN_TRACE
                     },
                 )
             };
@@ -363,8 +363,8 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
             let native_quota =
                 model == "future-9.7" && matches!(case, "http_quota" | "stream_quota");
             if let Some(error) = &error {
-                let expected = if model == "claude-new" {
-                    InferenceAttribution::Claude
+                let expected = if model == "foreign-new" {
+                    InferenceAttribution::Unknown
                 } else if matches!(case, "local_401" | "cooldown") {
                     InferenceAttribution::Unknown
                 } else {
@@ -413,7 +413,7 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                     "{model}/{case}: {error}"
                 );
                 assert!(session.owned_retry_forbidden(error));
-                if model == "claude-new"
+                if model == "foreign-new"
                     && matches!(case, "http_quota" | "local_401" | "partial_quota")
                 {
                     messages.push(error.to_string());
@@ -443,13 +443,13 @@ async fn owned_http_terminal_errors_and_partial_output_cannot_recover_or_replay(
                         if model == "future-9.7" {
                             NATIVE_TRACE
                         } else {
-                            CLAUDE_TRACE
+                            FOREIGN_TRACE
                         }
                         .into(),
                     )
                 })
             );
-            if model == "claude-new" || matches!(case, "local_401" | "cooldown") {
+            if model == "foreign-new" || matches!(case, "local_401" | "cooldown") {
                 assert_eq!(captured.served_native_source.get(), Some(&None));
             }
             assert_eq!(*fixture.manager.auth_change_receiver().borrow(), revision);
@@ -480,7 +480,7 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
         "missing",
         "mismatch",
         "wrong_model",
-        "claude",
+        "foreign",
         "401",
         "stale",
         "partial",
@@ -517,7 +517,7 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
         let _mock = Mock::given(method("POST")).and(path("/v1/responses"))
             .respond_with(move |request: &wiremock::Request| {
                 let body: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
-                if body["model"] != expected_a && case != "claude" {
+                if body["model"] != expected_a && case != "foreign" {
                     return ResponseTemplate::new(200).insert_header("x-cpa-trace-id", "20260930010000-0000000000000003-aabbccdd").set_body_string(COMPLETED);
                 }
                 if case == "stale" {
@@ -537,12 +537,12 @@ async fn owned_quota_switches_only_the_bound_native_source() -> anyhow::Result<(
                     _ => ResponseTemplate::new(429).set_body_json(json!({"error":{"type":"usage_limit_reached","resets_at":resets_at}})),
                 };
                 if matches!(case, "cooldown" | "cooldown_pinned" | "wrong_model" | "missing") { response } else {
-                    response.insert_header("x-cpa-trace-id", if matches!(case, "mismatch" | "claude") { CLAUDE_TRACE } else { NATIVE_TRACE })
+                    response.insert_header("x-cpa-trace-id", if matches!(case, "mismatch" | "foreign") { FOREIGN_TRACE } else { NATIVE_TRACE })
                 }
             }).expect(if switches { 2 } else { 1 }).mount_as_scoped(&fixture.server).await;
         let mut model_info = test_model_info();
-        model_info.slug = if case == "claude" {
-            "claude-new"
+        model_info.slug = if case == "foreign" {
+            "foreign-new"
         } else {
             "future-9.7"
         }

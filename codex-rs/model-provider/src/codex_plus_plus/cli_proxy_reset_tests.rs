@@ -75,7 +75,7 @@ async fn exact_reset_dispatches_once_and_unknown_requires_positive_current_readb
         {"name": root_name, "auth_index": "root-before-restart", "type": "codex", "disabled": false, "unavailable": true, "cooldowns": [{"reason": "quota"}]},
         {"name": imported_name, "auth_index": "imported", "type": "codex", "disabled": false, "unavailable": true, "cooldowns": [{"reason": "quota"}]},
         {"name": "other.json", "auth_index": "other", "type": "codex", "disabled": false},
-        {"name": "claude.json", "auth_index": "claude", "type": "claude", "disabled": false}
+        {"name": "foreign.json", "auth_index": "foreign", "type": "foreign", "disabled": false}
     ])));
     let inventory = entries.clone();
     Mock::given(method("GET"))
@@ -227,7 +227,7 @@ async fn exact_reset_dispatches_once_and_unknown_requires_positive_current_readb
         json!({"disabled": true}),
         json!({"unavailable": true}),
         json!({"auth_index": "other"}),
-        json!({"provider": "claude"}),
+        json!({"provider": "foreign"}),
     ] {
         let mut entry = clear.clone();
         entry

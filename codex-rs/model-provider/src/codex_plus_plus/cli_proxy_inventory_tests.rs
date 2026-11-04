@@ -28,7 +28,7 @@ async fn exact_membership_preserves_foreign_and_unknown_metadata_without_guessin
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "files": [
                 {"name":name,"type":"codex","provider":"codex","auth_index":"exact-index","disabled":false,"new_field":42},
-                {"name":foreign,"type":"claude","provider":"claude","auth_index":"foreign-index","disabled":true},
+                {"name":foreign,"type":"foreign","provider":"foreign","auth_index":"foreign-index","disabled":true},
                 {"name":"codex-native-imported-not-owned.json","type":"codex","provider":"codex","disabled":false},
                 {"name":"unclassified.json","auth_index":"unknown","disabled":false}
             ], "extra":true
@@ -44,9 +44,10 @@ async fn exact_membership_preserves_foreign_and_unknown_metadata_without_guessin
             .and(path("/v0/management/auth-files/models"))
             .and(query_param("name", file))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({"models":[
-                {"id":"vendor/new/unknown-x9.7","type":"claude","owned_by":"anthropic","future":true}
+                {"id":"vendor/new/unknown-x9.7","type":"foreign","owned_by":"foreign","future":true}
             ],"extra":0})))
-            .mount(&server).await;
+            .mount(&server)
+            .await;
     }
     let endpoint = RuntimeEndpoint {
         base_url: server.uri(),
@@ -70,8 +71,8 @@ async fn exact_membership_preserves_foreign_and_unknown_metadata_without_guessin
             disabled: false,
             models: vec![RegisteredModel {
                 id: "vendor/new/unknown-x9.7".into(),
-                provider: Some("claude".into()),
-                owned_by: Some("anthropic".into())
+                provider: Some("foreign".into()),
+                owned_by: Some("foreign".into())
             }]
         }
     );
@@ -95,7 +96,7 @@ async fn conflicts_missing_identity_and_aggregate_overlimit_fail_closed() {
         management_key: "fake".into(),
     };
     for (kind, provider, index) in [
-        (Some("codex"), Some("claude"), Some("index")),
+        (Some("codex"), Some("foreign"), Some("index")),
         (None, None, Some("index")),
         (Some("codex"), Some("codex"), None),
     ] {
@@ -212,7 +213,7 @@ fn canonical_catalogue_requires_membership_and_preserves_all_rich_metadata() {
     for case in 0..3 {
         let mut conflicted = inventory[0].clone();
         match case {
-            0 => conflicted.provider = Some("claude".into()),
+            0 => conflicted.provider = Some("foreign".into()),
             1 => conflicted.disabled = true,
             2 => conflicted.models[0].owned_by = None,
             _ => unreachable!(),
@@ -271,146 +272,4 @@ fn conflicting_prompts_and_foreign_collisions_keep_original_entries() {
         normalize_catalogue(vec![first.clone(), foreign.clone()], &inventory),
         vec![first, foreign]
     );
-}
-
-#[test]
-fn claude_catalogue_keeps_modern_models_and_latest_haiku_with_rich_metadata() {
-    let retained = [
-        "claude-fable-5",
-        "claude-fable-5-1",
-        "claude-haiku-4-5-20251001",
-        "claude-opus-5",
-        "claude-opus-5-5",
-        "claude-sonnet-5",
-        "claude-sonnet-5-5",
-    ];
-    let excluded = [
-        "claude-3-5-haiku-20241022",
-        "claude-3-7-sonnet-20250219",
-        "claude-opus-4-20250514",
-        "claude-opus-4-1-20250805",
-        "claude-opus-4-5-20251101",
-        "claude-opus-4-6",
-        "claude-opus-4-7",
-        "claude-opus-4-8",
-        "claude-sonnet-4-20250514",
-        "claude-sonnet-4-5-20250929",
-        "claude-sonnet-4-6",
-    ];
-    let mut template = codex_models_manager::bundled_models_response()
-        .unwrap()
-        .models
-        .remove(0);
-    template.context_window = Some(1_000_000);
-    let rich: Vec<_> = retained
-        .iter()
-        .chain(&excluded)
-        .map(|slug| {
-            let mut model = template.clone();
-            model.slug = (*slug).into();
-            model
-        })
-        .collect();
-    let mut credential = CredentialModels {
-        source: None,
-        name: "synthetic-claude.json".into(),
-        auth_index: Some("synthetic".into()),
-        provider: Some("claude".into()),
-        prefix: None,
-        disabled: false,
-        models: rich
-            .iter()
-            .map(|model| RegisteredModel {
-                id: model.slug.clone(),
-                provider: Some("claude".into()),
-                owned_by: Some("anthropic".into()),
-            })
-            .collect(),
-    };
-    // A disabled copy on another Claude account does not make membership ambiguous.
-    let mut disabled = credential.clone();
-    disabled.disabled = true;
-    assert_eq!(
-        normalize_catalogue(rich.clone(), &[credential.clone(), disabled]),
-        rich[..retained.len()]
-    );
-
-    // New generations and unknown naming stay discoverable.
-    let mut next = Vec::new();
-    for slug in [
-        "claude-future-6-10",
-        "claude-haiku-next",
-        "other/claude-sonnet-4",
-    ] {
-        let mut model = template.clone();
-        model.slug = slug.into();
-        credential.models.push(RegisteredModel {
-            id: slug.into(),
-            provider: Some("claude".into()),
-            owned_by: Some("anthropic".into()),
-        });
-        next.push(model);
-    }
-    assert_eq!(normalize_catalogue(next.clone(), &[credential]), next);
-}
-
-#[test]
-fn haiku_ranking_uses_numeric_version_and_date_only_for_confirmed_present_models() {
-    let mut template = codex_models_manager::bundled_models_response()
-        .unwrap()
-        .models
-        .remove(0);
-    template.slug = "claude-haiku-4-10-20260901".into();
-    let mut models = vec![template.clone()];
-    for slug in [
-        "claude-haiku-4-9-20260920",
-        "claude-haiku-4-10-20260801",
-        "claude-3-5-haiku-20241022",
-    ] {
-        let mut model = template.clone();
-        model.slug = slug.into();
-        models.push(model);
-    }
-    let credential = CredentialModels {
-        source: None,
-        name: "synthetic-claude.json".into(),
-        auth_index: None,
-        provider: Some("claude".into()),
-        prefix: None,
-        disabled: false,
-        models: models
-            .iter()
-            .map(|model| RegisteredModel {
-                id: model.slug.clone(),
-                provider: Some("claude".into()),
-                owned_by: Some("anthropic".into()),
-            })
-            .chain([RegisteredModel {
-                id: "claude-haiku-9".into(),
-                provider: Some("claude".into()),
-                owned_by: Some("anthropic".into()),
-            }])
-            .collect(),
-    };
-    assert_eq!(
-        normalize_catalogue(models.clone(), std::slice::from_ref(&credential)),
-        vec![template]
-    );
-    // Refreshing away the newest rich entry exposes the next advertised Haiku.
-    assert_eq!(
-        normalize_catalogue(models[1..].to_vec(), std::slice::from_ref(&credential)),
-        vec![models[2].clone()]
-    );
-    for ownership in [Some("foreign"), None] {
-        let mut conflict = credential.clone();
-        for model in &mut conflict.models {
-            model.owned_by = ownership.map(str::to_owned);
-        }
-        let mut expected = models.clone();
-        expected.sort_by(|a, b| a.slug.cmp(&b.slug));
-        assert_eq!(
-            normalize_catalogue(models.clone(), &[credential.clone(), conflict]),
-            expected
-        );
-    }
 }
