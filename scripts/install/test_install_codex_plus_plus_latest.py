@@ -122,6 +122,58 @@ class InstallLatestTest(unittest.TestCase):
             self.assertFalse((root / "shim").exists())
             self.assertFalse((root / "codex-home").exists())
 
+    def test_incomplete_platform_or_bad_checksum_preserves_working_install(
+        self,
+    ) -> None:
+        for failure in ("missing archive", "missing checksum", "bad checksum"):
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir,
+            ):
+                root = Path(temp_dir)
+                with ReleaseFixture(root) as release:
+                    first = run_installer(root, release)
+                    self.assertEqual(first.returncode, 0, first.stderr)
+                    shim = root / "shim"
+                    before = {
+                        str(p.relative_to(shim)): p.read_bytes()
+                        for p in shim.rglob("*")
+                        if p.is_file()
+                    }
+                    if failure == "missing archive":
+                        del release.assets[release.archive_name]
+                    elif failure == "missing checksum":
+                        del release.assets[f"{release.archive_name}.sha256"]
+                    else:
+                        release.assets[f"{release.archive_name}.sha256"] = checksum(
+                            release.archive_name, b"bad"
+                        )
+                    result = run_installer(root, release)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(
+                        "SHA-256 mismatch"
+                        if failure == "bad checksum"
+                        else "Could not download required",
+                        result.stderr,
+                    )
+                    self.assertEqual(
+                        {
+                            str(p.relative_to(shim)): p.read_bytes()
+                            for p in shim.rglob("*")
+                            if p.is_file()
+                        },
+                        before,
+                    )
+                    # Invoke the preserved global shim, not just its generation pointer.
+                    command = (
+                        [str(shim / platform_shim_name()), "/c", "echo still-working"]
+                        if os.name == "nt"
+                        else [str(shim / platform_shim_name()), "still-working"]
+                    )
+                    working = subprocess.run(command, capture_output=True, text=True)
+                    self.assertEqual(working.returncode, 0, working.stderr)
+                    self.assertIn("still-working", working.stdout)
+
     def test_unsupported_target_fails_before_network_or_mutation(self) -> None:
         with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as temp_dir:
             root = Path(temp_dir)
