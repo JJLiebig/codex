@@ -58,11 +58,12 @@ pub(crate) fn start(cli: &Cli, remote: Option<&crate::RemoteAppServerEndpoint>) 
     if socket.is_empty() || terminal.is_empty() || scope.is_empty() {
         return;
     }
-    let Ok(executable) = std::env::current_exe() else {
+    // Only the top-level CLI supplies a launch target that understands `resume <id>`.
+    let Some(executable) = cli.daemon_cli_executable.as_ref() else {
         return;
     };
     WORKER.get_or_init(|| {
-        let argv = launch_arguments(cli, &executable);
+        let argv = launch_arguments(cli, executable.as_path());
         let (tx, rx) = watch::channel(Update::Pending);
         let task = tokio::spawn(run(socket, terminal, scope, argv, rx));
         Worker {
