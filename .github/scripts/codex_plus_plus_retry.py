@@ -46,16 +46,17 @@ def retry_latest(api, repository, now):
                 candidates.append((tuple(map(int, match.groups())), run["id"], run))
     if not candidates:
         return {"status": "skipped", "reason": "no recent tag release"}
-    _, _, run = max(candidates)
+    for _, _, run in sorted(candidates, reverse=True):
+        commit = api(f"{root}/commits/{run['head_branch']}")
+        if commit["sha"] == run["head_sha"]:
+            break
+    else:
+        return {"status": "skipped", "reason": "release tags no longer match sources"}
     if run["status"] != "completed":
         return {"status": "skipped", "reason": "latest release still active"}
     # Three extra run attempts total, shared by app and voice; never reset on a new job.
     if run["run_attempt"] >= 4:
         return {"status": "skipped", "reason": "three extra attempts exhausted"}
-    commit = api(f"{root}/commits/{run['head_branch']}")
-    if commit["sha"] != run["head_sha"]:
-        return {"status": "skipped", "reason": "release tag no longer matches source"}
-
     pages = api(
         f"{root}/actions/runs/{run['id']}/jobs?filter=all&per_page=100",
         paginate=True,

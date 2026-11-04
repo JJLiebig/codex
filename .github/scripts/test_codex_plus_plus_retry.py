@@ -1,11 +1,14 @@
 from datetime import datetime, timedelta, timezone
 import unittest
 
-from codex_plus_plus_retry import ALLOCATION_FAILURE, retry_latest
+from codex_plus_plus_retry import retry_latest
 
 
 NOW = datetime(2026, 11, 4, 12, tzinfo=timezone.utc)
 ROOT = "repos/owner/repo"
+ALLOCATION_FAILURE = (
+    "The job was not acquired by Runner of type hosted even after multiple attempts"
+)
 
 
 def source_run(**changes):
@@ -56,6 +59,7 @@ class FakeGitHub:
             for identifier in (30, 40)
         }
         self.commit = "a" * 40
+        self.commits = {}
         self.current = None
         self.posts = []
 
@@ -69,7 +73,7 @@ class FakeGitHub:
             assert paginate
             return [{"workflow_runs": self.runs[:1]}, {"workflow_runs": self.runs[1:]}]
         if path.startswith(f"{ROOT}/commits/"):
-            return {"sha": self.commit}
+            return {"sha": self.commits.get(path.rsplit("/", 1)[-1], self.commit)}
         if "/jobs?filter=all&" in path:
             assert paginate
             return [{"jobs": self.jobs[:2]}, {"jobs": self.jobs[2:]}]
@@ -77,7 +81,9 @@ class FakeGitHub:
             assert paginate
             return self.annotations[int(path.split("/")[-2])]
         if path.startswith(f"{ROOT}/actions/runs/"):
-            return self.current or max(self.runs, key=lambda run: run["id"])
+            return self.current or next(
+                run for run in self.runs if run["id"] == int(path.rsplit("/", 1)[-1])
+            )
         raise AssertionError(f"Unexpected API request: {method} {path}")
 
 
@@ -196,6 +202,17 @@ class RetryTest(unittest.TestCase):
         api.current = source_run(status="queued", run_attempt=2)
         self.assertEqual(self.run_controller(api)["status"], "skipped")
         self.assertEqual(api.posts, [])
+
+    def test_newest_exact_source_release_is_selected_after_tag_moved(self):
+        api = FakeGitHub()
+        api.runs.append(
+            source_run(id=101, head_branch="codex-plus-plus-v0.166.0-fork.5")
+        )
+        api.commits["codex-plus-plus-v0.166.0-fork.5"] = "b" * 40
+        self.assertEqual(
+            self.run_controller(api), {"status": "retried", "run": 100, "job": 40}
+        )
+        self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/40/rerun"])
 
     def test_final_extra_attempt_is_allowed_but_never_resets_for_voice(self):
         api = FakeGitHub()
