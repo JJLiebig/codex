@@ -112,10 +112,7 @@ pub(super) async fn prepare_spawn(
     let snapshot = options.environments.as_ref().ok_or_else(|| {
         CodexErr::InvalidRequest("prepared spawn requires captured environments".into())
     })?;
-    let environments = options
-        .environment_requests
-        .clone()
-        .unwrap_or_else(|| snapshot.inheritable_requests());
+    let environments = snapshot.inheritable_requests();
     if matches!(destination, SpawnDestination::Detached)
         && environments
             .iter()
@@ -163,7 +160,6 @@ pub(super) async fn prepare_spawn(
         .insert(HostToolInvocationLookup);
     let exec_policy = match destination {
         SpawnDestination::SameManager => {
-            thread_options.environments = options.environment_requests;
             thread_options.inherited_environments = options.environments;
             inherited_policy
         }

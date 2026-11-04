@@ -29,7 +29,6 @@ use codex_protocol::protocol::SubAgentSource;
 /// Child creation options; omitted overrides retain native MAv2 inheritance and role rules.
 pub struct ThreadCreateRequest {
     pub task_name: String,
-    pub cwd: Option<String>,
     /// `None` starts fresh; `FullHistory` uses native fork preparation.
     pub fork_mode: Option<SpawnAgentForkMode>,
     pub agent_type: Option<String>,
@@ -39,7 +38,6 @@ pub struct ThreadCreateRequest {
 
 pub(crate) struct ThreadSpawnRequest {
     pub task_name: String,
-    pub cwd: Option<String>,
     /// Explicit encoding: hosts normally provide plaintext; native tools can forward ciphertext.
     pub message: AgentMessage,
     /// `None` starts fresh; `FullHistory` uses native fork preparation.
@@ -64,7 +62,6 @@ impl ThreadSpawnRequest {
         Ok((
             ThreadCreateRequest {
                 task_name: self.task_name,
-                cwd: self.cwd,
                 fork_mode: self.fork_mode,
                 agent_type: self.agent_type,
                 model: self.model,
@@ -133,7 +130,6 @@ pub(crate) async fn prepare(
     let turn = &step_context.turn;
     let ThreadCreateRequest {
         task_name,
-        cwd,
         fork_mode,
         agent_type,
         model,
@@ -148,7 +144,6 @@ pub(crate) async fn prepare(
         step_context,
         SpawnConfigOptions {
             version: SpawnConfigVersion::V2,
-            cwd: cwd.as_deref(),
             full_history_fork: matches!(fork_mode, Some(SpawnAgentForkMode::FullHistory)),
             role_name,
             model: model.as_deref(),
@@ -208,7 +203,6 @@ pub(crate) async fn prepare(
                 root_turn_id: turn.turn_metadata_state.root_turn_id(),
                 turn_trigger: turn.turn_metadata_state.current_turn_trigger(),
                 environments: Some(step_context.inherited_environments.clone()),
-                environment_requests: prepared.environment_requests,
                 disabled_plugin_ids: Some(turn.disabled_plugin_ids.clone()),
                 multi_agent_v2_usage_hints,
                 cyber_access_program: turn.cyber_access_program,
