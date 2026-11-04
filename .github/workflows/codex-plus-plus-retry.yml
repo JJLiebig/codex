@@ -1,0 +1,32 @@
+name: Retry Codex++ macOS allocation
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: codex-plus-plus-macos-allocation-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-24.04
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Retry eligible macOS job
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python .github/scripts/codex_plus_plus_retry.py

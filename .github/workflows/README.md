@@ -30,6 +30,17 @@ The workflows in this directory are split so that pull requests get fast, review
   - cross-platform `argument-comment-lint`
   - Linux remote-env tests
 
+## Codex++ macOS Allocation Retries
+
+`codex-plus-plus-retry.yml` runs twice an hour after it reaches the default branch;
+it can also be dispatched manually on that branch. It retries one macOS app or
+voice job only when its latest check proves hosted-runner allocation failed.
+The source release must be completed, match its tag and commit, and be less than
+one day old so its retained artifacts can still be used. At most three extra run
+attempts are allowed in total, shared by app and voice, including manual reruns.
+Active releases, unrelated failures, and manual job cancellations are left alone.
+Exhausted or expired releases need operator investigation rather than more retries.
+
 ## Rule Of Thumb
 
 - If a build/test/clippy check can be expressed in Bazel, prefer putting the PR-time version in `bazel.yml`.
