@@ -37,6 +37,17 @@ impl App {
         app_server: &mut AppServerSession,
         event: AppEvent,
     ) -> Result<AppRunControl> {
+        let result = Box::pin(self.handle_event_inner(tui, app_server, event)).await;
+        crate::codex_plus_plus::herdr_recovery::after_app_event(&result).await;
+        result
+    }
+
+    async fn handle_event_inner(
+        &mut self,
+        tui: &mut tui::Tui,
+        app_server: &mut AppServerSession,
+        event: AppEvent,
+    ) -> Result<AppRunControl> {
         let from_agents_overview = matches!(event, AppEvent::ForkAgentsOverviewThreadReady { .. });
         let event = if let AppEvent::ForkAgentsOverviewThreadReady { thread_id } = event {
             if self.current_displayed_thread_id() != Some(thread_id)
@@ -54,7 +65,6 @@ impl App {
         if matches!(event, AppEvent::ForkCurrentSession { .. }) {
             self.chat_widget.fork_in_progress = false;
         }
-        crate::codex_plus_plus::herdr_recovery::before_app_event(&event).await;
         if self.reconnect.offline && matches!(event, AppEvent::Exit(ExitMode::ShutdownFirst)) {
             return Ok(AppRunControl::Exit(ExitReason::UserRequested));
         }

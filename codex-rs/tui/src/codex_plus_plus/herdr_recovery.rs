@@ -86,17 +86,19 @@ pub(crate) fn set_primary(session: Option<&ThreadSessionState>) {
     }
 }
 
-// Run before offline event filtering: these are user requests, unlike EOF or signals.
-pub(crate) async fn before_app_event(event: &crate::app_event::AppEvent) {
-    use crate::app_event::AppEvent;
-    use crate::app_event::RunningTaskExitAction;
+// Event dispatch returns explicit user exits, including logout/archive/delete and offline quit.
+// EOF and signals exit through the terminal event path; fatal app events retain recovery too.
+pub(crate) async fn after_app_event(result: &color_eyre::Result<crate::app::AppRunControl>) {
+    use crate::app::AppRunControl;
+    use crate::app::ExitReason;
     if matches!(
-        event,
-        AppEvent::Exit(_)
-            | AppEvent::RunningTaskExit {
-                action: RunningTaskExitAction::RunInBackground,
-                ..
-            }
+        result,
+        Ok(AppRunControl::Exit(
+            ExitReason::UserRequested
+                | ExitReason::Archived(_)
+                | ExitReason::TurnInterrupted
+                | ExitReason::ThreadRemoved
+        ))
     ) {
         deliberate_exit().await;
     }
