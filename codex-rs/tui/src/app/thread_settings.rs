@@ -205,6 +205,7 @@ impl App {
             && let Some(session) = self.primary_session_configured.as_mut()
         {
             apply_thread_settings_to_session(session, settings);
+            crate::codex_plus_plus::herdr_recovery::set_primary(Some(session));
         }
 
         if let Some(channel) = self.thread_event_channels.get(&thread_id) {

@@ -1010,6 +1010,7 @@ impl App {
                 self.commit_animation = None;
             }
             AppEvent::Exit(mode) => {
+                crate::codex_plus_plus::herdr_recovery::deliberate_exit().await;
                 if matches!(mode, ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt) {
                     self.show_shutdown_feedback(tui)?;
                 }
@@ -1017,6 +1018,7 @@ impl App {
             }
             AppEvent::RunningTaskExit { action, thread_id } => match action {
                 RunningTaskExitAction::RunInBackground => {
+                    crate::codex_plus_plus::herdr_recovery::deliberate_exit().await;
                     return Ok(self.handle_exit_mode(app_server, ExitMode::Immediate).await);
                 }
                 RunningTaskExitAction::CancelTask => {

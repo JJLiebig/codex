@@ -11,6 +11,7 @@ use super::SessionStatusState;
 use crate::session_state::ThreadSessionState;
 
 pub(crate) fn set_primary_session(session: Option<&ThreadSessionState>) {
+    crate::codex_plus_plus::herdr_recovery::set_primary(session);
     static IN_HERDR: OnceLock<bool> = OnceLock::new();
     if *IN_HERDR.get_or_init(|| {
         ["HC_TERMINAL_ID", "HC_TERMINAL_SOCKET"]

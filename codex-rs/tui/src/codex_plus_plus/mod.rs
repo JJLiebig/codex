@@ -5,6 +5,7 @@ mod account_policy;
 mod account_removal;
 mod auto_redeem_resets;
 pub(crate) mod destructive_command_guard;
+pub(crate) mod herdr_recovery;
 #[cfg(any(not(debug_assertions), test))]
 mod lag_warning;
 mod model_capacity_retry;
