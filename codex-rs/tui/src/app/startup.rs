@@ -1481,7 +1481,7 @@ See the Codex keymap documentation for supported actions and examples."
                                 if cell.as_any().is::<history_cell::SessionInfoCell>()
                         );
                         let had_active_modal = app.chat_widget.has_active_modal();
-                        match crate::codex_plus_plus::herdr_recovery::after_app_event(Box::pin(app.handle_event(tui, backends.session_at_mut(displayed_session), event)).await).await {
+                        match crate::codex_plus_plus::herdr_recovery::after_event(Box::pin(app.handle_event(tui, backends.session_at_mut(displayed_session), event)).await).await {
                             Ok(AppRunControl::Continue) => {
                                 if is_initial_session_header {
                                     waiting_for_initial_session_header = false;
@@ -1541,7 +1541,7 @@ See the Codex keymap documentation for supported actions and examples."
                             {
                                 app.startup_protected_input_boundary = false;
                             }
-                            match app.handle_tui_event(tui, backends.session_at_mut(displayed_session), event).await {
+                            match crate::codex_plus_plus::herdr_recovery::after_event(app.handle_tui_event(tui, backends.session_at_mut(displayed_session), event).await).await {
                                 Ok(control) => control,
                                 Err(err) if app.recover_transport_error(&err) => AppRunControl::Continue,
                             Err(err) => break Err(err),
