@@ -59,7 +59,13 @@ pub(crate) struct UsageArgs {
 }
 
 pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Result<()> {
-    let config = load_config(account_cli.config_overrides).await?;
+    let config = if matches!(&account_cli.subcommand, AccountSubcommand::Add(args) if args.device_auth)
+    {
+        codex_cli::cloud_config::load_config(&account_cli.config_overrides, Default::default())
+            .await?
+    } else {
+        load_config(account_cli.config_overrides).await?
+    };
     let store = AccountStore::new(config.codex_home.to_path_buf());
 
     match account_cli.subcommand {
@@ -69,7 +75,6 @@ pub(crate) async fn run_account_command(account_cli: AccountCli) -> anyhow::Resu
             }
 
             if args.device_auth {
-                config.config_layer_stack.ensure_config_server_applied()?;
                 config.auth_config().validate()?;
                 if !config
                     .auth_config()
