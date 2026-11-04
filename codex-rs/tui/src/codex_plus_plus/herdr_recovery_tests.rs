@@ -133,10 +133,16 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
         vec!["codex.exe".into(), "--no-daemon".into()],
         rx,
     ));
-    for id in ["main-a", "main-b"] {
+    let second_cwd = root.path().join("second");
+    std::fs::create_dir(&second_cwd).unwrap();
+    for (id, cwd) in [
+        ("main-a", root.path()),
+        ("main-b", root.path()),
+        ("main-b", second_cwd.as_path()),
+    ] {
         tx.send_replace(Update::Session {
             id: id.into(),
-            cwd: root.path().to_string_lossy().into_owned(),
+            cwd: cwd.to_string_lossy().into_owned(),
         });
         let request = tokio::time::timeout(Duration::from_secs(2), requests_rx.recv())
             .await
@@ -152,7 +158,7 @@ async fn exercise_worker(kept: bool, deliberate: bool, supported: bool) {
             assert_eq!(
                 registration["params"]["recovery"],
                 json!({
-                    "argv":["codex.exe", "--no-daemon", "resume", id, "--cd", root.path()], "cwd":root.path()
+                    "argv":["codex.exe", "--no-daemon", "resume", id, "--cd", cwd], "cwd":cwd
                 })
             );
         }
