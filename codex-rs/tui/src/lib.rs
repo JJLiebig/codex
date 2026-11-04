@@ -1178,7 +1178,7 @@ pub async fn run_main(
     loader_overrides: LoaderOverrides,
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
-    codex_plus_plus::herdr_recovery::start(&cli);
+    codex_plus_plus::herdr_recovery::start(&cli, explicit_remote_endpoint.as_ref());
     system_motion::initialize().await;
     startup_recovery::scope(async move {
         // Startup retains a large future for the whole session. Keep it off callers' stacks,

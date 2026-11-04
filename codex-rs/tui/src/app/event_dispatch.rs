@@ -54,6 +54,7 @@ impl App {
         if matches!(event, AppEvent::ForkCurrentSession { .. }) {
             self.chat_widget.fork_in_progress = false;
         }
+        crate::codex_plus_plus::herdr_recovery::before_app_event(&event).await;
         if self.reconnect.offline && matches!(event, AppEvent::Exit(ExitMode::ShutdownFirst)) {
             return Ok(AppRunControl::Exit(ExitReason::UserRequested));
         }
@@ -1010,7 +1011,6 @@ impl App {
                 self.commit_animation = None;
             }
             AppEvent::Exit(mode) => {
-                crate::codex_plus_plus::herdr_recovery::deliberate_exit().await;
                 if matches!(mode, ExitMode::ShutdownFirst | ExitMode::ShutdownAfterInterrupt) {
                     self.show_shutdown_feedback(tui)?;
                 }
@@ -1018,7 +1018,6 @@ impl App {
             }
             AppEvent::RunningTaskExit { action, thread_id } => match action {
                 RunningTaskExitAction::RunInBackground => {
-                    crate::codex_plus_plus::herdr_recovery::deliberate_exit().await;
                     return Ok(self.handle_exit_mode(app_server, ExitMode::Immediate).await);
                 }
                 RunningTaskExitAction::CancelTask => {

@@ -39,7 +39,11 @@ enum Update {
     Quit,
 }
 
-pub(crate) fn start(cli: &Cli) {
+pub(crate) fn start(cli: &Cli, remote: Option<&crate::RemoteAppServerEndpoint>) {
+    // Remote thread IDs and cwd paths cannot be resumed by this local recipe.
+    if remote.is_some() {
+        return;
+    }
     if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
         return;
     }
@@ -82,8 +86,23 @@ pub(crate) fn set_primary(session: Option<&ThreadSessionState>) {
     }
 }
 
-// Only UI exit requests call this. EOF, panic, signals and terminal restoration do not.
-pub(crate) async fn deliberate_exit() {
+// Run before offline event filtering: these are user requests, unlike EOF or signals.
+pub(crate) async fn before_app_event(event: &crate::app_event::AppEvent) {
+    use crate::app_event::AppEvent;
+    use crate::app_event::RunningTaskExitAction;
+    if matches!(
+        event,
+        AppEvent::Exit(_)
+            | AppEvent::RunningTaskExit {
+                action: RunningTaskExitAction::RunInBackground,
+                ..
+            }
+    ) {
+        deliberate_exit().await;
+    }
+}
+
+async fn deliberate_exit() {
     if let Some(worker) = WORKER.get() {
         worker.tx.send_replace(Update::Quit);
         let task = worker
