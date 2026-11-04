@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import subprocess
 import unittest
 
 from codex_plus_plus_retry import retry_latest
@@ -73,7 +74,10 @@ class FakeGitHub:
             assert paginate
             return [{"workflow_runs": self.runs[:1]}, {"workflow_runs": self.runs[1:]}]
         if path.startswith(f"{ROOT}/commits/"):
-            return {"sha": self.commits.get(path.rsplit("/", 1)[-1], self.commit)}
+            commit = self.commits.get(path.rsplit("/", 1)[-1], self.commit)
+            if isinstance(commit, Exception):
+                raise commit
+            return {"sha": commit}
         if "/jobs?filter=all&" in path:
             assert paginate
             return [{"jobs": self.jobs[:2]}, {"jobs": self.jobs[2:]}]
@@ -213,6 +217,29 @@ class RetryTest(unittest.TestCase):
             self.run_controller(api), {"status": "retried", "run": 100, "job": 40}
         )
         self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/40/rerun"])
+
+    def test_deleted_tag_is_skipped_but_other_api_errors_are_not_hidden(self):
+        for status in (404, 403, 502):
+            with self.subTest(status=status):
+                api = FakeGitHub()
+                api.runs.append(
+                    source_run(id=101, head_branch="codex-plus-plus-v0.166.0-fork.5")
+                )
+                api.commits["codex-plus-plus-v0.166.0-fork.5"] = (
+                    subprocess.CalledProcessError(
+                        1, ["gh", "api"], stderr=f"gh: request failed (HTTP {status})"
+                    )
+                )
+                if status == 404:
+                    self.assertEqual(
+                        self.run_controller(api),
+                        {"status": "retried", "run": 100, "job": 40},
+                    )
+                    self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/40/rerun"])
+                else:
+                    with self.assertRaises(subprocess.CalledProcessError):
+                        self.run_controller(api)
+                    self.assertEqual(api.posts, [])
 
     def test_final_extra_attempt_is_allowed_but_never_resets_for_voice(self):
         api = FakeGitHub()

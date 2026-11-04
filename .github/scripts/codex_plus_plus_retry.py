@@ -47,7 +47,12 @@ def retry_latest(api, repository, now):
     if not candidates:
         return {"status": "skipped", "reason": "no recent tag release"}
     for _, _, run in sorted(candidates, reverse=True):
-        commit = api(f"{root}/commits/{run['head_branch']}")
+        try:
+            commit = api(f"{root}/commits/{run['head_branch']}")
+        except subprocess.CalledProcessError as error:
+            if "(HTTP 404)" not in error.stderr:
+                raise
+            continue
         if commit["sha"] == run["head_sha"]:
             break
     else:
