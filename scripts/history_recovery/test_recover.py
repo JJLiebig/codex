@@ -227,20 +227,10 @@ class RecoveryTests(unittest.TestCase):
                 self.apply()
         self.assertEqual(recovery.fingerprint(db), before)
 
-    def test_revalidation_rejects_intervening_commit(self):
+    def test_locked_inspection_rejects_unexpected_class(self):
         db = self.fixture()
-        original_connect = recovery.connect
-
-        def intervene(path, mode):
-            if mode == "rw":
-                db.execute("UPDATE thread_turns SET status='intervening-writer'")
-            return original_connect(path, mode)
-
-        with (
-            patch.object(recovery, "connect", intervene),
-            self.assertRaisesRegex(recovery.Refused, "changed since inspection"),
-        ):
-            self.apply()
+        with self.assertRaisesRegex(recovery.Refused, "class is mixed"):
+            self.apply("attribution-only")
         self.assertEqual(recovery.classify(db, self.target)[0], "mixed")
         self.assertFalse((self.root / "backup").exists())
 

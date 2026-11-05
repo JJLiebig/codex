@@ -1,6 +1,7 @@
 """Issue #260 maintenance, called only under the managed installer's launch gates."""
 
 import argparse
+from contextlib import closing
 from pathlib import Path
 import sqlite3
 import sys
@@ -11,11 +12,11 @@ import recover
 import windows_writers
 
 
-def needed(path):
-    if not path.exists():
-        return False
-    result = recover.recover(path)
-    return bool(result["normalize"] or result["class"] in ("mixed", "attribution-only"))
+def classify(path):
+    # Ledger and schema only; apply checks integrity and content under its lock.
+    with closing(recover.connect(path.resolve(strict=True), "ro")) as reader:
+        reader.execute("BEGIN")
+        return recover.classify(reader, recover.manifest())
 
 
 def complete(path):
@@ -36,14 +37,16 @@ def complete(path):
             )
             announced = True
         time.sleep(1)
-    if needed(path):
-        before = recover.recover(path)
+    if not path.exists():
+        return
+    state, normalize = classify(path)
+    if normalize or state in ("mixed", "attribution-only"):
         backups = path.parent / "history-recovery-backups"
         backups.mkdir(exist_ok=True)
         result = recover.recover(
             path,
             apply=True,
-            expected=before["class"],
+            expected=state,
             stopped=not observed,
             backup_dir=backups / str(uuid.uuid4()),
             target_profile=recover.TARGET_PROFILE,
@@ -59,8 +62,8 @@ def main():
     try:
         if args.operation == "inspect":
             # Old managed writers can advance a healthy prefix into the collision.
-            result = recover.recover(args.database)
-            return 75 if result["normalize"] or result["class"] != "canonical" else 0
+            state, normalize = classify(args.database)
+            return 75 if normalize or state != "canonical" else 0
         complete(args.database)
         return 0
     except (recover.Refused, OSError, sqlite3.Error) as error:
