@@ -1,0 +1,85 @@
+{
+  "upstream": "4f093f2748667f3b0e6a07e3d4055121cbd3ce64",
+  "merged_upstream": "d373d649673ca8a5bca71f54be0ae47dbd79b466",
+  "fork": "ff847af67b30b01447007d5e6d986445314fd921",
+  "canonical": [
+    {
+      "path": "codex-rs/state/thread_history_migrations/0001_thread_history.sql",
+      "blob": "8de55dde198160542ca3133649d2dbea647b5e4c",
+      "sql": "CREATE TABLE thread_turns (\n    thread_id TEXT NOT NULL,\n    turn_id TEXT NOT NULL,\n    rollout_ordinal INTEGER NOT NULL,\n    status TEXT NOT NULL,\n    error_json TEXT,\n    started_at INTEGER,\n    completed_at INTEGER,\n    duration_ms INTEGER,\n    first_user_item_id TEXT,\n    final_agent_item_id TEXT,\n    PRIMARY KEY (thread_id, turn_id)\n);\n\nCREATE UNIQUE INDEX idx_thread_turns_page\n    ON thread_turns(thread_id, rollout_ordinal);\n\nCREATE TABLE thread_items (\n    thread_id TEXT NOT NULL,\n    turn_id TEXT NOT NULL,\n    item_id TEXT NOT NULL,\n    rollout_ordinal INTEGER NOT NULL,\n    created_at_ms INTEGER NOT NULL,\n    item_json TEXT NOT NULL,\n    PRIMARY KEY (thread_id, turn_id, item_id)\n);\n\nCREATE UNIQUE INDEX idx_thread_items_page\n    ON thread_items(thread_id, rollout_ordinal);\n\nCREATE INDEX idx_thread_items_by_turn_page\n    ON thread_items(thread_id, turn_id, rollout_ordinal);\n\nCREATE TABLE thread_history_projection_state (\n    thread_id TEXT PRIMARY KEY,\n    next_rollout_byte_offset INTEGER NOT NULL,\n    next_rollout_ordinal INTEGER NOT NULL\n);\n",
+      "lf": "2ad9a4ab17df511fb73f03337133de94a172dc0a1f5729b5ef61fe106db03d1a43bdb5978b0cb7d7bc74071d3ca34a92",
+      "crlf": "3d81349432ecbf6e5255dbe0a075d27811144fd3c32941ac1cbba640a83e278fa562309fb3b226964ee4251e97b4b513"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0002_thread_items_item_type.sql",
+      "blob": "b29b90bdc3323efba2a1408e1377fd81f4812880",
+      "sql": "ALTER TABLE thread_items ADD COLUMN item_type TEXT NOT NULL DEFAULT '';\n\nUPDATE thread_items\nSET item_type = json_extract(item_json, '$.type')\nWHERE item_type = '';\n\nCREATE INDEX idx_thread_items_user_messages\n    ON thread_items(thread_id, rollout_ordinal)\n    WHERE item_type = 'userMessage';\n",
+      "lf": "ae61dbc1a6422530aa93914dbcac363a0238b86ae1a9d77eb041c75330e1283a0fcf93a043deeefcd6fd2c4037694bc4",
+      "crlf": "1461cffa3015c335f993c4afeecb729714fc741d663038ebe18288b968aef006649eb1ef3a0716ce47fe6d08c06045a5"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0003_turn_rollout_positions.sql",
+      "blob": "3cab073486f1c2dfbe88556c1992b122dbe4644c",
+      "sql": "ALTER TABLE thread_turns ADD COLUMN rollout_byte_offset INTEGER;\nALTER TABLE thread_turns ADD COLUMN rollout_end_ordinal INTEGER;\nALTER TABLE thread_turns ADD COLUMN rollout_end_byte_offset INTEGER;\n",
+      "lf": "a51da2a11df7760d8f8cab221e82b36ce8c0a30f16d44f3602e7f0fbc622ca72f1c3e3ecf22a194e12c2222bdcb51afe",
+      "crlf": "cce3adb187490e2822a759c2668337cb277656f1fc1a1713542a4f15d23fd5e7e444328a58be7906067006fac870a574"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0004_thread_items_updated_at_ordinal.sql",
+      "blob": "30629325f8aac21c0998868a3863e3a8729d2df3",
+      "sql": "ALTER TABLE thread_items ADD COLUMN updated_at_ordinal INTEGER NOT NULL DEFAULT 0;\n\n-- As of this migration, existing projected items originate from exactly one ItemCompleted rollout\n-- event, so their creation ordinal is also their update ordinal.\nUPDATE thread_items\nSET updated_at_ordinal = rollout_ordinal;\n\n-- Older writers can still append items with the zero default after this migration. Incremental\n-- replay excludes those items until a newer writer projects an update for them.\n-- Keep this index non-unique so mixed-version writers can continue to persist history.\nCREATE INDEX idx_thread_items_updated_page\n    ON thread_items(thread_id, updated_at_ordinal);\n\nCREATE INDEX idx_thread_items_by_turn_updated_page\n    ON thread_items(thread_id, turn_id, updated_at_ordinal);\n",
+      "lf": "65f33b171bd3aafe9d24728b2ca6a5c720a3ab54aed472998f8acf7489f0d35b2dfd12258a2d17be993bf17098b5e50c",
+      "crlf": "6a2824bee2b0670c6bb3bb5ae990f015863c5f6548540834eddcde94c470d6affa040a6e1e50ab81d75f0a149d19bb77"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0005_thread_realtime_items.sql",
+      "blob": "9c850436517d8f5cb1d179e8bd53d1e941ed42a6",
+      "sql": "CREATE TABLE thread_realtime_items (\n    thread_id TEXT NOT NULL,\n    item_id TEXT NOT NULL,\n    rollout_ordinal INTEGER NOT NULL,\n    created_at_ms INTEGER NOT NULL,\n    item_type TEXT NOT NULL,\n    item_json TEXT NOT NULL,\n    PRIMARY KEY (thread_id, item_id)\n);\n\nCREATE UNIQUE INDEX idx_thread_realtime_items_page\n    ON thread_realtime_items(thread_id, rollout_ordinal);\n\nCREATE INDEX idx_thread_realtime_items_boundary\n    ON thread_realtime_items(thread_id, rollout_ordinal)\n    WHERE item_type IN ('realtime_session_started', 'realtime_session_closed');\n\nCREATE TRIGGER thread_realtime_items_projection_cleanup\n    AFTER DELETE ON thread_history_projection_state\nBEGIN\n    DELETE FROM thread_realtime_items WHERE thread_id = OLD.thread_id;\nEND;\n",
+      "lf": "2fdad8e361dc1f828afacf10bd2eb1f511b02deef7fa234a9c412d0211de126d1cfad54b175c9c3a9731548f9084b437",
+      "crlf": "bdfaf405f3b733cf7455ca5aa0afae13869fd2ad2cf75245e6e268b9b110f331d3d69b01224bffa66d1107ff938e9d6b"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0006_thread_turn_ends.sql",
+      "blob": "b6c6ddd738d5818c4b3bc890f9c1b8aa20468dca",
+      "sql": "CREATE INDEX idx_thread_turns_end_page\n    ON thread_turns(thread_id, rollout_end_ordinal, turn_id)\n    WHERE rollout_end_ordinal IS NOT NULL;\n",
+      "lf": "02ed82d375adb58b5c0c09e0154f3331d507cea7af446d12324e5653cdba9a91f84afd38cf2a29f33030614689deb9de",
+      "crlf": "7ae052fd42a8ab1e7d0fe33127157b9cf2552ab1c8010a3adeca49b9dd314163dc19663639a4a6bf479b9f25d1a5a16a"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0007_thread_item_lifecycle_timestamps.sql",
+      "blob": "6fe293575b3102a2950c084e6ff561e81dafd67b",
+      "sql": "ALTER TABLE thread_items ADD COLUMN started_at_ms INTEGER;\nALTER TABLE thread_items ADD COLUMN completed_at_ms INTEGER;\n",
+      "lf": "9334adb4cda792116a47b69a19e3840ae3806b08773ef1794043fe0aa72891360acb1a0a8431084d53c568482c5fdd20",
+      "crlf": "852814c808c7a62178029739ca41c38b9c86f4c366c6c436dfd9e905031f43ffef927f5c3dcbb7b17f9e5ac04124fc7c"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0008_thread_turn_root.sql",
+      "blob": "55304755c42bd87b363657170bf68c04d72f3f8e",
+      "sql": "ALTER TABLE thread_turns ADD COLUMN root_turn_id TEXT;\n",
+      "lf": "94635cd58535adb1679f4ad07a9d14231b69004405fa88a22db1b6a7e5feac8b6b66ad97ea16fce464b99bff5b3548d3",
+      "crlf": "745e4ee42b02c79c4bc742a5405acbf460fcdaaa44394367ce93d3a3ff29f3876830f1bbeb44bdc87d7ad9af060a9587"
+    }
+  ],
+  "historical": [
+    {
+      "path": "codex-rs/state/thread_history_migrations/0008_inference_attribution.sql",
+      "blob": "f546765476a50aab25984d61914eddc888dd2471",
+      "sql": "ALTER TABLE thread_turns ADD COLUMN inference_attribution_json TEXT;\n",
+      "lf": "ea7aa9e46ecddcec9011736293f9ec7d2db75a799b3d1a6d8a2c9d2782870e8c8a858378450253eb534f93a5246e8b88",
+      "crlf": "e68b63f8b4e12dfc8681b48ff8f945ef6632df96e95dd5f50ffb2200bbd7952a6a0c27c3120fe0e157557d09acdfc8b6"
+    },
+    {
+      "path": "codex-rs/state/thread_history_migrations/0009_thread_turn_root.sql",
+      "blob": "55304755c42bd87b363657170bf68c04d72f3f8e",
+      "sql": "ALTER TABLE thread_turns ADD COLUMN root_turn_id TEXT;\n",
+      "lf": "94635cd58535adb1679f4ad07a9d14231b69004405fa88a22db1b6a7e5feac8b6b66ad97ea16fce464b99bff5b3548d3",
+      "crlf": "745e4ee42b02c79c4bc742a5405acbf460fcdaaa44394367ce93d3a3ff29f3876830f1bbeb44bdc87d7ad9af060a9587"
+    }
+  ],
+  "target": {
+    "profile": "upstream-alpha6-windows",
+    "checksum_variant": "crlf",
+    "executable_version": "0.166.0-alpha.6",
+    "executable_sha256": "925c7d0665ffa49b0dcf748e034a805a04da984164ac92301432073b47789b99"
+  }
+}

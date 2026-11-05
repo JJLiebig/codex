@@ -54,6 +54,18 @@ add local requirements but must not weaken these rules.
   Review only when the tool can target the fork-authored commits or exact conflict/seam diff;
   otherwise use the bounded conflict audit and focused validation.
 
+## Preserve shared migration chains
+
+- Never add, edit, delete, rename, or renumber migrations in the six upstream shared state
+  chains, or change their shared migration-ledger semantics, without explicit exceptional user
+  approval. Verbatim merged upstream migrations are allowed. Fork-only state needs its own
+  storage and ledger; a different migration number in a shared chain is not isolation.
+- The reviewed, offline issue #260 history canonicalization is a specific recovery exception,
+  not permission for runtime repair or future shared-chain divergence.
+- `repo-checks` compares paths and blobs with actual merged `openai/codex` ancestry. Review
+  changes to the state migrator, SQLite open/recovery code, and thread-history startup explicitly;
+  the equality gate does not detect arbitrary SQL writes outside migration directories.
+
 ## Maintain the fork ledger
 
 - Keep `CODEX_PLUS_PLUS_LEDGER.md` as the authoritative map of maintained fork capabilities.
