@@ -75,6 +75,8 @@ add local requirements but must not weaken these rules.
 - Every fork feature or fix must update its relevant capability row before the change is complete.
 - Update existing rows as capabilities evolve; do not append one row per commit. The ledger is a
   maintenance map, not a changelog.
+- When a capability is retired, move its row to the ledger's `# Archive` section; keep the main
+  table to live capabilities.
 - Use merged PR numbers as durable history anchors. Include a short commit SHA only for a
   direct-to-main change that has no PR.
 - Link known overlapping upstream issues or PRs in the capability row as
