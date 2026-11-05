@@ -1,14 +1,18 @@
 # Only the managed Windows installer calls these functions, under its install locks.
 function Get-HistoryUpgrade {
-    param([string]$Target, [string]$Python, [string]$Helper)
+    param([string]$Target, [string]$Python, [string]$Helper, [string]$Database)
 
     # The new executable only resolves configuration; it must not open a database.
-    $database = & $Target debug history-upgrade-target
-    if ($LASTEXITCODE -ne 0 -or @($database).Count -ne 1 -or
-        -not [System.IO.Path]::IsPathRooted($database)) {
-        throw "Cannot resolve history for this upgrade. Installation was left unchanged."
+    if (-not $Database) {
+        $Database = & $Target debug history-upgrade-target
+        if ($LASTEXITCODE -ne 0 -or @($Database).Count -ne 1 -or
+            -not [System.IO.Path]::IsPathRooted($Database)) {
+            throw "Cannot resolve history for this upgrade. Installation was left unchanged."
+        }
     }
-    if (-not (Test-Path -LiteralPath $database -PathType Leaf)) { return $null }
+    if (-not (Test-Path -LiteralPath $Database -PathType Leaf)) {
+        return @{ Database = [string]$Database; PythonExe = $Python; Required = $true }
+    }
     if ([string]::IsNullOrWhiteSpace($Python)) {
         $Python = $env:Path -split ';' |
             Where-Object { [System.IO.Path]::IsPathRooted($_) } |
@@ -18,16 +22,15 @@ function Get-HistoryUpgrade {
     }
     if (-not $Python -or -not [System.IO.Path]::IsPathRooted($Python) -or
         -not (Test-Path -LiteralPath $Python -PathType Leaf)) {
-        throw "History upgrade requires Python 3.10 or newer. Rerun the installer with -PythonExe <absolute-path>."
+        throw "History upgrade requires Python 3.10 or newer. Rerun the installer with -PythonExe <absolute-path> (also -ResumeUpgrade if pending)."
     }
-    & $Python $Helper inspect $database
-    if ($LASTEXITCODE -eq 0) { return $null }
-    if ($LASTEXITCODE -ne 75) { throw "History upgrade preflight failed; installation was left unchanged." }
-    return @{ Database = [string]$database; PythonExe = $Python }
+    & $Python $Helper inspect $Database
+    if ($LASTEXITCODE -notin @(0, 75)) { throw "History upgrade preflight failed; installation was left unchanged." }
+    return @{ Database = [string]$Database; PythonExe = $Python; Required = ($LASTEXITCODE -eq 75) }
 }
 
 function Invoke-HistoryUpgrade {
-    param([object]$Pending, [string]$Leases, [scriptblock]$Activate)
+    param([object]$Pending, [string]$Leases, [string]$Links, [string]$Releases, [string]$Incoming, [scriptblock]$Activate)
 
     $gates = @()
     $readers = @()
@@ -75,8 +78,27 @@ function Invoke-HistoryUpgrade {
             Start-Sleep -Seconds 1
         }
         $helper = Join-Path (Split-Path $Pending.Installer) 'windows_upgrade.py'
-        & $Pending.PythonExe $helper complete $Pending.Database
-        if ($LASTEXITCODE -ne 0) { throw "History upgrade remains pending. The current installation was not activated." }
+        $history = Get-HistoryUpgrade -Database $Pending.Database -Python $Pending.PythonExe -Helper $helper
+        # A preloaded old wrapper can resume after these gates close. Retire only
+        # owned junctions before repair so it must reread the active generation.
+        foreach ($gate in $gates) {
+            $name = Split-Path -Leaf $gate.Generation
+            if ($name -eq $Incoming) { continue }
+            $linkPath = Join-Path $Links $name
+            $link = Get-Item -LiteralPath $linkPath -Force -ErrorAction SilentlyContinue
+            if (-not $link) { continue } # Resuming an interrupted maintenance.
+            $expected = Join-Path (Join-Path $Releases $name) 'bin'
+            if ($name -notmatch '^\d{8}T\d{13}Z$' -or -not (Test-IsJunction $link) -or
+                $link.FullName -ine [System.IO.Path]::GetFullPath($linkPath) -or
+                (Resolve-PhysicalPath $link.FullName) -ine (Resolve-PhysicalPath $expected)) {
+                throw "Unknown Codex generation; upgrade remains pending."
+            }
+            [System.IO.Directory]::Delete($link.FullName) # Unlink only; never recurse into the release.
+        }
+        if (Test-Path -LiteralPath $Pending.Database -PathType Leaf) {
+            & $history.PythonExe $helper complete $Pending.Database
+            if ($LASTEXITCODE -ne 0) { throw "History upgrade remains pending. The current installation was not activated." }
+        }
         & $Activate
     } finally {
         foreach ($reader in $readers) { $reader.Dispose() }

@@ -106,9 +106,8 @@ def codex_processes():
         process.size = c.sizeof(process)
         found = first(handle, c.byref(process))
         while found:
-            if process.name.lower().startswith("codex") and process.name.endswith(
-                ".exe"
-            ):
+            name = process.name.lower()
+            if name.startswith("codex") and name.endswith(".exe"):
                 value = identity(process.pid)
                 if value:
                     result.add(value)

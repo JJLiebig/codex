@@ -18,7 +18,8 @@ if ($ResumeUpgrade) {
     if (-not (Test-Path -LiteralPath $pendingPath)) { exit 0 }
     $pending = Get-Content -LiteralPath $pendingPath -Raw | ConvertFrom-Json
     $TargetExe = $pending.TargetExe
-    $PythonExe = $pending.PythonExe
+    if ($PythonExe) { $pending.PythonExe = $PythonExe }
+    else { $PythonExe = $pending.PythonExe }
     $env:CODEX_HOME = $pending.CodexHome
     $AddToUserPath = $pending.AddToUserPath
     $Install = $true
@@ -459,6 +460,8 @@ Invoke-WithInstallLocks -LockPaths $installLockPaths -Script {
         . (Join-Path $historyTools 'windows_upgrade.ps1')
         if (-not $ResumeUpgrade) {
             $upgrade = Get-HistoryUpgrade -Target $targetPath -Python $PythonExe -Helper (Join-Path $historyTools 'windows_upgrade.py')
+            if (-not $upgrade.Required -or (-not (Test-Path -LiteralPath $upgrade.Database) -and
+                -not (Test-Path -LiteralPath $targetPointerPath))) { $upgrade = $null }
         }
     }
     if (($upgrade -or $ResumeUpgrade) -and (Test-Path -LiteralPath $releasesRoot)) {
@@ -630,7 +633,7 @@ try {
         $temporary = "$pendingPath.$PID.tmp"
         [System.IO.File]::WriteAllText($temporary, ($upgrade | ConvertTo-Json), [System.Text.UTF8Encoding]::new($false))
         Move-Item -LiteralPath $temporary -Destination $pendingPath
-        Write-Host "Upgrade pending. Close existing Codex sessions, then launch Codex to finish."
+        Write-Host "Upgrade pending. Close existing Codex sessions, then run: & '$shimPath'"
         exit 75
     }
     $activate = {
@@ -657,10 +660,10 @@ try {
     }
     Write-Host "==> Installed shims at $shimPath and $cmdShimPath"
     Write-Host "==> Active release: $releaseDir"
-    if ($ResumeUpgrade) { Remove-Item -LiteralPath $pendingPath }
     }
     if ($ResumeUpgrade) {
-        Invoke-HistoryUpgrade -Pending $pending -Leases $generationLeasesDir -Activate $activate
+        Invoke-HistoryUpgrade -Pending $pending -Leases $generationLeasesDir -Links $generationLinksDir -Releases $releasesDir -Incoming $releaseName -Activate $activate
+        Remove-Item -LiteralPath $pendingPath
     } else { & $activate }
     Remove-StaleReleases `
         -ReleasesDir $releasesDir `

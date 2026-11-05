@@ -42,7 +42,7 @@ class Fixture {
       while (!File.Exists(Environment.GetEnvironmentVariable("TEST_RELEASE"))) System.Threading.Thread.Sleep(50);
       return 0;
     }
-    Console.WriteLine("fixture started"); return 0;
+    Console.WriteLine("fixture started " + File.ReadAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "generation.txt"))); return 0;
   }
 }""")
         cls.binary = source.with_name("codex.exe")
@@ -67,6 +67,7 @@ class Fixture {
         self.package = self.root / "package"
         (self.package / "bin").mkdir(parents=True)
         shutil.copyfile(self.binary, self.package / "bin/codex.exe")
+        (self.package / "bin/generation.txt").write_text("old")
         (self.package / "codex-package.json").write_text("{}")
         sys.path.insert(0, str(ROOT / "scripts"))
         from codex_package.codex_plus_plus.history_upgrade import add_recovery
@@ -101,6 +102,7 @@ class Fixture {
             "-Install",
         ]
         self.assertEqual(self.install().returncode, 0)
+        (self.package / "bin/generation.txt").write_text("new")
         self.pointer = self.shim / ".codex-plus-plus-current"
         self.original = self.pointer.read_bytes()
         self.pending = self.shim / ".codex-plus-plus-pending.json"
@@ -185,10 +187,52 @@ class Fixture {
             )
         )
         racing = self.launch([str(stale)])
-        deadline = time.monotonic() + 10
-        while not released.with_suffix(".ready").exists():
-            self.assertLess(time.monotonic(), deadline)
-            time.sleep(0.05)
+        self.addCleanup(released.touch)
+
+        def wait_paused(path, process):
+            deadline = time.monotonic() + 10
+            while not path.with_suffix(".ready").exists():
+                if process.poll() is not None:
+                    self.fail(str(process.communicate()))
+                self.assertLess(time.monotonic(), deadline)
+                time.sleep(0.05)
+
+        wait_paused(released, racing)
+        # These wrappers remain paused until AFTER activation. They have already
+        # read the old generation, but have not published/acquired their leases.
+        delayed = []
+        for kind, insertion in (
+            ("cmd", 'set "CODEX_PLUS_PLUS_LEASE='),
+            ("ps1", "$leasePath ="),
+        ):
+            release = self.root / f"delayed-{kind}"
+            script = self.shim / f"loaded.{kind}"
+            source = (self.shim / f"codex.{kind}").read_text()
+            command = subprocess.list2cmdline(
+                [sys.executable, str(pause), str(release)]
+            )
+            script.write_text(
+                source.replace(
+                    insertion,
+                    ("& " if kind == "ps1" else "") + command + "\n" + insertion,
+                )
+            )
+            args = (
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script),
+                ]
+                if kind == "ps1"
+                else [str(script)]
+            )
+            process = self.launch(args, input_pipe=False)
+            self.addCleanup(release.touch)
+            delayed.append((release, process))
+            wait_paused(release, process)
         # This updater actually runs inside an old CMD-generation lease.
         self.env["TEST_INSTALL_ARGS"] = subprocess.list2cmdline(self.command[1:])
         staged = self.install(self.shim_command("cmd", "stage"))
@@ -224,10 +268,15 @@ class Fixture {
         writer.communicate("\n", timeout=10)
         out, err = finishing.communicate(timeout=30)
         self.assertEqual(finishing.returncode, 0, out + err)
-        self.assertIn("fixture started", out)
+        self.assertIn("fixture started new", out)
+        for release, process in delayed:
+            release.touch()
+            delayed_out, delayed_err = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 0, delayed_out + delayed_err)
+            self.assertIn("fixture started new", delayed_out)
         raced_out, raced_err = racing.communicate(timeout=10)
         if racing.returncode == 0:
-            self.assertIn("fixture started", raced_out)
+            self.assertIn("fixture started new", raced_out)
         else:
             # An old wrapper may fail reading the pointer during File.Replace;
             # it must never start the old target while maintenance is fenced.
@@ -329,11 +378,94 @@ class Fixture {
             len(list((self.home / "history-recovery-backups").iterdir())), 1
         )
 
+        # A process exit bypasses finally after activation, leaving gates behind.
+        # Pending must survive so a CMD launch can resume and clear them.
+        self.fixture.path.unlink()
+        self.affected()
+        self.assertEqual(self.install().returncode, 75)
+        pending = json.loads(self.pending.read_text())
+        helper = Path(pending["Installer"]).with_name("windows_upgrade.ps1")
+        source = helper.read_text()
+        helper.write_text(
+            source.replace(
+                "        & $Activate",
+                "        & $Activate\n        [Environment]::Exit(19)",
+            )
+        )
+        interrupted = self.install(self.shim_command())
+        self.assertEqual(
+            interrupted.returncode, 19, interrupted.stdout + interrupted.stderr
+        )
+        self.assertTrue(self.pending.exists())
+        self.assertTrue(list(self.shim.glob(".codex-plus-plus-leases/*/.pruning")))
+        helper.write_text(source)
+        resumed = self.install(self.shim_command("cmd"))
+        self.assertEqual(resumed.returncode, 0, resumed.stdout + resumed.stderr)
+        self.assertFalse(self.pending.exists())
+        self.assertFalse(list(self.shim.glob(".codex-plus-plus-leases/*/.pruning")))
+
+    def test_missing_history_is_rechecked_after_old_managed_writer_drains(self):
+        old = self.launch(self.shim_command("ps", "hold"), input_pipe=False)
+        self.assertEqual(old.stdout.readline().strip(), "ready")
+        self.assertEqual(self.install().returncode, 75)
+        finishing = self.launch(self.shim_command(), input_pipe=False)
+        self.wait_gates()
+        self.affected()  # Old lazy writer creates history after missing-file preflight.
+        self.release.touch()
+        old.communicate(timeout=10)
+        out, err = finishing.communicate(timeout=30)
+        self.assertEqual(finishing.returncode, 0, out + err)
+        import recover
+
+        self.assertEqual(recover.recover(self.fixture.path)["class"], "canonical")
+        self.assertEqual(
+            len(list((self.home / "history-recovery-backups").iterdir())), 1
+        )
+        self.fixture.path.unlink()
+        missing = self.command.copy()
+        missing[missing.index("-PythonExe") + 1] = str(self.root / "missing-python.exe")
+        self.assertEqual(self.install(missing).returncode, 75)
+        self.assertEqual(self.install(self.shim_command()).returncode, 0)
+        self.assertFalse(
+            self.fixture.path.exists(), "absent history needs no interpreter"
+        )
+        self.assertEqual(self.install(missing).returncode, 75)
+        self.fixture.fixture(state="healthy", newline="crlf").close()
+        result = self.install(self.shim_command())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("-ResumeUpgrade", result.stderr)
+        self.assertTrue(self.pending.exists())
+        self.assertEqual(self.install([*self.command, "-ResumeUpgrade"]).returncode, 0)
+        self.assertEqual(
+            self.install().returncode, 75
+        )  # A healthy prefix still needs draining.
+        self.assertEqual(self.install(self.shim_command()).returncode, 0)
+        self.assertEqual(recover.recover(self.fixture.path)["class"], "healthy")
+        self.assertEqual(
+            len(list((self.home / "history-recovery-backups").iterdir())), 1
+        )
+
+    def test_first_affected_install_reports_reachable_pending_launcher(self):
+        # Remove only this test's initial install; leave synthetic history in place.
+        shutil.rmtree(self.shim)
+        shutil.rmtree(self.home / "packages")
+        self.affected()
+        result = self.install()
+        self.assertEqual(result.returncode, 75, result.stdout + result.stderr)
+        self.assertIn(
+            str(self.shim / "codex.ps1"), result.stdout.split("Upgrade pending.")[-1]
+        )
+        self.assertFalse(self.pointer.exists())
+        result = self.install(self.shim_command())
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_native_process_identity_and_recovery_lock_survive_process_exit(self):
         import windows_writers
         import recover
 
-        process = self.launch([str(self.binary), "hold"])
+        uppercase = self.root / "CODEX.EXE"
+        shutil.copyfile(self.binary, uppercase)
+        process = self.launch([str(uppercase), "hold"])
         self.assertEqual(process.stdout.readline().strip(), "ready")
         native_identity = windows_writers.identity
         with patch.object(

@@ -58,7 +58,9 @@ def main():
     args = parser.parse_args()
     try:
         if args.operation == "inspect":
-            return 75 if needed(args.database) else 0
+            # Old managed writers can advance a healthy prefix into the collision.
+            result = recover.recover(args.database)
+            return 75 if result["normalize"] or result["class"] != "canonical" else 0
         complete(args.database)
         return 0
     except (recover.Refused, OSError, sqlite3.Error) as error:

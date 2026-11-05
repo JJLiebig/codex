@@ -88,15 +88,20 @@ seams for explicit review; it cannot detect arbitrary SQL writes in other code.
 The Windows managed installer, downloaded update and local build `--install` share
 one maintenance path. The new binary resolves the global configuration's history
 location without opening history or auth. Project and per-invocation overrides are
-outside this installation maintenance scope. Missing history is unchanged. Existing
+outside this installation maintenance scope. First installs with missing history
+are unchanged. Existing managed installs with missing history or a healthy prefix
+stage pending completion too: an old lazy writer can create or advance history
+after preflight, so it is checked again after managed writers drain. Existing
 history requires Python 3.10+; local builds pass their interpreter, and the installer
 also accepts an absolute `-PythonExe`. No interpreter is downloaded.
 
 Recognized affected histories stage a pending upgrade and return status 75. Close
-existing Codex sessions and launch Codex again: that launch completes maintenance
+existing Codex sessions and use the printed shim path (or launch Codex again): that launch completes maintenance
 before acquiring a runtime lease or starting Codex. It waits/retries for all retained
 generation leases, known Codex processes and users of the exact database/WAL/SHM.
-It never stops clients. Discovery failures remain pending. An upgrade running inside
+It never stops clients. Obsolete owned generation junctions are retired under the
+gates before repair; their packages remain, but preloaded old launchers cannot
+restart those generations afterward. Discovery failures remain pending. An upgrade running inside
 Codex therefore returns instead of waiting on its own session's lease. New CLIs
 report pending; an older CLI may additionally describe status 75 as an update failure.
 
@@ -108,8 +113,10 @@ Already-compatible histories skip maintenance and its namespace restriction.
 Unknown/future histories refuse before changing the selected installation or data.
 
 The verified backup is retained under `history-recovery-backups` beside history.
-If interrupted after repair but before activation, the pending record and staged
-package remain; the next managed launch finishes activation without repeating a
-completed repair. Leave these artifacts in place. This is a one-upgrade operation,
+If interrupted, the pending record remains until activation and gate cleanup both
+finish; the next managed launch resumes without repeating a completed repair.
+Missing history at completion needs no interpreter; newly created history requires
+Python before activation. Leave the pending record and staged package in place.
+This is a one-upgrade operation,
 not a startup migrator, service, scheduled task or background worker. Native account
 stores and the six shared migration chains are unchanged.
