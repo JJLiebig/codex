@@ -63,7 +63,7 @@ not a valid apply target for this installed app. No other apply profile is suppo
    backup contains private conversation data even though manifests contain only
    metadata and hashes. Resume only qualified upstream and fixed-fork clients.
 
-Apply obtains a separate invocation lock, revalidates under `BEGIN IMMEDIATE`, and
+Apply obtains a separate invocation lock, inspects only under `BEGIN IMMEDIATE`, and
 uses a second read connection's SQLite backup API while writes are excluded. It
 verifies backup integrity, schema, ledger and typed content, then flushes the backup
 and metadata manifest before mutation. All changes and post-validation share one
@@ -91,7 +91,9 @@ location without opening history or auth. Project and per-invocation overrides a
 outside this installation maintenance scope. First installs with missing history
 are unchanged. Existing managed installs with missing history or a healthy prefix
 stage pending completion too: an old lazy writer can create or advance history
-after preflight, so it is checked again after managed writers drain. Existing
+after preflight, so it is checked again after managed writers drain. Both checks
+read only the ledger and schema; full integrity and content checks run once, under
+the repair lock, and only when a repair is needed. Existing
 history requires Python 3.10+; local builds pass their interpreter, and the installer
 also accepts an absolute `-PythonExe`. No interpreter is downloaded.
 

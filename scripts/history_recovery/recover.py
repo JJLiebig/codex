@@ -264,15 +264,14 @@ def recover(
     if path.name != "thread_history_1.sqlite" or not path.is_file():
         raise Refused("expected the explicit thread_history_1.sqlite file")
     target = manifest()
-    with closing(connect(path, "ro")) as reader:
-        reader.execute("BEGIN")
-        before = inspect(reader, target)
     if not apply:
-        return before
+        with closing(connect(path, "ro")) as reader:
+            reader.execute("BEGIN")
+            return inspect(reader, target)
     if (
         target_profile != TARGET_PROFILE
         or not stopped
-        or expected != before["class"]
+        or expected is None
         or backup_dir is None
     ):
         raise Refused(
@@ -283,7 +282,9 @@ def recover(
         with closing(connect(path, "rw")) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
-                if inspect(db, target) != before:
+                # Full scans are slow on large histories; inspect once, under the lock.
+                before = inspect(db, target)
+                if before["class"] != expected:
                     raise Refused("database changed since inspection")
                 if (
                     before["class"] in ("healthy", "canonical")
@@ -323,8 +324,11 @@ def recover(
                             os.fsync(fd)
                         finally:
                             os.close(fd)
-                preserved = fingerprint(
-                    db, future_root=before["class"] == "attribution-only"
+                # The lock kept content unchanged since inspection.
+                preserved = (
+                    fingerprint(db, future_root=True)
+                    if before["class"] == "attribution-only"
+                    else dict(before["content"])
                 )
                 preserved.pop("_sqlx_migrations")
                 mutate(db, before["class"], target)
