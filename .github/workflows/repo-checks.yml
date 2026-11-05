@@ -27,6 +27,17 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify shared migrations match merged upstream
+        run: |
+          git fetch --no-tags https://github.com/openai/codex.git +refs/heads/main:refs/remotes/shared-upstream/main
+          python3 .github/scripts/verify_shared_migrations.py
+
+      - name: Test offline history recovery on synthetic data
+        run: |
+          python3 -m unittest discover -s scripts/history_recovery -p 'test_*.py'
+          python3 -m unittest discover -s .github/scripts -p 'test_verify_shared_migrations.py'
 
       - uses: ./.github/actions/setup-ci
 
