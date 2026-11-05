@@ -229,7 +229,7 @@ class RecoveryTests(unittest.TestCase):
 
     def test_locked_inspection_rejects_unexpected_class(self):
         db = self.fixture()
-        with self.assertRaisesRegex(recovery.Refused, "changed since inspection"):
+        with self.assertRaisesRegex(recovery.Refused, "class is mixed"):
             self.apply("attribution-only")
         self.assertEqual(recovery.classify(db, self.target)[0], "mixed")
         self.assertFalse((self.root / "backup").exists())

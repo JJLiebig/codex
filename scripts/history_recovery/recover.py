@@ -285,7 +285,9 @@ def recover(
                 # Full scans are slow on large histories; inspect once, under the lock.
                 before = inspect(db, target)
                 if before["class"] != expected:
-                    raise Refused("database changed since inspection")
+                    raise Refused(
+                        f"history class is {before['class']}, expected {expected}"
+                    )
                 if (
                     before["class"] in ("healthy", "canonical")
                     and not before["normalize"]
