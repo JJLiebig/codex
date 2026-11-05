@@ -198,7 +198,6 @@ fn token_count_item(last_model_visible_tokens: i64) -> RolloutItem {
         ..TokenUsage::default()
     };
     RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
-        inference_attribution: None,
         info: Some(TokenUsageInfo {
             total_token_usage: usage.clone(),
             last_usage_includes_reasoning: None,
@@ -215,7 +214,6 @@ fn turn_complete_item(
     completed_at: Option<i64>,
 ) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id,
         last_agent_message: None,

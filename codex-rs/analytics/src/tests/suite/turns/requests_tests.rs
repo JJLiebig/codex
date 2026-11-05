@@ -89,7 +89,6 @@ fn non_steerable_review_error() -> JSONRPCErrorError {
         message: "cannot steer a review turn".to_string(),
         data: Some(
             serde_json::to_value(AppServerTurnError {
-                inference_attribution: None,
                 misalignment: None,
                 message: "cannot steer a review turn".to_string(),
                 codex_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {

@@ -20,9 +20,7 @@ impl ChatWidget {
         {
             return;
         }
-        if !self.observe_inference_usage(&notification) {
-            return;
-        }
+
         let was_replaying_turn_completion = self.thread_usage.replaying_turn_completion;
         if replay_kind.is_some()
             || matches!(
@@ -254,7 +252,6 @@ impl ChatWidget {
                         self.handle_non_retry_error(
                             notification.error.message,
                             notification.error.codex_error_info,
-                            notification.error.inference_attribution,
                         );
                     }
                 }
@@ -563,11 +560,7 @@ impl ChatWidget {
                             self.maybe_send_next_queued_input();
                         }
                     } else {
-                        self.handle_non_retry_error(
-                            error.message,
-                            error.codex_error_info,
-                            error.inference_attribution,
-                        );
+                        self.handle_non_retry_error(error.message, error.codex_error_info);
                     }
                 } else {
                     self.last_non_retry_error = None;

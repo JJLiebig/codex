@@ -206,8 +206,6 @@ async fn daybreak_refusal_offers_enable_for_the_next_turn() {
     assert!(ops.try_recv().is_err());
 
     let error = AppServerTurnError {
-        inference_attribution: None,
-        usage_limit_observed_at_ns: None,
         message: "blocked".into(),
         codex_error_info: Some(CodexErrorInfo::CyberPolicy),
         misalignment: None,
@@ -3731,7 +3729,6 @@ async fn failed_turn_refreshes_estimated_thread_usage() {
     chat.handle_non_retry_error(
         "turn failed after generating tokens".to_string(),
         /*codex_error_info*/ None,
-        /*inference_attribution*/ None,
     );
 
     assert!(

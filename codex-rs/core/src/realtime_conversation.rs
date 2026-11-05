@@ -2828,8 +2828,6 @@ async fn send_conversation_error(
     sess.send_event_raw(Event {
         id: sub_id,
         msg: EventMsg::Error(ErrorEvent {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             misalignment: None,
             message,
             codex_error_info: Some(codex_error_info),

@@ -2557,11 +2557,10 @@ impl Session {
         }
         let legacy_source = msg.clone();
         if let EventMsg::Error(error) = &legacy_source
-            && (error.inference_attribution.is_some()
-                || error
-                    .codex_error_info
-                    .as_ref()
-                    .is_some_and(CodexErrorInfo::affects_turn_status))
+            && (error
+                .codex_error_info
+                .as_ref()
+                .is_some_and(CodexErrorInfo::affects_turn_status))
         {
             turn_context
                 .terminal_error
@@ -5460,22 +5459,11 @@ impl Session {
         turn_context: &TurnContext,
         new_rate_limits: RateLimitSnapshot,
     ) {
-        self.record_rate_limits_info(turn_context, new_rate_limits)
-            .await;
+        self.record_rate_limits_info(new_rate_limits).await;
         self.send_token_count_event(turn_context).await;
     }
 
-    pub(crate) async fn record_rate_limits_info(
-        &self,
-        turn_context: &TurnContext,
-        new_rate_limits: RateLimitSnapshot,
-    ) {
-        if turn_context
-            .record_inference_rate_limits(&new_rate_limits)
-            .await
-        {
-            return;
-        }
+    pub(crate) async fn record_rate_limits_info(&self, new_rate_limits: RateLimitSnapshot) {
         {
             let mut state = self.state.lock().await;
             state.set_rate_limits(new_rate_limits);
@@ -5500,12 +5488,7 @@ impl Session {
             let state = self.state.lock().await;
             state.token_info_and_rate_limits()
         };
-        let mut event = TokenCountEvent {
-            info,
-            rate_limits,
-            inference_attribution: None,
-        };
-        turn_context.attribute_token_count(&mut event).await;
+        let event = TokenCountEvent { info, rate_limits };
         let event = EventMsg::TokenCount(event);
         self.send_event(turn_context, event).await;
     }

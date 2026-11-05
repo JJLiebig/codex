@@ -3457,28 +3457,24 @@ async fn record_initial_history_seeds_token_info_from_rollout() {
 
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
-            inference_attribution: None,
             info: Some(info1),
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
-            inference_attribution: None,
             info: None,
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
-            inference_attribution: None,
             info: Some(info2.clone()),
             rate_limits: None,
         },
     )));
     rollout_items.push(RolloutItem::EventMsg(EventMsg::TokenCount(
         TokenCountEvent {
-            inference_attribution: None,
             info: None,
             rate_limits: None,
         },
@@ -4568,7 +4564,6 @@ async fn record_initial_history_forked_hydrates_previous_turn_settings() {
         RolloutItem::TurnContext(previous_context_item.clone()),
         RolloutItem::EventMsg(EventMsg::TurnComplete(
             codex_protocol::protocol::TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id,
                 last_agent_message: None,
@@ -6507,7 +6502,6 @@ async fn compaction_persists_resume_metadata_and_companion_records() {
         if let Some(turn_id) = last_started_turn_id {
             items.push(RolloutItem::EventMsg(EventMsg::TurnComplete(
                 TurnCompleteEvent {
-                    inference_attribution: None,
                     root_turn_id: None,
                     turn_id,
                     last_agent_message: None,

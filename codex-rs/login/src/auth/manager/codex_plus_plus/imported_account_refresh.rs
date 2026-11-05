@@ -14,10 +14,7 @@ use super::super::ReloadOutcome;
 use super::super::load_auth_dot_json_with_guard;
 use super::super::logout_all_stores_with_guard;
 use super::super::revoke_auth_tokens;
-use super::native_credential_export::NativeCredentialExpectation;
-use super::native_credential_export::NativeRequestAdmission;
 use crate::account::AccountId;
-use crate::account::AccountProfile;
 use crate::account::AccountStore;
 use crate::account::account_id_for_auth;
 use crate::account::is_root_account_marker;
@@ -66,27 +63,6 @@ pub(in crate::auth::manager) struct ManagedAuthRefreshLocks {
 }
 
 impl ManagedAuthRefreshLocks {
-    pub(in crate::auth::manager) fn account_profiles(
-        &self,
-    ) -> std::io::Result<Vec<(AccountProfile, PathBuf)>> {
-        if !self.index_readable {
-            return Err(std::io::Error::other("account index is unreadable"));
-        }
-        self.account_store
-            .list()?
-            .into_iter()
-            .filter_map(|account| {
-                let home = self.account_store.account_home(&account.id);
-                match std::fs::metadata(home.join("auth.json")) {
-                    Ok(metadata) if metadata.is_file() => Some(Ok((account, home))),
-                    Ok(_) => None,
-                    Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
-                    Err(err) => Some(Err(err)),
-                }
-            })
-            .collect()
-    }
-
     pub(in crate::auth::manager) fn account_homes(&self) -> &[PathBuf] {
         &self.account_homes
     }
@@ -272,7 +248,6 @@ impl AuthManager {
         result: Result<(), RefreshTokenError>,
         attempted_account_id: Option<AccountId>,
         guard: AuthRefreshGuard,
-        expected: Option<&NativeCredentialExpectation>,
     ) -> Result<(), RefreshTokenError> {
         let terminal = matches!(
             result
@@ -288,13 +263,6 @@ impl AuthManager {
         let Some(attempted_account_id) = terminal.then_some(attempted_account_id).flatten() else {
             return result;
         };
-        if let Some(expected) = expected
-            && !self
-                .native_request_matches(expected, NativeRequestAdmission::Eligible, &guard)
-                .map_err(RefreshTokenError::Transient)?
-        {
-            return Err(native_source_changed());
-        }
         if self.active_account_id().as_ref() == Some(&attempted_account_id) {
             let expected_account_id = self
                 .auth_cached()
@@ -314,7 +282,7 @@ impl AuthManager {
             .map_err(RefreshTokenError::Transient)?;
         drop(guard);
         if self.active_account_id().as_ref() == Some(&attempted_account_id) {
-            self.move_off_imported_account_requiring_login(attempted_account_id, expected)
+            self.move_off_imported_account_requiring_login(attempted_account_id)
                 .await
         } else {
             Ok(())
@@ -342,7 +310,7 @@ impl AuthManager {
         }
 
         drop(guard);
-        self.move_off_imported_account_requiring_login(active_account_id, /*expected*/ None)
+        self.move_off_imported_account_requiring_login(active_account_id)
             .await?;
         Ok(None)
     }
@@ -372,7 +340,6 @@ impl AuthManager {
     async fn move_off_imported_account_requiring_login(
         &self,
         active_account_id: AccountId,
-        expected: Option<&NativeCredentialExpectation>,
     ) -> Result<(), RefreshTokenError> {
         if self.automatic_account_selection() == AutomaticAccountSelection::Disabled {
             return Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(
@@ -382,33 +349,12 @@ impl AuthManager {
         }
         let attempted_account_ids = HashSet::from([active_account_id.to_string()]);
         let outcome = self
-            .switch_to_next_imported_account_unlocked(
-                &attempted_account_ids,
-                expected.map(|expected| (expected, NativeRequestAdmission::AfterTerminalRefresh)),
-            )
+            .switch_to_next_imported_account_unlocked(&attempted_account_ids)
             .await;
-        if outcome
-            == super::imported_account_selection::ImportedAccountSwitchOutcome::RequestSourceChanged
-        {
-            return Err(native_source_changed());
-        }
         if outcome != super::imported_account_selection::ImportedAccountSwitchOutcome::NoCandidate {
             tracing::info!(%active_account_id, "switched away from imported account that requires login");
             Ok(())
         } else {
-            let _guard = if let Some(expected) = expected {
-                Some(
-                    self.native_request_guard(
-                        expected,
-                        NativeRequestAdmission::AfterTerminalRefresh,
-                    )
-                    .await
-                    .map_err(RefreshTokenError::Transient)?
-                    .ok_or_else(native_source_changed)?,
-                )
-            } else {
-                None
-            };
             self.clear_active_imported_account();
             self.set_cached_auth(/*new_auth*/ None);
             Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(
@@ -417,13 +363,6 @@ impl AuthManager {
             )))
         }
     }
-}
-
-pub(super) fn native_source_changed() -> RefreshTokenError {
-    RefreshTokenError::Permanent(RefreshTokenFailedError::new(
-        RefreshTokenFailedReason::Other,
-        "The account changed while the request was running. Try again.",
-    ))
 }
 
 fn acquire_refresh_file_lock(auth_home: &Path) -> std::io::Result<AuthRefreshGuard> {

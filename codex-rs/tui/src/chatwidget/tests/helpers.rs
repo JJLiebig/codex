@@ -509,7 +509,6 @@ pub(super) fn handle_token_count(chat: &mut ChatWidget, info: Option<TokenUsageI
             chat.handle_server_notification(
                 ServerNotification::ThreadTokenUsageUpdated(
                     codex_app_server_protocol::ThreadTokenUsageUpdatedNotification {
-                        inference_attribution: None,
                         thread_id: thread_id(chat),
                         turn_id: chat
                             .turn_lifecycle
@@ -538,8 +537,6 @@ pub(super) fn handle_error(
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: message.into(),
                 codex_error_info,
@@ -574,8 +571,6 @@ pub(super) fn handle_stream_error_with_replay(
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: message.into(),
                 codex_error_info: None,
@@ -1146,7 +1141,6 @@ pub(in crate::chatwidget) fn app_server_turn(
     error: Option<AppServerTurnError>,
 ) -> AppServerTurn {
     AppServerTurn {
-        inference_attribution: None,
         id: turn_id.to_string(),
         root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,

@@ -148,7 +148,6 @@ pub struct ThreadHistoryItemChange {
 /// Turn metadata for history projection and snapshots that do not need items.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThreadHistoryTurnMetadata {
-    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     pub turn_id: String,
     pub root_turn_id: Option<String>,
     pub status: TurnStatus,
@@ -182,7 +181,6 @@ impl From<ThreadHistoryTurnMetadata> for Turn {
             root_turn_id: value.root_turn_id,
             items: Vec::new(),
             items_view: TurnItemsView::NotLoaded,
-            inference_attribution: value.inference_attribution,
             error: value.error,
             status: value.status,
             started_at: value.started_at,
@@ -198,7 +196,6 @@ impl ThreadHistoryTurnMetadata {
             turn_id: turn.id.clone(),
             root_turn_id: turn.root_turn_id.clone(),
             status: turn.status.clone(),
-            inference_attribution: turn.inference_attribution.clone(),
             error: turn.error.clone(),
             started_at: turn.started_at,
             completed_at: turn.completed_at,
@@ -1385,8 +1382,6 @@ impl ThreadHistoryBuilder {
         let changed_turn = if let Some(turn) = self.current_turn.as_mut() {
             turn.status = TurnStatus::Failed;
             turn.error = Some(V2TurnError {
-                usage_limit_observed_at_ns: payload.usage_limit_observed_at_ns.clone(),
-                inference_attribution: payload.inference_attribution.clone(),
                 misalignment: payload.misalignment.clone().map(Into::into),
                 message: payload.message.clone(),
                 codex_error_info: payload.codex_error_info.clone().map(Into::into),
@@ -1403,8 +1398,6 @@ impl ThreadHistoryBuilder {
 
     fn handle_turn_aborted(&mut self, payload: &TurnAbortedEvent) {
         let terminal_error = payload.error.as_ref().map(|error| V2TurnError {
-            usage_limit_observed_at_ns: error.usage_limit_observed_at_ns.clone(),
-            inference_attribution: error.inference_attribution.clone(),
             message: error.message.clone(),
             codex_error_info: error.codex_error_info.clone().map(Into::into),
             misalignment: error.misalignment.clone().map(Into::into),
@@ -1455,15 +1448,12 @@ impl ThreadHistoryBuilder {
 
     fn handle_turn_complete(&mut self, payload: &TurnCompleteEvent) {
         let terminal_error = payload.error.as_ref().map(|error| V2TurnError {
-            usage_limit_observed_at_ns: error.usage_limit_observed_at_ns.clone(),
-            inference_attribution: error.inference_attribution.clone(),
             misalignment: error.misalignment.clone().map(Into::into),
             message: error.message.clone(),
             codex_error_info: error.codex_error_info.clone().map(Into::into),
             additional_details: None,
         });
         let apply_completion = |turn: &mut PendingTurn| {
-            turn.inference_attribution = payload.inference_attribution.clone();
             if let Some(error) = terminal_error.as_ref() {
                 turn.status = TurnStatus::Failed;
                 turn.error = Some(error.clone());
@@ -1498,7 +1488,7 @@ impl ThreadHistoryBuilder {
             } else if matches!(turn.status, TurnStatus::Completed | TurnStatus::InProgress) {
                 turn.status = TurnStatus::Completed;
             }
-            turn.inference_attribution = payload.inference_attribution.clone();
+
             turn.completed_at = payload.completed_at;
             turn.duration_ms = payload.duration_ms;
             let changed_turn = ThreadHistoryTurnMetadata::from_pending_turn(turn);
@@ -1567,7 +1557,6 @@ impl ThreadHistoryBuilder {
             }
         });
         PendingTurn {
-            inference_attribution: None,
             id,
             root_turn_id: None,
             items: Vec::new(),
@@ -1856,7 +1845,6 @@ impl TurnItemIndex {
 }
 
 struct PendingTurn {
-    inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     id: String,
     root_turn_id: Option<String>,
     items: Vec<ThreadItemPayload>,
@@ -1910,7 +1898,6 @@ impl PendingTurn {
             root_turn_id: self.root_turn_id.clone(),
             items: history_items_with_times(items, &self.item_times),
             items_view,
-            inference_attribution: self.inference_attribution.clone(),
             error: self.error.clone(),
             status: self.status.clone(),
             started_at: self.started_at,
@@ -1927,7 +1914,6 @@ impl From<PendingTurn> for Turn {
             root_turn_id: value.root_turn_id,
             items: history_items_with_times(value.items, &value.item_times),
             items_view: TurnItemsView::Full,
-            inference_attribution: value.inference_attribution,
             error: value.error,
             status: value.status,
             started_at: value.started_at,
@@ -2226,7 +2212,6 @@ mod tests {
                 review_output: None,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-1".into(),
                 started_at: None,
@@ -2290,7 +2275,6 @@ mod tests {
                 completed_at_ms: 0,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-1".into(),
                 started_at: None,
@@ -2455,7 +2439,6 @@ mod tests {
                 started_at_ms: 0,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
@@ -2513,7 +2496,6 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
@@ -2614,7 +2596,6 @@ mod tests {
                 completed_at_ms: 1_000,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
@@ -2735,7 +2716,6 @@ mod tests {
                 status: CoreExecCommandStatus::Completed,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
@@ -2843,7 +2823,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: turn_id.to_string(),
                 started_at: None,
@@ -2955,7 +2934,6 @@ mod tests {
                 generation_id: None,
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-image".into(),
                 started_at: None,
@@ -2972,7 +2950,6 @@ mod tests {
         assert_eq!(
             turns[0],
             Turn {
-                inference_attribution: None,
                 id: "turn-image".into(),
                 root_turn_id: None,
                 status: TurnStatus::Completed,
@@ -3356,7 +3333,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4035,7 +4011,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4106,7 +4081,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4153,7 +4127,6 @@ mod tests {
                 status: CoreExecCommandStatus::Completed,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-b".into(),
                 started_at: None,
@@ -4219,7 +4192,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4266,7 +4238,6 @@ mod tests {
                 status: CoreExecCommandStatus::Completed,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-b".into(),
                 started_at: None,
@@ -4353,7 +4324,6 @@ mod tests {
             Some(expected.clone())
         );
         builder.handle_event(&EventMsg::TurnComplete(TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: "turn-1".into(),
             started_at: Some(100),
@@ -4394,7 +4364,6 @@ mod tests {
             ..Default::default()
         }));
         let mut expected = ThreadHistoryTurnMetadata {
-            inference_attribution: None,
             turn_id: "turn-1".into(),
             root_turn_id: Some("root-turn".into()),
             error: None,
@@ -4414,7 +4383,6 @@ mod tests {
         );
 
         builder.handle_event(&EventMsg::TurnComplete(TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: "turn-1".into(),
             started_at: Some(100),
@@ -4603,7 +4571,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4631,7 +4598,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4649,7 +4615,6 @@ mod tests {
                 questions: None,
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-b".into(),
                 started_at: None,
@@ -4710,14 +4675,11 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: Some(10),
                 last_agent_message: None,
                 error: Some(ErrorEvent {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),
                     codex_error_info: Some(CodexErrorInfo::PolicyCapacityUnavailable),
@@ -4737,7 +4699,6 @@ mod tests {
             build_turns_from_rollout_items(&items),
             vec![
                 Turn {
-                    inference_attribution: None,
                     id: "turn-a".into(),
                     root_turn_id: None,
                     items_view: TurnItemsView::Full,
@@ -4751,8 +4712,6 @@ mod tests {
                     })],
                     status: TurnStatus::Failed,
                     error: Some(TurnError {
-                        usage_limit_observed_at_ns: None,
-                        inference_attribution: None,
                         misalignment: None,
                         message: "Selected model is at capacity. Please try a different model."
                             .into(),
@@ -4766,7 +4725,6 @@ mod tests {
                     duration_ms: Some(10_000),
                 },
                 Turn {
-                    inference_attribution: None,
                     id: "turn-b".into(),
                     root_turn_id: None,
                     items_view: TurnItemsView::Full,
@@ -4809,7 +4767,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -4893,7 +4850,6 @@ mod tests {
                 resume_metadata: None,
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-compact".into(),
                 started_at: None,
@@ -4909,7 +4865,6 @@ mod tests {
         assert_eq!(
             turns,
             vec![Turn {
-                inference_attribution: None,
                 id: "turn-compact".into(),
                 root_turn_id: None,
                 status: TurnStatus::Completed,
@@ -5134,8 +5089,6 @@ mod tests {
                 questions: None,
             }),
             EventMsg::Error(ErrorEvent {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "rollback failed".into(),
                 codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
@@ -5173,7 +5126,6 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -5184,8 +5136,6 @@ mod tests {
                 time_to_first_token_ms: None,
             }),
             EventMsg::Error(ErrorEvent {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "request-level failure".into(),
                 codex_error_info: Some(CodexErrorInfo::BadRequest),
@@ -5201,7 +5151,6 @@ mod tests {
         assert_eq!(
             turns[0],
             Turn {
-                inference_attribution: None,
                 id: "turn-a".into(),
                 root_turn_id: None,
                 status: TurnStatus::Completed,
@@ -5243,16 +5192,11 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::Error(ErrorEvent {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: Some(
-                    codex_protocol::inference_attribution::InferenceAttribution::Unknown,
-                ),
                 misalignment: None,
                 message: "stream failure".into(),
                 codex_error_info: Some(CodexErrorInfo::BadRequest),
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -5275,10 +5219,6 @@ mod tests {
         assert_eq!(
             turns[0].error,
             Some(TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: Some(
-                    codex_protocol::inference_attribution::InferenceAttribution::Unknown
-                ),
                 misalignment: None,
                 message: "stream failure".into(),
                 codex_error_info: Some(crate::protocol::v2::CodexErrorInfo::BadRequest),
@@ -5308,14 +5248,11 @@ mod tests {
                 ..Default::default()
             }),
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: Some(10),
                 last_agent_message: None,
                 error: Some(ErrorEvent {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),
                     codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
@@ -5334,7 +5271,6 @@ mod tests {
         assert_eq!(
             build_turns_from_rollout_items(&items),
             vec![Turn {
-                inference_attribution: None,
                 id: "turn-a".into(),
                 root_turn_id: None,
                 items_view: TurnItemsView::Full,
@@ -5348,8 +5284,6 @@ mod tests {
                 })],
                 status: TurnStatus::Failed,
                 error: Some(TurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message: "Selected model is at capacity. Please try a different model.".into(),
                     codex_error_info: Some(crate::protocol::v2::CodexErrorInfo::ServerOverloaded),
@@ -5389,7 +5323,6 @@ mod tests {
             })),
             RolloutItem::ResponseItem(hook_prompt.into()),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -5510,7 +5443,6 @@ mod tests {
                 })),
                 RolloutItem::EventMsg(spawn),
                 RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                    inference_attribution: None,
                     root_turn_id: None,
                     turn_id: "turn-a".into(),
                     started_at: None,
@@ -5583,7 +5515,6 @@ mod tests {
                 .into(),
             ),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -5629,7 +5560,6 @@ mod tests {
                     })
                 }],
                 changed_turns: vec![ThreadHistoryTurnMetadata {
-                    inference_attribution: None,
                     turn_id: "rollout-0".into(),
                     root_turn_id: None,
                     status: TurnStatus::Completed,
@@ -5735,7 +5665,6 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
-                    inference_attribution: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::InProgress,
@@ -5760,7 +5689,6 @@ mod tests {
         )));
         let complete_changes = builder.handle_rollout_item_with_changes(&RolloutItem::EventMsg(
             EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -5777,7 +5705,6 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
-                    inference_attribution: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::Completed,
@@ -5824,7 +5751,6 @@ mod tests {
                     }))
                 }],
                 changed_turns: vec![ThreadHistoryTurnMetadata {
-                    inference_attribution: None,
                     turn_id: "rollout-0".into(),
                     root_turn_id: None,
                     status: TurnStatus::Completed,
@@ -5852,7 +5778,6 @@ mod tests {
                 collaboration_mode_kind: Default::default(),
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: "turn-a".into(),
                 started_at: None,
@@ -5869,7 +5794,6 @@ mod tests {
             ThreadHistoryChangeSet {
                 changed_items: Vec::new(),
                 changed_turns: vec![ThreadHistoryTurnMetadata {
-                    inference_attribution: None,
                     turn_id: "turn-a".into(),
                     root_turn_id: Some("root-turn".into()),
                     status: TurnStatus::Completed,

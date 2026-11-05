@@ -27,10 +27,7 @@ use codex_api::ResponseEvent;
 use codex_api::TransportError;
 use codex_features::RuntimeAuthMode;
 use codex_history::HistoryInitialization;
-use codex_http_client::HttpClient;
-use codex_http_client::HttpClientBuilder;
 use codex_http_client::HttpClientFactory;
-use codex_http_client::HttpTransport;
 use codex_http_client::OutboundProxyPolicy;
 use codex_login::AccountStore;
 use codex_login::AuthCredentialsStoreMode;
@@ -156,103 +153,6 @@ fn test_model_client_with_thread_id(
 
 fn test_model_provider() -> SharedModelProvider {
     test_model_client(SessionSource::Cli).state.provider.clone()
-}
-
-#[derive(Debug)]
-struct TestHttpClientProvider {
-    inner: SharedModelProvider,
-    client: HttpClient,
-}
-
-impl ModelProvider for TestHttpClientProvider {
-    fn info(&self) -> &ModelProviderInfo {
-        self.inner.info()
-    }
-
-    fn api_http_client(&self) -> codex_protocol::error::Result<Option<HttpClient>> {
-        Ok(Some(self.client.clone()))
-    }
-
-    fn prepare_request<'a>(
-        &'a self,
-        model: &'a str,
-    ) -> ModelProviderFuture<
-        'a,
-        codex_protocol::error::Result<Option<codex_model_provider::PreparedModelRequest>>,
-    > {
-        Box::pin(async move {
-            let mut prepared =
-                codex_model_provider::prepare_configured_request(self.inner.as_ref(), model)
-                    .await?;
-            prepared.model = format!("captured/{model}");
-            prepared.http_client = Some(self.client.clone());
-            Ok(Some(prepared))
-        })
-    }
-
-    fn auth_manager(&self) -> Option<Arc<AuthManager>> {
-        self.inner.auth_manager()
-    }
-
-    fn auth(&self) -> ModelProviderFuture<'_, Option<CodexAuth>> {
-        self.inner.auth()
-    }
-
-    fn account_state(&self) -> ProviderAccountResult {
-        self.inner.account_state()
-    }
-
-    fn models_manager(
-        &self,
-        codex_home: PathBuf,
-        config_model_catalog: Option<ModelsResponse>,
-    ) -> SharedModelsManager {
-        self.inner.models_manager(codex_home, config_model_catalog)
-    }
-}
-
-#[tokio::test]
-async fn responses_http_uses_provider_owned_client() -> anyhow::Result<()> {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/responses"))
-        .respond_with(ResponseTemplate::new(/*status*/ 200))
-        .mount(&server)
-        .await;
-    let mut headers = http::HeaderMap::new();
-    headers.insert(
-        "x-test-provider-client",
-        http::HeaderValue::from_static("used"),
-    );
-    let client = HttpClientBuilder::new()
-        .default_headers(headers)
-        .build_direct()?;
-    let mut info = test_model_provider().info().clone();
-    info.base_url = Some(format!("{}/v1", server.uri()));
-    let mut model_client = test_model_client(SessionSource::Exec);
-    Arc::get_mut(&mut model_client.state).unwrap().provider = Arc::new(TestHttpClientProvider {
-        inner: create_model_provider(info, /*auth_manager*/ None),
-        client,
-    });
-    let setup = model_client
-        .current_client_setup(super::ClientRouting::Workspace)
-        .await?;
-    let transport = setup.build_api_transport("/responses")?;
-    let request = setup
-        .api_provider
-        .build_request(http::Method::POST, "/responses")
-        .with_json(&json!({"input": "provider transport"}));
-    assert_eq!(
-        transport.execute(request).await?.status,
-        http::StatusCode::OK
-    );
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests.len(), 1);
-    assert_eq!(
-        requests[0].headers.get("x-test-provider-client").unwrap(),
-        "used"
-    );
-    Ok(())
 }
 
 #[test_case::test_case(None; "credential_auth")]
@@ -1930,57 +1830,6 @@ async fn summarize_memories_returns_empty_for_empty_input() {
 }
 
 #[tokio::test]
-async fn summarize_memories_uses_prepared_wire_model_without_changing_model_info()
--> anyhow::Result<()> {
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .and(path("/v1/memories/trace_summarize"))
-        .respond_with(ResponseTemplate::new(/*status*/ 200).set_body_json(json!({"output":[]})))
-        .expect(1)
-        .mount(&server)
-        .await;
-    let mut client = test_model_client(SessionSource::Internal(
-        InternalSessionSource::MemoryConsolidation,
-    ));
-    let mut info = client.state.provider.info().clone();
-    info.base_url = Some(format!("{}/v1", server.uri()));
-    Arc::get_mut(&mut client.state).unwrap().provider = Arc::new(TestHttpClientProvider {
-        inner: create_model_provider(info, /*auth_manager*/ None),
-        client: HttpClientBuilder::new().build_direct()?,
-    });
-    let model = test_model_info();
-    let original_model = model.clone();
-    client
-        .summarize_memories(
-            vec![codex_api::RawMemory {
-                id: "trace".into(),
-                metadata: codex_api::RawMemoryMetadata {
-                    source_path: "source".into(),
-                },
-                items: vec![json!({"text":"unchanged"})],
-            }],
-            &model,
-            /*effort*/ None,
-            &test_session_telemetry(),
-        )
-        .await?;
-    let requests = server.received_requests().await.unwrap();
-    assert_eq!(
-        requests[0].body_json::<serde_json::Value>()?,
-        json!({
-            "model":format!("captured/{}", model.slug),
-            "traces":[{"id":"trace","metadata":{"source_path":"source"},"items":[{"text":"unchanged"}]}],
-        })
-    );
-    assert_eq!(
-        requests[0].headers.get("x-openai-subagent").unwrap(),
-        "memory_consolidation"
-    );
-    assert_eq!(model, original_model);
-    Ok(())
-}
-
-#[tokio::test]
 async fn untraced_http_stream_releases_completed_output_before_response_ends() {
     // This item's shared payload lets us observe whether the mapper kept a copy.
     let tools = Arc::from([json!({"type": "function", "name": "lookup"})]);
@@ -1999,7 +1848,6 @@ async fn untraced_http_stream_releases_completed_output_before_response_ends() {
         InferenceTraceAttempt::disabled(),
         test_model_provider(),
         /*last_response_tx*/ None,
-        /*owned_request*/ None,
     );
 
     assert!(matches!(
@@ -2028,7 +1876,6 @@ async fn dropped_response_stream_traces_cancelled_partial_output() -> anyhow::Re
         attempt,
         test_model_provider(),
         /*last_response_tx*/ None,
-        /*owned_request*/ None,
     );
 
     let observed = stream
@@ -2086,7 +1933,6 @@ async fn response_stream_records_last_model_feedback_ids() {
         InferenceTraceAttempt::disabled(),
         test_model_provider(),
         /*last_response_tx*/ None,
-        /*owned_request*/ None,
     );
 
     while stream.next().await.is_some() {}
@@ -2311,7 +2157,6 @@ async fn dropped_backpressured_response_stream_traces_cancelled_partial_output()
         attempt,
         test_model_provider(),
         /*last_response_tx*/ None,
-        /*owned_request*/ None,
     );
 
     // Fill the mapper channel with non-terminal events, then yield one output
@@ -2606,7 +2451,7 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
     let mut stream = super::map_response_stream(
         codex_api::ResponseStream {
             routing_affinity: None,
-            proxy_trace_id: None,
+
             rx_event,
             upstream_request_id: None,
             interrupt: None,
@@ -2616,7 +2461,6 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
         test_model_provider(),
         vec![Box::new(ReplaceOutput)],
         Some(last_response_tx),
-        /*owned_request*/ None,
     );
     let mut delivered = Vec::new();
     while let Some(event) = stream.next().await {
@@ -2638,8 +2482,6 @@ async fn intercepted_output_reaches_trace_and_websocket_bookkeeping() -> anyhow:
     Ok(())
 }
 
-#[path = "codex_plus_plus/proxy_request_tests.rs"]
-mod proxy_request_tests;
 #[tokio::test]
 async fn inference_tools_changes_follow_full_specs_across_turns() {
     let client = test_model_client(SessionSource::Cli);

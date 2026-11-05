@@ -702,7 +702,6 @@ impl TurnRequestProcessor {
             .record_request_turn_id(&request_id, &turn_id)
             .await;
         let turn = Turn {
-            inference_attribution: None,
             id: turn_id,
             root_turn_id: Some(root_turn_id),
             items: vec![],
@@ -1117,8 +1116,6 @@ impl TurnRequestProcessor {
                             ),
                         };
                         let error = TurnError {
-                            usage_limit_observed_at_ns: None,
-                            inference_attribution: None,
                             misalignment: None,
                             message: message.clone(),
                             codex_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
@@ -1407,7 +1404,6 @@ impl TurnRequestProcessor {
         });
 
         Turn {
-            inference_attribution: None,
             id: turn_id,
             root_turn_id: None,
             items: vec![item],

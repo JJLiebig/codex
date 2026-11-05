@@ -425,8 +425,6 @@ pub struct ResponseStream {
     /// Routing pin from the connection that produced these responses. Never model metadata.
     pub routing_affinity: Option<codex_http_client::ChatGptRoutingAffinity>,
     pub rx_event: mpsc::Receiver<Result<ResponseEvent, ApiError>>,
-    /// Bounded owned-proxy response trace, retained separately from the upstream request ID.
-    pub proxy_trace_id: Option<String>,
     /// Server-assigned `x-request-id` response header, when present.
     pub upstream_request_id: Option<String>,
     /// Requests a graceful interrupt. Keep consuming events through completion.

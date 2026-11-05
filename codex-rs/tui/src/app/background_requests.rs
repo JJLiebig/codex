@@ -123,13 +123,6 @@ impl App {
         else {
             return;
         };
-        if origin == RateLimitRefreshOrigin::Periodic
-            && self
-                .refresh_owned_reset(app_server, Some(request_id), /*completion*/ None)
-                .is_break()
-        {
-            return;
-        }
         self.chat_widget.start_usage_notice_read(request_id);
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
@@ -191,7 +184,6 @@ impl App {
         idempotency_key: String,
         credit_id: Option<String>,
     ) {
-        let thread_id = self.current_displayed_thread_id().map(|id| id.to_string());
         let request_handle = app_server.request_handle();
         let app_event_tx = self.app_event_tx.clone();
         tokio::spawn(async move {
@@ -201,7 +193,6 @@ impl App {
                     request_handle,
                     idempotency_key.clone(),
                     credit_id.clone(),
-                    thread_id,
                 ),
             )
             .await
@@ -835,7 +826,6 @@ pub(super) async fn fetch_account_rate_limits(
         .request_typed(ClientRequest::GetAccountRateLimits {
             request_id: request_id.clone(),
             params: Some(GetAccountRateLimitsParams {
-                reset_admission: None,
                 supports_luna_reserve: true,
                 exclude_reset_credit_details: origin == RateLimitRefreshOrigin::Periodic,
             }),
@@ -883,14 +873,12 @@ pub(super) async fn consume_rate_limit_reset_credit_request(
     request_handle: AppServerRequestHandle,
     idempotency_key: String,
     credit_id: Option<String>,
-    thread_id: Option<String>,
 ) -> Result<ConsumeAccountRateLimitResetCreditResponse> {
     let request_id = RequestId::String(format!("consume-rate-limit-reset-{}", Uuid::new_v4()));
     request_handle
         .request_typed(ClientRequest::ConsumeAccountRateLimitResetCredit {
             request_id,
             params: ConsumeAccountRateLimitResetCreditParams {
-                thread_id,
                 idempotency_key,
                 credit_id,
             },

@@ -120,10 +120,6 @@ use codex_plus_plus::imported_account_refresh;
 pub use codex_plus_plus::imported_account_selection::ImportedAccountSwitchOutcome;
 use codex_plus_plus::imported_account_startup::chatgpt_auth_workspace_allowed;
 use codex_plus_plus::imported_account_startup::load_initial_imported_account_auth;
-pub use codex_plus_plus::native_credential_export::NativeCredential;
-pub use codex_plus_plus::native_credential_export::NativeCredentialExpectation;
-pub use codex_plus_plus::native_credential_export::NativeCredentialSnapshot;
-pub use codex_plus_plus::native_credential_export::NativeCredentialSource;
 
 /// Authentication mechanism used by the current user.
 #[derive(Debug, Clone)]
@@ -3719,13 +3715,8 @@ impl AuthManager {
                 let result = self
                     .refresh_token_from_authority_impl(reason, Some(&file_guard))
                     .await;
-                self.recover_terminal_imported_refresh(
-                    result,
-                    attempted_account_id,
-                    file_guard,
-                    /*expected*/ None,
-                )
-                .await
+                self.recover_terminal_imported_refresh(result, attempted_account_id, file_guard)
+                    .await
             }
             ReloadOutcome::Skipped => {
                 Err(RefreshTokenError::Permanent(RefreshTokenFailedError::new(

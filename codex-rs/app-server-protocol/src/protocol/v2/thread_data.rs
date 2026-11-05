@@ -385,8 +385,6 @@ impl<'de> Deserialize<'de> for Thread {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct Turn {
-    #[serde(default)]
-    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// Identifier for this turn. Codex-generated turn IDs are UUIDv7.
     pub id: String,
     /// ID of the first turn in the chain of work that led to this turn.
@@ -439,13 +437,8 @@ pub enum TurnItemsView {
 #[ts(export_to = "v2/")]
 #[error("{message}")]
 pub struct TurnError {
-    /// Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
-    #[serde(default)]
-    pub usage_limit_observed_at_ns: Option<String>,
     pub message: String,
     pub codex_error_info: Option<CodexErrorInfo>,
-    #[serde(default)]
-    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     #[serde(default)]
     pub additional_details: Option<String>,
     /// Optional public explanation and continuation instruction for a misalignment block.

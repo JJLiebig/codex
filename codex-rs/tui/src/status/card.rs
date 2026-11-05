@@ -148,7 +148,6 @@ struct StatusHistoryCell {
     session_id: Option<String>,
     forked_from: Option<String>,
     token_usage: StatusTokenUsageData,
-    token_usage_available: bool,
     rate_limit_state: Arc<RwLock<StatusRateLimitState>>,
     thread_usage: StatusThreadUsage,
     prompt_cache: prompt_cache::StatusCache,
@@ -434,7 +433,6 @@ impl StatusHistoryCell {
             session_id,
             forked_from,
             token_usage,
-            token_usage_available: token_info.is_some(),
             agents_summary,
             rate_limit_state,
             thread_usage,
@@ -785,7 +783,6 @@ impl StatusHistoryCell {
                 (None, Some(plan)) => plan.clone(),
                 (None, None) => "ChatGPT".to_string(),
             },
-            StatusAccountDisplay::Inference(label) => label.clone(),
             StatusAccountDisplay::ApiKey => {
                 "API key configured (run codex login to use ChatGPT)".to_string()
             }
@@ -920,10 +917,7 @@ impl StatusHistoryCell {
 
         lines.push(Line::from(Vec::<Span<'static>>::new()));
         // Hide token usage only for ChatGPT subscribers
-        if !matches!(self.account, Some(StatusAccountDisplay::ChatGpt { .. }))
-            && (self.token_usage_available
-                || !matches!(self.account, Some(StatusAccountDisplay::Inference(_))))
-        {
+        if !matches!(self.account, Some(StatusAccountDisplay::ChatGpt { .. })) {
             lines.push(formatter.line("Token usage", self.token_usage_spans()));
         }
 

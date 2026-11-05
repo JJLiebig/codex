@@ -7529,7 +7529,6 @@ async fn resizing_empty_transcript_schedules_settled_size_recheck() {
 
 fn test_turn(turn_id: &str, status: TurnStatus, items: Vec<ThreadItemPayload>) -> Turn {
     Turn {
-        inference_attribution: None,
         id: turn_id.to_string(),
         root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -7579,7 +7578,6 @@ fn token_usage_notification(
     model_context_window: Option<i64>,
 ) -> ServerNotification {
     ServerNotification::ThreadTokenUsageUpdated(ThreadTokenUsageUpdatedNotification {
-        inference_attribution: None,
         thread_id: thread_id.to_string(),
         turn_id: turn_id.to_string(),
         token_usage: ThreadTokenUsage {
@@ -7887,8 +7885,6 @@ fn test_session_telemetry(config: &Config, model: &str) -> SessionTelemetry {
 #[test]
 fn active_turn_not_steerable_turn_error_extracts_structured_server_error() {
     let turn_error = AppServerTurnError {
-        usage_limit_observed_at_ns: None,
-        inference_attribution: None,
         misalignment: None,
         message: "cannot steer a review turn".to_string(),
         codex_error_info: Some(AppServerCodexErrorInfo::ActiveTurnNotSteerable {
@@ -8789,7 +8785,6 @@ async fn prompt_edit_reverts_earlier_and_first_visible_prompts_in_place_scenario
                 completed_at_ms: 0,
             })),
             RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                inference_attribution: None,
                 root_turn_id: None,
                 turn_id: turn_id.to_string(),
                 last_agent_message: None,
@@ -9177,7 +9172,6 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
             )),
             turns: vec![
                 Turn {
-                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -9196,7 +9190,6 @@ async fn replay_thread_snapshot_replays_turn_history_in_order() {
                     duration_ms: None,
                 },
                 Turn {
-                    inference_attribution: None,
                     id: "turn-2".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,

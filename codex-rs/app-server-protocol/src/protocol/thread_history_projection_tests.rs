@@ -37,7 +37,6 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
     )));
     let completed = project(RolloutItem::EventMsg(EventMsg::TurnComplete(
         TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: Some("root-turn".into()),
             turn_id: "turn-1".to_string(),
             last_agent_message: None,
@@ -61,7 +60,6 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
         completed,
         ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
-                inference_attribution: None,
                 turn_id: "turn-1".to_string(),
                 root_turn_id: Some("root-turn".into()),
                 status: TurnStatus::Completed,
@@ -78,10 +76,6 @@ fn projects_turn_lifecycle_without_prior_builder_state() {
 #[test]
 fn projects_failed_turn_completion_as_snapshot() {
     let error = ErrorEvent {
-        usage_limit_observed_at_ns: Some("19000000001".into()),
-        inference_attribution: Some(
-            codex_protocol::inference_attribution::InferenceAttribution::Claude,
-        ),
         misalignment: None,
         message: "request failed".to_string(),
         codex_error_info: None,
@@ -89,7 +83,6 @@ fn projects_failed_turn_completion_as_snapshot() {
 
     let changes = project(RolloutItem::EventMsg(EventMsg::TurnComplete(
         TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: "turn-1".to_string(),
             last_agent_message: None,
@@ -105,15 +98,10 @@ fn projects_failed_turn_completion_as_snapshot() {
         changes,
         ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
-                inference_attribution: None,
                 turn_id: "turn-1".to_string(),
                 root_turn_id: None,
                 status: TurnStatus::Failed,
                 error: Some(TurnError {
-                    usage_limit_observed_at_ns: Some("19000000001".into()),
-                    inference_attribution: Some(
-                        codex_protocol::inference_attribution::InferenceAttribution::Claude
-                    ),
                     misalignment: None,
                     message: "request failed".to_string(),
                     codex_error_info: None,
@@ -272,7 +260,6 @@ fn projects_identified_turn_aborts() {
         changes,
         ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
-                inference_attribution: None,
                 turn_id: "turn-1".to_string(),
                 root_turn_id: Some("root-turn".into()),
                 status: TurnStatus::Interrupted,

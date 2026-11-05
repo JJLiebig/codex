@@ -36,11 +36,6 @@ use std::sync::atomic::Ordering;
 #[path = "client_tool_metadata.rs"]
 mod tool_metadata;
 
-#[path = "codex_plus_plus/prepared_memory_request.rs"]
-mod prepared_memory_request;
-#[path = "codex_plus_plus/proxy_request.rs"]
-mod proxy_request;
-
 use crate::CodexResponsesHeaders;
 use crate::PromptCacheKey;
 use crate::tools::ExecutedToolCalls;
@@ -252,7 +247,6 @@ struct CurrentClientSetup {
     auth_revision: Option<u64>,
     api_provider: ApiProvider,
     http_client_factory: HttpClientFactory,
-    api_http_client: Option<codex_http_client::HttpClient>,
     redirect_policy: ClientRedirectPolicy,
     api_auth: SharedAuthProvider,
     agent_identity_telemetry: Option<AgentIdentityTelemetry>,
@@ -261,9 +255,6 @@ struct CurrentClientSetup {
 
 impl CurrentClientSetup {
     fn build_api_transport(&self, endpoint: &str) -> Result<ReqwestTransport> {
-        if let Some(client) = &self.api_http_client {
-            return Ok(ReqwestTransport::from_http_client(client.clone()));
-        }
         let api_provider = &self.api_provider;
         let redirect_policy = if api_provider
             .headers
@@ -337,7 +328,6 @@ pub struct ModelClient {
 /// the previous turn's sticky-routing token into the next turn, which violates the client/server
 /// contract and can cause routing bugs.
 pub struct ModelClientSession {
-    owned_request: Option<Arc<proxy_request::OwnedRequest>>,
     client: ModelClient,
     websocket_session: WebsocketSession,
     foreground: bool,
@@ -772,7 +762,6 @@ impl ModelClient {
             websocket_session,
             foreground: true,
             request_account_id: None,
-            owned_request: None,
             usage_limit_failover_tracking: Default::default(),
             turn_state: Arc::new(OnceLock::new()),
         }
@@ -895,8 +884,10 @@ impl ModelClient {
             return Ok(Vec::new());
         }
 
-        let (client_setup, transport, wire_model) =
-            self.memory_request_setup(&model_info.slug).await?;
+        let client_setup = self
+            .current_client_setup(ClientRouting::ConfiguredProvider)
+            .await?;
+        let transport = client_setup.build_api_transport(MEMORIES_SUMMARIZE_ENDPOINT)?;
         let request_telemetry = Self::build_request_telemetry(
             session_telemetry,
             AuthRequestTelemetryContext::new(
@@ -914,7 +905,7 @@ impl ModelClient {
                 .with_telemetry(Some(request_telemetry));
 
         let payload = ApiMemorySummarizeInput {
-            model: wire_model,
+            model: model_info.slug.clone(),
             raw_memories,
             reasoning: effort
                 .map(|effort| model_info.resolve_reasoning_effort(effort))
@@ -1275,7 +1266,6 @@ impl ModelClient {
                 auth_revision,
                 api_provider,
                 http_client_factory,
-                api_http_client: self.state.provider.api_http_client()?,
                 redirect_policy,
                 api_auth: resolved_auth.auth,
                 agent_identity_telemetry: None,
@@ -1356,7 +1346,6 @@ impl ModelClient {
                 auth_revision: revision,
                 api_provider,
                 http_client_factory: self.http_client_factory.clone(),
-                api_http_client: provider.api_http_client()?,
                 redirect_policy,
                 api_auth: resolved_auth.auth,
                 agent_identity_telemetry: resolved_auth.agent_identity_telemetry,
@@ -1973,7 +1962,6 @@ impl ResponsesHttpExecutor<'_> {
             websocket_session: WebsocketSession::default(),
             foreground: false,
             request_account_id: None,
-            owned_request: None,
             usage_limit_failover_tracking: Default::default(),
             turn_state: Arc::clone(turn_state),
         };
@@ -2038,10 +2026,13 @@ impl ModelClientSession {
             .attempted_account_ids
             .clone();
         loop {
-            let (client_setup, transport, wire_model) =
-                self.response_request_setup(&model_info.slug).await?;
+            let client_setup = self
+                .client
+                .current_client_setup(ClientRouting::Workspace)
+                .await?;
+            let transport = client_setup.build_api_transport("/responses")?;
             if expected_auth_owner.is_some_and(|owner| {
-                (self.owned_request.is_none() && Some(owner) != client_setup.auth_owner_generation)
+                Some(owner) != client_setup.auth_owner_generation
                     || Some(owner) != self.client.auth_owner_generation()
             }) {
                 return Err(CodexErr::TurnAborted);
@@ -2093,7 +2084,6 @@ impl ModelClientSession {
                 responses_metadata,
                 include_internal,
             )?;
-            request.model = wire_model;
             self.client.set_guardian_metadata(
                 &mut request.client_metadata,
                 responses_metadata.parent_response_id.as_deref(),
@@ -2156,16 +2146,14 @@ impl ModelClientSession {
                         Arc::clone(&self.client.state.provider),
                         interceptors,
                         /*last_response_tx*/ None,
-                        self.owned_request.clone(),
                     ));
                 }
                 Err(ApiError::Transport(unauthorized_transport))
-                    if self.owned_request.is_none()
-                        && self
-                            .client
-                            .state
-                            .provider
-                            .is_recoverable_auth_error(&unauthorized_transport) =>
+                    if self
+                        .client
+                        .state
+                        .provider
+                        .is_recoverable_auth_error(&unauthorized_transport) =>
                 {
                     let response_debug_context =
                         extract_response_debug_context(&unauthorized_transport);
@@ -2191,22 +2179,7 @@ impl ModelClientSession {
                 Err(err) => {
                     let response_debug_context =
                         extract_response_debug_context_from_api_error(&err);
-                    match self.recover_owned_auth(&err, &mut auth_recovery).await {
-                        Ok(false) => {}
-                        recovery => {
-                            inference_trace_attempt.record_failed(
-                                &err,
-                                response_debug_context.request_id.as_deref(),
-                                /*output_items*/ &[],
-                            );
-                            recovery?;
-                            continue;
-                        }
-                    }
-                    let err = match self.owned_request.as_ref() {
-                        Some(request) => request.map_error(&self.client.state.provider, err),
-                        None => self.client.state.provider.map_api_error(err),
-                    };
+                    let err = self.client.state.provider.map_api_error(err);
                     inference_trace_attempt.record_failed(
                         &err,
                         response_debug_context.request_id.as_deref(),
@@ -2215,18 +2188,6 @@ impl ModelClientSession {
                     if self.foreground
                         && let CodexErrorDetails::UsageLimitReached(usage_limit) = err.details()
                     {
-                        if let Some(outcome) = self
-                            .switch_owned_quota(&mut attempted_account_ids, usage_limit)
-                            .await
-                            .map_err(|replacement| {
-                                replacement.with_inference_attribution_from(&err)
-                            })?
-                        {
-                            if outcome == ImportedAccountSwitchOutcome::ReadyToRetry {
-                                continue;
-                            }
-                            return Err(err);
-                        }
                         if let Some(manager) = auth_manager.as_ref() {
                             if let Some(account_id) = request_account_id.as_ref() {
                                 if let Some(resets_at) = usage_limit.resets_at.as_ref()
@@ -2260,8 +2221,7 @@ impl ModelClientSession {
                                     continue;
                                 }
                                 ImportedAccountSwitchOutcome::SelectedBlockedUntil { .. }
-                                | ImportedAccountSwitchOutcome::NoCandidate
-                                | ImportedAccountSwitchOutcome::RequestSourceChanged => {}
+                                | ImportedAccountSwitchOutcome::NoCandidate => {}
                             }
                         }
                         return Err(err);
@@ -2571,7 +2531,6 @@ impl ModelClientSession {
                 Arc::clone(&self.client.state.provider),
                 interceptors,
                 Some(last_response_tx),
-                /*owned_request*/ None,
             );
             self.websocket_session.last_response_rx = Some(last_response_rx);
             return Ok(WebsocketStreamOutcome::Stream(stream));
@@ -2830,22 +2789,17 @@ fn map_response_stream(
     provider: SharedModelProvider,
     interceptors: Vec<Box<dyn codex_extension_api::ModelResponseInterceptor>>,
     last_response_tx: Option<oneshot::Sender<LastResponse>>,
-    owned_request: Option<Arc<proxy_request::OwnedRequest>>,
 ) -> ResponseStream {
     let routing_affinity = api_stream.routing_affinity.take();
     let upstream_request_id = api_stream.upstream_request_id.take();
     let interrupt = api_stream.interrupt.take();
     let mut stream = map_response_events(
         upstream_request_id,
-        crate::model_request::intercept_stream(
-            proxy_request::observe_stream(api_stream, owned_request.clone()),
-            interceptors,
-        ),
+        crate::model_request::intercept_stream(Box::pin(api_stream), interceptors),
         session_telemetry,
         inference_trace_attempt,
         provider,
         last_response_tx,
-        owned_request,
     );
     stream.interrupt = interrupt;
     stream.routing_affinity = routing_affinity;
@@ -2859,7 +2813,6 @@ fn map_response_events<S>(
     inference_trace_attempt: InferenceTraceAttempt,
     provider: SharedModelProvider,
     mut last_response_tx: Option<oneshot::Sender<LastResponse>>,
-    owned_request: Option<Arc<proxy_request::OwnedRequest>>,
 ) -> ResponseStream
 where
     S: futures::Stream<Item = std::result::Result<ResponseEvent, ApiError>>
@@ -2992,10 +2945,7 @@ where
                     if let Some(upstream_request_id) = upstream_request_id {
                         feedback_tags!(last_model_request_id = upstream_request_id);
                     }
-                    let mapped = match &owned_request {
-                        Some(request) => request.map_error(&provider, err),
-                        None => provider.map_api_error(err),
-                    };
+                    let mapped = provider.map_api_error(err);
                     inference_trace_attempt.record_failed(
                         &mapped,
                         upstream_request_id,

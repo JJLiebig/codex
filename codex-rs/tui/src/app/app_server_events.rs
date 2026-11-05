@@ -360,9 +360,7 @@ impl App {
                 }
             }
 
-            ServerNotification::AccountRateLimitsUpdated(notification)
-                if notification.inference.is_none() =>
-            {
+            ServerNotification::AccountRateLimitsUpdated(notification) => {
                 let workspace_hard_stop = matches!(
                     notification.rate_limits.rate_limit_reached_type,
                     Some(

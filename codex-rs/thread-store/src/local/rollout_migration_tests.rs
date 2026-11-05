@@ -263,7 +263,6 @@ fn compacted(replacement_history: Vec<ResponseItem>) -> RolloutItem {
 
 fn completed(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id: turn_id.to_string(),
         last_agent_message: None,

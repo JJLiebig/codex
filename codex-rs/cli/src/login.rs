@@ -41,8 +41,6 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 const CHATGPT_LOGIN_DISABLED_MESSAGE: &str =
     "ChatGPT login is disabled. Use API key login instead.";
-#[path = "codex_plus_plus/cli_proxy_logout.rs"]
-mod cli_proxy_logout;
 #[path = "codex_plus_plus/device_code_login.rs"]
 mod device_code_login;
 pub use device_code_login::login_with_device_code;
@@ -624,7 +622,6 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
     };
     drop(enterprise_guard);
 
-    let proxy_cleanup = cli_proxy_logout::cleanup_after_logout(&config, &auth_manager).await;
     let cleared_bedrock_config =
         if let Some(paths) = ConfigEditsBuilder::bedrock_provider_config_paths_to_clear(&config) {
             let edits = paths
@@ -635,7 +632,6 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
                 .apply()
                 .await
             {
-                cli_proxy_logout::finish_proxy_cleanup(proxy_cleanup);
                 eprintln!("Error clearing Amazon Bedrock configuration after logout: {err}");
                 std::process::exit(1);
             }
@@ -643,8 +639,6 @@ pub async fn run_logout(cli_config_overrides: CliConfigOverrides) -> ! {
         } else {
             false
         };
-
-    cli_proxy_logout::finish_proxy_cleanup(proxy_cleanup);
 
     let config_server_logged_out = match config_server_logout {
         Ok(removed) => removed,

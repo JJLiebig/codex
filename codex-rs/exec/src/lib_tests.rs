@@ -386,7 +386,6 @@ fn turn_items_for_thread_returns_matching_turn_items() {
         name: None,
         turns: vec![
             codex_app_server_protocol::Turn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -407,7 +406,6 @@ fn turn_items_for_thread_returns_matching_turn_items() {
                 duration_ms: None,
             },
             codex_app_server_protocol::Turn {
-                inference_attribution: None,
                 id: "turn-2".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -446,7 +444,6 @@ fn should_backfill_turn_completed_items_backfills_persisted_summaries_only() {
         ServerNotification::TurnCompleted(codex_app_server_protocol::TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: codex_app_server_protocol::Turn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Summary,

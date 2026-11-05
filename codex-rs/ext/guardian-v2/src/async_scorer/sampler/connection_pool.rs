@@ -50,9 +50,6 @@ use tokio::task::JoinHandle;
 use tokio::task::JoinSet;
 use tokio::time::Instant;
 
-#[path = "codex_plus_plus/prepared_request.rs"]
-mod prepared_request;
-
 const CONNECT_COOLDOWN: Duration = Duration::from_secs(5 * 60);
 const MAX_WEBSOCKET_AGE: Duration = Duration::from_secs(55 * 60);
 const MAX_CONCURRENT_OPENS: usize = 4;
@@ -104,10 +101,7 @@ struct ClientSetup {
 
 enum Connection {
     Websocket(PooledConnection),
-    Http {
-        client: ResponsesClient<ReqwestTransport>,
-        prepared: Option<Box<codex_model_provider::PreparedModelRequest>>,
-    },
+    Http(ResponsesClient<ReqwestTransport>),
 }
 
 pub(super) struct ConnectionLease {
@@ -141,9 +135,6 @@ impl ConnectionPool {
 
     /// Never waits for another opener or sleeps through the cooldown.
     pub(super) fn replenish(self: &Arc<Self>) -> Option<JoinHandle<()>> {
-        if !self.config.provider.info().supports_websockets {
-            return None;
-        }
         let guard = Arc::clone(&self.replenishing).try_lock_owned().ok()?;
         self.start_refill(guard)
     }
@@ -224,15 +215,6 @@ impl ConnectionPool {
             .await
             .map_err(|error| LunaSamplerError::Api(ApiError::Stream(error.to_string())))?;
         let admitted = Instant::now();
-        if let Some(request) = self
-            .config
-            .provider
-            .prepare_request(super::MODEL)
-            .await
-            .map_err(LunaSamplerError::Provider)?
-        {
-            return prepared_request::lease(self, permit, request);
-        }
         let ClientSetup {
             mut provider,
             auth,
@@ -289,60 +271,48 @@ impl ConnectionPool {
                 } else {
                     redirect_policy
                 };
-                let transport = if let Some(client) =
-                    self.config.provider.api_http_client().map_err(|error| {
-                        LunaSamplerError::Api(ApiError::Transport(TransportError::Build(
-                            error.to_string(),
-                        )))
-                    })? {
-                    ReqwestTransport::from_http_client(client)
-                } else {
-                    let transport = {
-                        let mut cached = self
-                            .http_transport
-                            .lock()
-                            .unwrap_or_else(std::sync::PoisonError::into_inner);
-                        if let Some(transport) = cached.as_ref()
-                            && transport.url == url
-                            && transport.redirect_policy == redirect_policy
-                        {
-                            Arc::clone(transport)
-                        } else {
-                            let transport = Arc::new(HttpTransport {
-                                url: url.clone(),
-                                redirect_policy,
-                                transport: OnceCell::new(),
-                            });
-                            *cached = Some(Arc::clone(&transport));
-                            transport
-                        }
-                    };
-                    transport
-                        .transport
-                        .get_or_try_init(|| async {
-                            let client = create_client_for_route_async(
-                                self.config.http_client_factory.clone(),
-                                url,
-                                ClientRouteClass::Api,
-                                redirect_policy,
-                            )
-                            .await
-                            .map_err(|error| {
-                                LunaSamplerError::Api(ApiError::Transport(TransportError::Build(
-                                    error.to_string(),
-                                )))
-                            })?;
-                            Ok::<_, LunaSamplerError>(ReqwestTransport::from_http_client(client))
-                        })
-                        .await?
-                        .clone()
+                let transport = {
+                    let mut cached = self
+                        .http_transport
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    if let Some(transport) = cached.as_ref()
+                        && transport.url == url
+                        && transport.redirect_policy == redirect_policy
+                    {
+                        Arc::clone(transport)
+                    } else {
+                        let transport = Arc::new(HttpTransport {
+                            url: url.clone(),
+                            redirect_policy,
+                            transport: OnceCell::new(),
+                        });
+                        *cached = Some(Arc::clone(&transport));
+                        transport
+                    }
                 };
+                let transport = transport
+                    .transport
+                    .get_or_try_init(|| async {
+                        let client = create_client_for_route_async(
+                            self.config.http_client_factory.clone(),
+                            url,
+                            ClientRouteClass::Api,
+                            redirect_policy,
+                        )
+                        .await
+                        .map_err(|error| {
+                            LunaSamplerError::Api(ApiError::Transport(TransportError::Build(
+                                error.to_string(),
+                            )))
+                        })?;
+                        Ok::<_, LunaSamplerError>(ReqwestTransport::from_http_client(client))
+                    })
+                    .await?
+                    .clone();
                 let client = ResponsesClient::new(transport, provider, auth);
                 (
-                    Connection::Http {
-                        client,
-                        prepared: None,
-                    },
+                    Connection::Http(client),
                     ThreadId::new().to_string(),
                     request_kind,
                 )
@@ -359,7 +329,7 @@ impl ConnectionPool {
         if let Some(metrics) = self.config.metrics.as_deref() {
             let transport = match &connection {
                 Connection::Websocket(_) => "websocket",
-                Connection::Http { .. } => "http",
+                Connection::Http(_) => "http",
             };
             for (stage, duration) in [
                 ("admission", admitted.duration_since(started)),
@@ -583,16 +553,12 @@ impl ConnectionLease {
                     )
                     .await
             }
-            Connection::Http { client, prepared } => {
-                let mut request = request.clone();
-                if let Some(prepared) = prepared {
-                    request.model.clone_from(&prepared.model);
-                }
+            Connection::Http(client) => {
                 // The SSE idle timeout starts after headers arrive. Bound that wait too.
                 tokio::time::timeout(
                     self.pool.config.provider.info().stream_idle_timeout(),
                     client.stream_request(
-                        request,
+                        request.clone(),
                         ResponsesOptions {
                             session_id: Some(self.pool.config.session_id.clone()),
                             thread_id: Some(self.thread_id.clone()),

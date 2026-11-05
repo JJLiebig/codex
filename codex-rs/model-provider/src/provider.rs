@@ -9,7 +9,6 @@ use codex_api::Provider;
 use codex_api::SharedAuthProvider;
 use codex_api::TransportError;
 use codex_features::RuntimeAuthMode;
-use codex_http_client::HttpClient;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
 use codex_login::GatewayAuthManager;
@@ -96,7 +95,7 @@ pub type ProviderAccountResult = std::result::Result<ProviderAccountState, Provi
 /// require a backend-specific model ID.
 pub const DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "codex-auto-review";
 
-const API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "gpt-5.6-luna";
+const API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "gpt-6-luna";
 
 const FEDRAMP_API_BASE_URL: &str = "https://gov.api.openai.com/v1";
 
@@ -124,25 +123,6 @@ pub const DEFAULT_MEMORY_CONSOLIDATION_PREFERRED_MODEL: &str = "gpt-6.1-terra";
 pub trait ModelProvider: fmt::Debug + Send + Sync {
     /// Returns the configured provider metadata.
     fn info(&self) -> &ModelProviderInfo;
-
-    /// Returns a provider-owned HTTP client for API requests, if required.
-    ///
-    /// The default keeps native providers on the route-aware client factory.
-    /// Implementations that override this must enforce their own destination,
-    /// proxy, and redirect policy for every request sent through the client.
-    fn api_http_client(&self) -> codex_protocol::error::Result<Option<HttpClient>> {
-        Ok(None)
-    }
-
-    /// Captures provider-owned request routing before the caller encodes its typed model field.
-    /// `None` preserves the caller's existing native routing and session-auth resolution.
-    fn prepare_request<'a>(
-        &'a self,
-        _model: &'a str,
-    ) -> ModelProviderFuture<'a, codex_protocol::error::Result<Option<crate::PreparedModelRequest>>>
-    {
-        Box::pin(async { Ok(None) })
-    }
 
     /// Returns whether the resolved Responses provider may receive internal tool metadata.
     fn include_internal_metadata(&self, provider: &Provider) -> bool {
@@ -460,12 +440,6 @@ pub(crate) fn create_model_provider_with_runtime(
     auth_manager: Option<Arc<AuthManager>>,
     runtime_auth: Option<(Arc<RuntimeAuthManager>, RuntimeAuthMode)>,
 ) -> SharedModelProvider {
-    if provider_info.is_cli_proxy() {
-        return Arc::new(crate::codex_plus_plus::CliProxyModelProvider::new(
-            provider_info,
-            auth_manager,
-        ));
-    }
     if provider_info.is_amazon_bedrock() {
         return Arc::new(AmazonBedrockModelProvider::new(provider_info, auth_manager));
     }
@@ -993,7 +967,7 @@ mod tests {
             ))),
         );
 
-        assert_eq!(provider.approval_review_preferred_model(), "gpt-5.6-luna");
+        assert_eq!(provider.approval_review_preferred_model(), "gpt-6-luna");
     }
 
     #[test]
@@ -1568,8 +1542,8 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                 ("openai.gpt-6-sol", "GPT-6 Sol"),
                 ("openai.gpt-6-luna", "GPT-6 Luna"),
                 ("openai.gpt-5.6-sol", "GPT-5.6 Sol"),
-                ("openai.gpt-5.6-terra", "GPT-5.6 Terra"),
-                ("openai.gpt-5.6-luna", "GPT-5.6 Luna"),
+                ("openai.gpt-6.1-terra", "GPT-5.6 Terra"),
+                ("openai.gpt-6-luna", "GPT-5.6 Luna"),
                 ("openai.gpt-5.5", "GPT-5.5"),
             ]
         );
@@ -1592,8 +1566,8 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                 "openai.gpt-6-sol",
                 "openai.gpt-6-luna",
                 "openai.gpt-5.6-sol",
-                "openai.gpt-5.6-terra",
-                "openai.gpt-5.6-luna",
+                "openai.gpt-6.1-terra",
+                "openai.gpt-6-luna",
                 "openai.gpt-5.5",
             ]
         );

@@ -1,6 +1,4 @@
 use super::ThreadUsage;
-use super::UsageResetCompletion;
-use super::UsageResetTargetParams;
 use crate::JsonSchema;
 use crate::TS;
 use crate::protocol::common::AuthMode;
@@ -345,9 +343,6 @@ impl fmt::Debug for ChatgptAuthTokensRefreshResponse {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountRateLimitsParams {
-    /// Read-only reset admission for an exact failed native source.
-    #[ts(optional = nullable)]
-    pub reset_admission: Option<UsageResetTargetParams>,
     /// The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users,
     /// allow the backend to record experiment exposure after ordinary usage is blocked.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -364,8 +359,6 @@ pub type NullableGetAccountRateLimitsParams = Option<GetAccountRateLimitsParams>
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct GetAccountRateLimitsResponse {
-    /// Present only after fresh exact reset admission succeeds.
-    pub reset_admission: Option<UsageResetCompletion>,
     /// Backend permission for ordinary included usage, validated against the active account.
     /// Null means unavailable; clients must not infer recovery from percentages or reset times.
     pub ordinary_usage_allowed: Option<bool>,
@@ -438,9 +431,6 @@ pub enum RateLimitResetCreditStatus {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConsumeAccountRateLimitResetCreditParams {
-    /// Optional loaded thread whose provider needs source-bound reset completion.
-    #[ts(optional = nullable)]
-    pub thread_id: Option<String>,
     /// Identifies one logical reset attempt. A UUID is recommended; reuse the same value when
     /// retrying that attempt.
     pub idempotency_key: String,
@@ -454,7 +444,6 @@ pub struct ConsumeAccountRateLimitResetCreditParams {
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
 pub struct ConsumeAccountRateLimitResetCreditResponse {
-    pub reset_completion: Option<super::UsageResetCompletion>,
     pub outcome: ConsumeAccountRateLimitResetCreditOutcome,
 }
 
@@ -696,7 +685,6 @@ pub struct GatewayOAuthCancelResponse {}
 /// or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and
 /// does not clear a previously observed value.
 pub struct AccountRateLimitsUpdatedNotification {
-    pub inference: Option<codex_protocol::inference_attribution::InferenceScope>,
     pub rate_limits: RateLimitSnapshot,
 }
 

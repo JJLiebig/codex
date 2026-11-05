@@ -5,10 +5,6 @@
 //! Terminal errors retain live question drafts across queued input delivery.
 
 use super::*;
-use codex_protocol::inference_attribution::InferenceAttribution;
-
-#[path = "codex_plus_plus/inference_failure.rs"]
-mod inference_failure;
 
 const LEGACY_SAFETY_ACCESS_BLOCK_PREFIX: &str =
     "Invalid prompt: we've limited access to this content for safety reasons.";
@@ -544,7 +540,6 @@ impl ChatWidget {
         &mut self,
         message: String,
         codex_error_info: Option<AppServerCodexErrorInfo>,
-        inference_attribution: Option<InferenceAttribution>,
     ) {
         if codex_error_info
             .as_ref()
@@ -570,7 +565,6 @@ impl ChatWidget {
             self.add_to_history(history_cell::new_safety_access_block_event());
             self.request_redraw();
             self.maybe_send_next_queued_input();
-        } else if self.handle_owned_inference_error(&message, inference_attribution) {
         } else if let Some(info) = codex_error_info
             .as_ref()
             .and_then(app_server_rate_limit_error_kind)

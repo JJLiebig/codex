@@ -220,8 +220,6 @@ async fn assert_policy_violation_completes_turn_with_typed_terminal_error(
         error,
         ErrorNotification {
             error: TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: expected_misalignment.clone(),
                 message: MESSAGE.to_string(),
                 codex_error_info: Some(CodexErrorInfo::MisalignmentPolicyViolation),
@@ -244,8 +242,6 @@ async fn assert_policy_violation_completes_turn_with_typed_terminal_error(
     assert_eq!(
         completed.turn.error,
         Some(TurnError {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             misalignment: expected_misalignment,
             message: MESSAGE.to_string(),
             codex_error_info: Some(CodexErrorInfo::MisalignmentPolicyViolation),

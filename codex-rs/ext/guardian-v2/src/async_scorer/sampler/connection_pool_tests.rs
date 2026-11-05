@@ -89,32 +89,6 @@ impl Drop for Gateway {
 }
 
 #[tokio::test]
-async fn http_only_provider_skips_websocket_pool_and_samples_over_http() -> Result<()> {
-    skip_if_no_network!(Ok(()));
-    let http = responses::start_mock_server().await;
-    let http_mock = responses::mount_sse_once(
-        &http,
-        responses::sse(vec![
-            responses::ev_output_text_delta("low"),
-            responses::ev_completed("score"),
-        ]),
-    )
-    .await;
-    let ws = responses::start_websocket_server(Vec::new()).await;
-    let gateway = Gateway::new(&http.uri(), ws.uri()).await?;
-    let mut config = sampler_config(format!("{}/v1", gateway.url));
-    let mut info = config.provider.info().clone();
-    info.supports_websockets = false;
-    config.provider = create_model_provider(info, config.provider.auth_manager());
-    let sampler = LunaSampler::new(config);
-    assert!(sampler.connections.replenish().is_none());
-    assert_eq!(sampler.sample(sample_request("http-only")).await?, "low");
-    assert_eq!(gateway.opens.load(Ordering::SeqCst), 0);
-    assert_eq!(http_mock.single_request().path(), "/v1/responses");
-    Ok(())
-}
-
-#[tokio::test]
 async fn stalled_handshake_does_not_delay_other_warm_sockets() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let stalled = responses::start_websocket_server_with_headers(vec![
@@ -361,7 +335,7 @@ async fn cooldown_preserves_healthy_sockets_and_both_transports_share_capacity()
     assert!(matches!(leases[0].connection, Connection::Websocket(_)));
     for _ in 1..MAX_CONCURRENT_REQUESTS {
         let lease = sampler.connections.lease().await?;
-        assert!(matches!(lease.connection, Connection::Http { .. }));
+        assert!(matches!(lease.connection, Connection::Http(_)));
         leases.push(lease);
     }
     assert!(
@@ -372,7 +346,7 @@ async fn cooldown_preserves_healthy_sockets_and_both_transports_share_capacity()
     leases.pop();
     assert!(matches!(
         sampler.connections.lease().await?.connection,
-        Connection::Http { .. }
+        Connection::Http(_)
     ));
     assert_eq!(gateway.opens.load(Ordering::SeqCst), 2);
     Ok(())
@@ -570,7 +544,7 @@ async fn http_cache_preserves_no_constraint_redirect_policy_and_configured_heade
         let setup = pool.client_setup().await?;
         assert!(!setup.provider.headers.contains_key(ACCOUNT_ROUTING_HEADER));
         let lease = pool.lease().await?;
-        assert!(matches!(lease.connection, Connection::Http { .. }));
+        assert!(matches!(lease.connection, Connection::Http(_)));
         let cached = Arc::clone(pool.http_transport.lock().unwrap().as_ref().unwrap());
         assert_eq!(
             (cached.url.as_str(), cached.redirect_policy),
@@ -602,7 +576,7 @@ async fn http_cache_preserves_no_constraint_redirect_policy_and_configured_heade
         ClientRedirectPolicy::Default
     );
     let lease = pool.lease().await?;
-    assert!(matches!(lease.connection, Connection::Http { .. }));
+    assert!(matches!(lease.connection, Connection::Http(_)));
     assert_eq!(
         pool.http_transport
             .lock()

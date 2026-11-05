@@ -14,9 +14,6 @@ use std::sync::Weak;
 use reqwest::Url;
 use tokio::sync::watch;
 
-#[path = "codex_plus_plus/origin_restriction.rs"]
-mod origin_restriction;
-
 /// Effective application destinations, after the requirements owner has applied precedence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DestinationPolicy {
@@ -59,7 +56,6 @@ pub enum NetworkPolicyDenied {
 pub struct NetworkPolicy {
     state: Option<Arc<Mutex<State>>>,
     endpoints: Option<Arc<BTreeSet<Url>>>,
-    origin: Option<origin_restriction::OriginRestriction>,
     account: Option<u64>,
 }
 
@@ -74,7 +70,6 @@ impl fmt::Debug for NetworkPolicy {
 impl PartialEq for NetworkPolicy {
     fn eq(&self, other: &Self) -> bool {
         self.endpoints == other.endpoints
-            && self.origin == other.origin
             && self.account == other.account
             && match (&self.state, &other.state) {
                 (Some(left), Some(right)) => Arc::ptr_eq(left, right),
@@ -148,7 +143,6 @@ impl NetworkPolicyController {
         NetworkPolicy {
             state: Some(self.state.clone()),
             endpoints: None,
-            origin: None,
             account: None,
         }
     }
@@ -199,7 +193,6 @@ impl NetworkPolicy {
         Self {
             state: None,
             endpoints: None,
-            origin: None,
             account: None,
         }
     }
@@ -287,13 +280,6 @@ impl NetworkPolicy {
     /// Checks a destination before proxy resolution, DNS, or transport work starts.
     pub fn acquire(&self, url: &Url) -> Result<NetworkPermit, NetworkPolicyDenied> {
         if self
-            .origin
-            .as_ref()
-            .is_some_and(|origin| !origin.allows(url))
-        {
-            return Err(NetworkPolicyDenied::Destination);
-        }
-        if self
             .endpoints
             .as_ref()
             .is_some_and(|endpoints| !endpoints.contains(url))
@@ -306,7 +292,7 @@ impl NetworkPolicy {
     /// Disables SDKs without destination enforcement whenever restrictions apply.
     /// The returned permit also cancels work if an unrestricted policy changes.
     pub fn acquire_for_unsupported_sdk(&self) -> Result<NetworkPermit, NetworkPolicyDenied> {
-        if self.endpoints.is_some() || self.origin.is_some() {
+        if self.endpoints.is_some() {
             return Err(NetworkPolicyDenied::UnsupportedTransport);
         }
         self.acquire_destination(PermitDestination::UnrestrictedSdk)

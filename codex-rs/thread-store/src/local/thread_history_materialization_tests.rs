@@ -1875,11 +1875,7 @@ WHERE thread_id = ? AND turn_id = ?
         })
         .await
         .expect("append delayed turn lifecycle");
-    let mut completion = turn_completed("turn-2");
-    let attribution = Some(codex_protocol::inference_attribution::InferenceAttribution::Claude);
-    if let RolloutItem::EventMsg(EventMsg::TurnComplete(event)) = &mut completion {
-        event.inference_attribution = attribution.clone();
-    }
+    let completion = turn_completed("turn-2");
     store
         .append_items(AppendThreadItemsParams {
             thread_id,
@@ -1928,7 +1924,6 @@ WHERE thread_id = ? AND turn_id = ?
             .map(|turn| {
                 (
                     turn.turn_id.as_str(),
-                    turn.inference_attribution.clone(),
                     turn.items
                         .iter()
                         .map(|item| item.item_id.as_str())
@@ -1937,8 +1932,8 @@ WHERE thread_id = ? AND turn_id = ?
             })
             .collect::<Vec<_>>(),
         vec![
-            ("turn-1", None, vec!["user-1", "final-1"]),
-            ("turn-2", attribution, vec!["user-2"]),
+            ("turn-1", vec!["user-1", "final-1"]),
+            ("turn-2", vec!["user-2"]),
         ]
     );
 }
@@ -1973,7 +1968,6 @@ async fn paginated_projection_accepts_float_rate_limits_and_later_final_answers(
         .expect("rollout path");
     let token_count = |primary: Option<f64>, secondary: Option<f64>| {
         RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
-            inference_attribution: None,
             info: None,
             rate_limits: Some(RateLimitSnapshot {
                 limit_id: None,
@@ -3128,7 +3122,6 @@ fn turn_started_with_root(turn_id: &str, root_turn_id: &str) -> RolloutItem {
 
 fn turn_completed(turn_id: &str) -> RolloutItem {
     RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-        inference_attribution: None,
         root_turn_id: None,
         turn_id: turn_id.to_string(),
         last_agent_message: None,

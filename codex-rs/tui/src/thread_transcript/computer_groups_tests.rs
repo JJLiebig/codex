@@ -23,7 +23,6 @@ fn computer(id: &str) -> ThreadItemPayload {
 
 fn turn(id: &str, items: Vec<ThreadItemPayload>) -> Turn {
     Turn {
-        inference_attribution: None,
         id: id.to_string(),
         root_turn_id: None,
         items: items.into_iter().map(ThreadItem::untimed).collect(),

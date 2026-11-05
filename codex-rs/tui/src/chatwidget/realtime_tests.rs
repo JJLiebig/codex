@@ -133,7 +133,6 @@ fn finish_turn(
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: thread_id.to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: turn_id.to_string(),
                 root_turn_id: None,
                 items: items.into_iter().map(ThreadItem::untimed).collect(),

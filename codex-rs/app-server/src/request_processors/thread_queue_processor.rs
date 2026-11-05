@@ -231,7 +231,6 @@ impl ThreadQueueRequestProcessor {
             .await;
         Ok(ThreadQueueStartResponse {
             turn: Turn {
-                inference_attribution: None,
                 id: turn_id,
                 root_turn_id: Some(root_turn_id),
                 items: vec![],

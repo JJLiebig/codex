@@ -135,16 +135,6 @@
       "$schema": "http://json-schema.org/draft-07/schema#",
       "description": "Sparse rolling rate-limit update.\n\nClients should merge available values into the most recent `account/rateLimits/read` response or refetch that snapshot. Nullable account metadata may be unavailable in a rolling update and does not clear a previously observed value.",
       "properties": {
-        "inference": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InferenceScope"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "rateLimits": {
           "$ref": "#/definitions/RateLimitSnapshot"
         }
@@ -6655,13 +6645,6 @@
         "idempotencyKey": {
           "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
           "type": "string"
-        },
-        "threadId": {
-          "description": "Optional loaded thread whose provider needs source-bound reset completion.",
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -6675,16 +6658,6 @@
       "properties": {
         "outcome": {
           "$ref": "#/definitions/ConsumeAccountRateLimitResetCreditOutcome"
-        },
-        "resetCompletion": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UsageResetCompletion"
-            },
-            {
-              "type": "null"
-            }
-          ]
         }
       },
       "required": [
@@ -9018,17 +8991,6 @@
           "description": "Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
           "type": "boolean"
         },
-        "resetAdmission": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UsageResetTargetParams"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Read-only reset admission for an exact failed native source."
-        },
         "supportsLunaReserve": {
           "description": "The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
           "type": "boolean"
@@ -9083,17 +9045,6 @@
             "object",
             "null"
           ]
-        },
-        "resetAdmission": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UsageResetCompletion"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Present only after fresh exact reset admission succeeds."
         }
       },
       "required": [
@@ -10130,132 +10081,6 @@
           ]
         }
       },
-      "type": "object"
-    },
-    "InferenceAttribution": {
-      "description": "Discovery or the current native login cannot establish which account served a request.",
-      "oneOf": [
-        {
-          "properties": {
-            "accountId": {
-              "type": "string"
-            },
-            "displayLabel": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "source": {
-              "$ref": "#/definitions/InferenceNativeSource"
-            },
-            "type": {
-              "enum": [
-                "servedNative"
-              ],
-              "title": "ServedNativeInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "accountId",
-            "source",
-            "type"
-          ],
-          "title": "ServedNativeInferenceAttribution",
-          "type": "object"
-        },
-        {
-          "description": "A matching local cooldown prevented an upstream attempt.",
-          "properties": {
-            "accountId": {
-              "type": "string"
-            },
-            "displayLabel": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "source": {
-              "$ref": "#/definitions/InferenceNativeSource"
-            },
-            "type": {
-              "enum": [
-                "intendedNative"
-              ],
-              "title": "IntendedNativeInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "accountId",
-            "source",
-            "type"
-          ],
-          "title": "IntendedNativeInferenceAttribution",
-          "type": "object"
-        },
-        {
-          "description": "The frozen inventory proves the provider, without asserting a Claude account identity.",
-          "properties": {
-            "type": {
-              "enum": [
-                "claude"
-              ],
-              "title": "ClaudeInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ClaudeInferenceAttribution",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "unknown"
-              ],
-              "title": "UnknownInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "UnknownInferenceAttribution",
-          "type": "object"
-        }
-      ]
-    },
-    "InferenceNativeSource": {
-      "enum": [
-        "root",
-        "imported"
-      ],
-      "type": "string"
-    },
-    "InferenceScope": {
-      "description": "Scope for rolling inference quota; native account maintenance remains unscoped.",
-      "properties": {
-        "attribution": {
-          "$ref": "#/definitions/InferenceAttribution"
-        },
-        "threadId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "attribution",
-        "threadId",
-        "turnId"
-      ],
       "type": "object"
     },
     "InitializeCapabilities": {
@@ -24012,17 +23837,6 @@
     "ThreadTokenUsageUpdatedNotification": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "properties": {
-        "inferenceAttribution": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InferenceAttribution"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "threadId": {
           "type": "string"
         },
@@ -24487,17 +24301,6 @@
           "description": "Identifier for this turn. Codex-generated turn IDs are UUIDv7.",
           "type": "string"
         },
-        "inferenceAttribution": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InferenceAttribution"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "items": {
           "description": "Thread items currently included in this turn payload.",
           "items": {
@@ -24623,17 +24426,6 @@
             }
           ]
         },
-        "inferenceAttribution": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InferenceAttribution"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "message": {
           "type": "string"
         },
@@ -24648,14 +24440,6 @@
           ],
           "default": null,
           "description": "Optional public explanation and continuation instruction for a misalignment block."
-        },
-        "usageLimitObservedAtNs": {
-          "default": null,
-          "description": "Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.",
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -25077,80 +24861,6 @@
       },
       "required": [
         "data"
-      ],
-      "type": "object"
-    },
-    "UsageResetCompletion": {
-      "properties": {
-        "accountId": {
-          "type": "string"
-        },
-        "completedAt": {
-          "description": "Unix seconds; does not prove present quota or proxy readiness.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "completedAtNs": {
-          "description": "Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.",
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "source": {
-          "$ref": "#/definitions/InferenceNativeSource"
-        }
-      },
-      "required": [
-        "accountId",
-        "completedAt",
-        "completedAtNs",
-        "id",
-        "source"
-      ],
-      "type": "object"
-    },
-    "UsageResetTargetParams": {
-      "description": "An existing live wait's exact native source; this read never changes account selection.",
-      "properties": {
-        "accountId": {
-          "type": "string"
-        },
-        "completionId": {
-          "description": "When supplied, admission requires this exact durable completion.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "failedAt": {
-          "description": "Earliest eligible completion, in Unix seconds on the inference host.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "failedAtNs": {
-          "description": "Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "source": {
-          "$ref": "#/definitions/InferenceNativeSource"
-        },
-        "threadId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "accountId",
-        "failedAt",
-        "source",
-        "threadId",
-        "turnId"
       ],
       "type": "object"
     },

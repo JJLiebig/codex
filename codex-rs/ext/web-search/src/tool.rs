@@ -1,4 +1,3 @@
-use codex_api::ReqwestTransport;
 use codex_api::SearchClient;
 use codex_api::SearchCommands;
 use codex_api::SearchQuery;
@@ -103,24 +102,21 @@ impl WebSearchTool {
     ) -> Result<Box<dyn ToolOutput>, FunctionCallError> {
         let commands = parse_commands(call.function_arguments()?, self.supports_literature_search)?;
         let command_action = command_action(&commands);
-        let prepared =
-            codex_model_provider::prepare_configured_request(self.provider.as_ref(), &call.model)
-                .await
-                .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
-        let transport = if let Some(client) = prepared.http_client {
-            ReqwestTransport::from_http_client(client)
-        } else {
-            create_transport_for_routes_async(
-                self.http_client_factory.clone(),
-                ClientRouteClass::Api,
-            )
+        let (provider, auth) = self
+            .provider
+            .api_provider_and_auth()
             .await
-            .map_err(|err| FunctionCallError::Fatal(err.to_string()))?
-        };
-        let client = SearchClient::new(transport, prepared.provider, prepared.auth.auth);
+            .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
+        let transport = create_transport_for_routes_async(
+            self.http_client_factory.clone(),
+            ClientRouteClass::Api,
+        )
+        .await
+        .map_err(|err| FunctionCallError::Fatal(err.to_string()))?;
+        let client = SearchClient::new(transport, provider, auth);
         let request = SearchRequest {
             id: self.session_id.clone(),
-            model: prepared.model,
+            model: call.model.clone(),
             reasoning: None,
             input: recent_input(call.conversation_history.items()),
             commands: Some(commands),

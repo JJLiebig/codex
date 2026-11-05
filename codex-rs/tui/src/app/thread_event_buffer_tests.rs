@@ -17,7 +17,6 @@ fn turn_started_notification(thread_id: ThreadId, turn_id: &str) -> ServerNotifi
     ServerNotification::TurnStarted(TurnStartedNotification {
         thread_id: thread_id.to_string(),
         turn: Turn {
-            inference_attribution: None,
             id: turn_id.to_string(),
             root_turn_id: None,
             items_view: TurnItemsView::Full,

@@ -19,14 +19,10 @@ use codex_rmcp_client::EnterpriseOAuthCredentialGuard;
 
 mod bedrock_gov_cloud;
 mod bedrock_setup;
-#[path = "codex_plus_plus/cli_proxy_logout.rs"]
-mod cli_proxy_logout;
 mod enterprise_login;
 mod gateway_oauth;
 mod gcp_setup;
 mod rate_limit_resets;
-#[path = "account_processor/codex_plus_plus/reset_admission.rs"]
-mod reset_admission;
 mod workspace_routing;
 mod workspace_switching;
 
@@ -1043,8 +1039,6 @@ impl AccountRequestProcessor {
             logout_configured_account(&self.config_manager, &self.auth_manager, &self.config)
                 .await?;
         self.thread_manager.invalidate_mcp_runtimes().await;
-        let proxy_cleanup =
-            cli_proxy_logout::cleanup_after_logout(&config, &self.auth_manager).await;
         clear_account_configuration(&self.config_manager, &config).await?;
         self.model_catalog.invalidate().await;
         *self.workspace_routing.lock().await = None;
@@ -1055,8 +1049,6 @@ impl AccountRequestProcessor {
             self.auth_manager.auth_cached(),
         )
         .await;
-
-        proxy_cleanup?;
 
         // Reflect the current auth method after logout (likely None).
         Ok(self
@@ -1183,9 +1175,6 @@ impl AccountRequestProcessor {
         &self,
         params: GetAccountRateLimitsParams,
     ) -> Result<GetAccountRateLimitsResponse, JSONRPCErrorError> {
-        if let Some(target) = params.reset_admission {
-            return reset_admission::read(self, target).await;
-        }
         let Some((auth, http_client_factory)) =
             self.auth_manager.auth_with_http_client_factory().await
         else {
@@ -1275,7 +1264,6 @@ impl AccountRequestProcessor {
             .filter(|_| matches_active_account);
 
         Ok(GetAccountRateLimitsResponse {
-            reset_admission: None,
             ordinary_usage_allowed: response
                 .ordinary_usage_allowed
                 .filter(|_| matches_active_account),

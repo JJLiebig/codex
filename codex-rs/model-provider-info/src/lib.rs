@@ -82,8 +82,6 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 const OPENAI_PROVIDER_NAME: &str = "OpenAI";
 const OPENAI_ACTOR_AUTHORIZATION_HEADER: &str = "x-openai-actor-authorization";
 pub const OPENAI_PROVIDER_ID: &str = "openai";
-pub const CLI_PROXY_PROVIDER_ID: &str = "cli-proxy";
-pub const CLI_PROXY_PROVIDER_NAME: &str = "CLIProxyAPI";
 pub const CHATGPT_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
 const AMAZON_BEDROCK_PROVIDER_NAME: &str = "Amazon Bedrock";
 pub const AMAZON_BEDROCK_PROVIDER_ID: &str = "amazon-bedrock";
@@ -735,18 +733,6 @@ other non-default provider fields are not supported"
     pub fn has_command_auth(&self) -> bool {
         self.auth.is_some()
     }
-
-    pub fn is_cli_proxy(&self) -> bool {
-        self.name == CLI_PROXY_PROVIDER_NAME
-    }
-
-    pub fn create_cli_proxy_provider() -> Self {
-        Self {
-            name: CLI_PROXY_PROVIDER_NAME.into(),
-            requires_openai_auth: true,
-            ..Self::default()
-        }
-    }
 }
 
 pub const DEFAULT_LMSTUDIO_PORT: u16 = 1234;
@@ -764,14 +750,12 @@ pub fn built_in_model_providers(
     let amazon_bedrock_provider = P::create_amazon_bedrock_provider(/*aws*/ None);
     let amazon_bedrock_runtime_provider =
         P::create_amazon_bedrock_runtime_provider(/*aws*/ None);
-    let cli_proxy_provider = P::create_cli_proxy_provider();
     let gcp_provider = P::create_gcp_provider();
 
     // Bundle OpenAI, supported cloud-hosted OpenAI backends, and local OSS providers.
     // Other compatible providers can be added through `model_providers` in config.toml.
     [
         (OPENAI_PROVIDER_ID, openai_provider),
-        (CLI_PROXY_PROVIDER_ID, cli_proxy_provider),
         (AMAZON_BEDROCK_PROVIDER_ID, amazon_bedrock_provider),
         (GCP_PROVIDER_ID, gcp_provider),
         (

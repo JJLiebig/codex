@@ -300,7 +300,6 @@ fn evicted_voice_delegation_marker_still_suppresses_private_replay() {
 
     let mut resumed = ThreadEventStore::new(/*capacity*/ 1);
     resumed.set_turns(vec![Turn {
-        inference_attribution: None,
         id: "voice-turn".into(),
         root_turn_id: None,
         items: vec![ThreadItem::untimed(voice_request)],
@@ -343,7 +342,6 @@ fn saved_voice_turn_suppresses_reasoning_without_hiding_typed_reasoning() {
         }],
     };
     let turn = |id: &str, items| Turn {
-        inference_attribution: None,
         id: id.into(),
         root_turn_id: None,
         items,
@@ -396,7 +394,6 @@ fn snapshot_keeps_typed_output_before_voice_handoff_in_the_same_turn() {
     let private = commentary("private", "Later voice-private commentary");
     let mut store = ThreadEventStore::new(/*capacity*/ 8);
     store.set_turns(vec![Turn {
-        inference_attribution: None,
         id: "shared".into(),
         root_turn_id: None,
         items: vec![
@@ -666,8 +663,6 @@ async fn misalignment_buffered_replay_preserves_input_after_continuation() {
         .restore_user_message_to_composer("keep draft".into());
     let saved_input = app.chat_widget.capture_thread_input_state();
     let error = AppServerTurnError {
-        usage_limit_observed_at_ns: None,
-        inference_attribution: None,
         misalignment: None,
         message: "Chat stopped".into(),
         codex_error_info: Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation),
@@ -773,10 +768,6 @@ async fn misalignment_buffered_replay_preserves_input_after_continuation() {
 async fn misalignment_replay_blocks_when_turn_start_was_evicted() {
     let thread_id = ThreadId::new();
     let error = AppServerTurnError {
-        usage_limit_observed_at_ns: None,
-        inference_attribution: Some(
-            codex_protocol::inference_attribution::InferenceAttribution::Unknown,
-        ),
         misalignment: None,
         message: "Chat stopped".into(),
         codex_error_info: Some(AppServerCodexErrorInfo::MisalignmentPolicyViolation),
@@ -811,8 +802,6 @@ async fn misalignment_replay_blocks_when_turn_start_was_evicted() {
                 thread_id: thread_id.to_string(),
                 turn_id: "settings-update".into(),
                 error: AppServerTurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     codex_error_info: Some(AppServerCodexErrorInfo::BadRequest),
                     ..error
                 },

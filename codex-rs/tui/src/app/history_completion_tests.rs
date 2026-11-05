@@ -11,7 +11,6 @@ fn payloads(items: &[codex_app_server_protocol::ThreadItem]) -> Vec<ThreadItemPa
 
 fn turn(id: &str, status: TurnStatus, item_ids: &[&str]) -> Turn {
     Turn {
-        inference_attribution: None,
         id: id.to_string(),
         root_turn_id: None,
         items: item_ids

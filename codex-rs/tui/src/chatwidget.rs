@@ -563,7 +563,6 @@ pub(crate) struct ChatWidget {
     session_header: SessionHeader,
     pub(crate) initial_user_message: Option<UserMessage>,
     status_account_display: Option<StatusAccountDisplay>,
-    inference_display: codex_plus_plus::InferenceDisplay,
     pub(crate) prompt_cache: crate::codex_plus_plus::prompt_cache::PromptCache,
     pub(crate) remote_connection: Option<RemoteConnectionStatus>,
     /// Remote app servers cannot read image paths on the TUI host.

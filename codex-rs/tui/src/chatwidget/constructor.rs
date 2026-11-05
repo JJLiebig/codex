@@ -143,7 +143,6 @@ impl ChatWidget {
             session_header: SessionHeader::new(header_model),
             initial_user_message,
             status_account_display,
-            inference_display: Default::default(),
             prompt_cache: Default::default(),
             remote_connection: None,
             snapshot_local_images: false,
