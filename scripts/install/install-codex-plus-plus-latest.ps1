@@ -119,7 +119,9 @@ try {
     if ($AddToUserPath) {
         $installerArgs.Add("AddToUserPath", $true)
     }
+    $global:LASTEXITCODE = 0
     & $installerPath @installerArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
     Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
 }

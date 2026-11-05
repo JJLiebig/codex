@@ -2,7 +2,8 @@
 
 This Python 3.10+ standard-library tool repairs only the known fork attribution-8 /
 upstream root-9 collision in an explicitly selected `thread_history_1.sqlite`.
-There is no startup hook, home discovery, automatic process stop, or runtime repair.
+The standalone command has no startup hook or automatic process stop. Managed Windows
+upgrades can invoke the same repair as guarded installation maintenance described below.
 The source-removal PR must restore canonical migrations before this recovery is used. The equality gate intentionally fails until that PR lands.
 
 ## Pinned provenance and accepted states
@@ -70,6 +71,8 @@ transaction. A failed run leaves the original logically unchanged and any comple
 backup intact. `verified-before-commit.json` is verification evidence, **not** proof
 that commit completed; inspect the original after interruption. A crash can leave
 `.recovery-lock`; remove it manually only after establishing no recovery is running.
+On Windows, new invocations use a process-held file lock released on exit/crash;
+an old directory lock still refuses recovery and needs the procedure above.
 No database replacement, rebuild, drop, rename, JSONL rewrite, WAL/SHM deletion or
 journal-mode change is performed. Do not restore a backup over a running database.
 Old fork fresh opens fail on the repaired checksum; already-open old pools remain
@@ -79,3 +82,41 @@ The existing repo-checks gate fetches full `openai/codex` ancestry, resolves the
 common ancestor and compares path/blob inventories for all six shared chains. It
 fails on unresolved/shallow history or any difference. It flags known migrator/open
 seams for explicit review; it cannot detect arbitrary SQL writes in other code.
+
+## Managed Windows upgrades
+
+The Windows managed installer, downloaded update and local build `--install` share
+one maintenance path. The new binary resolves the global configuration's history
+location without opening history or auth. Project and per-invocation overrides are
+outside this installation maintenance scope. First installs with missing history
+are unchanged. Existing managed installs with missing history or a healthy prefix
+stage pending completion too: an old lazy writer can create or advance history
+after preflight, so it is checked again after managed writers drain. Existing
+history requires Python 3.10+; local builds pass their interpreter, and the installer
+also accepts an absolute `-PythonExe`. No interpreter is downloaded.
+
+Recognized affected histories stage a pending upgrade and return status 75. Close
+existing Codex sessions and use the printed shim path (or launch Codex again): that launch completes maintenance
+before acquiring a runtime lease or starting Codex. It waits/retries for all retained
+generation leases, known Codex processes and users of the exact database/WAL/SHM.
+It never stops clients. Obsolete owned generation junctions are retired under the
+gates before repair; their packages remain, but preloaded old launchers cannot
+restart those generations afterward. Discovery failures remain pending. An upgrade running inside
+Codex therefore returns instead of waiting on its own session's lease. New CLIs
+report pending; an older CLI may additionally describe status 75 as an update failure.
+
+Maintenance supports the selected managed Windows shim only. Affected histories
+with multiple managed namespaces in the same CODEX_HOME refuse maintenance.
+Keep raw executables, npm, desktop and supervisors stopped throughout maintenance;
+the managed launch fence cannot prevent those external launchers from starting.
+Already-compatible histories skip maintenance and its namespace restriction.
+Unknown/future histories refuse before changing the selected installation or data.
+
+The verified backup is retained under `history-recovery-backups` beside history.
+If interrupted, the pending record remains until activation and gate cleanup both
+finish; the next managed launch resumes without repeating a completed repair.
+Missing history at completion needs no interpreter; newly created history requires
+Python before activation. Leave the pending record and staged package in place.
+This is a one-upgrade operation,
+not a startup migrator, service, scheduled task or background worker. Native account
+stores and the six shared migration chains are unchanged.
