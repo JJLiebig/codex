@@ -151,112 +151,6 @@
       ],
       "description": "This translation layer make sure that we expose codex error code in camel case.\n\nWhen an upstream HTTP status is available (for example, from the Responses API or a provider), it is forwarded in `httpStatusCode` on the relevant `codexErrorInfo` variant."
     },
-    "InferenceAttribution": {
-      "description": "Discovery or the current native login cannot establish which account served a request.",
-      "oneOf": [
-        {
-          "properties": {
-            "accountId": {
-              "type": "string"
-            },
-            "displayLabel": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "source": {
-              "$ref": "#/definitions/InferenceNativeSource"
-            },
-            "type": {
-              "enum": [
-                "servedNative"
-              ],
-              "title": "ServedNativeInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "accountId",
-            "source",
-            "type"
-          ],
-          "title": "ServedNativeInferenceAttribution",
-          "type": "object"
-        },
-        {
-          "description": "A matching local cooldown prevented an upstream attempt.",
-          "properties": {
-            "accountId": {
-              "type": "string"
-            },
-            "displayLabel": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "source": {
-              "$ref": "#/definitions/InferenceNativeSource"
-            },
-            "type": {
-              "enum": [
-                "intendedNative"
-              ],
-              "title": "IntendedNativeInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "accountId",
-            "source",
-            "type"
-          ],
-          "title": "IntendedNativeInferenceAttribution",
-          "type": "object"
-        },
-        {
-          "description": "The frozen inventory proves the provider, without asserting a Claude account identity.",
-          "properties": {
-            "type": {
-              "enum": [
-                "claude"
-              ],
-              "title": "ClaudeInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ClaudeInferenceAttribution",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "unknown"
-              ],
-              "title": "UnknownInferenceAttributionType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "UnknownInferenceAttribution",
-          "type": "object"
-        }
-      ]
-    },
-    "InferenceNativeSource": {
-      "enum": [
-        "root",
-        "imported"
-      ],
-      "type": "string"
-    },
     "MisalignmentErrorDetails": {
       "properties": {
         "detailedExplanation": {
@@ -331,17 +225,6 @@
             }
           ]
         },
-        "inferenceAttribution": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/InferenceAttribution"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null
-        },
         "message": {
           "type": "string"
         },
@@ -356,14 +239,6 @@
           ],
           "default": null,
           "description": "Optional public explanation and continuation instruction for a misalignment block."
-        },
-        "usageLimitObservedAtNs": {
-          "default": null,
-          "description": "Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.",
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [

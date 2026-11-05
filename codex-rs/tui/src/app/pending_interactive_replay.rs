@@ -674,7 +674,6 @@ mod tests {
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: turn_id.to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,

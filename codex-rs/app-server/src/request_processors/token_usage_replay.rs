@@ -46,7 +46,6 @@ pub(super) async fn send_thread_token_usage_update_to_connection(
         return;
     };
     let notification = ThreadTokenUsageUpdatedNotification {
-        inference_attribution: None,
         thread_id: thread_id.to_string(),
         turn_id: token_usage_turn_id,
         token_usage: ThreadTokenUsage::from(info),
@@ -185,7 +184,6 @@ mod tests {
                 questions: None,
             })),
             RolloutItem::EventMsg(EventMsg::TokenCount(TokenCountEvent {
-                inference_attribution: None,
                 info: None,
                 rate_limits: None,
             })),

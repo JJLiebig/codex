@@ -703,8 +703,6 @@ pub(crate) async fn run_legacy_after_agent_hook(
         return false;
     };
     let event = EventMsg::Error(codex_protocol::protocol::ErrorEvent {
-        usage_limit_observed_at_ns: None,
-        inference_attribution: None,
         misalignment: None,
         message,
         codex_error_info: Some(CodexErrorInfo::Other),

@@ -1088,10 +1088,7 @@ async fn startup_check_shows_reset_hint_for_workspace_account_with_credit() {
 fn consume_response(
     outcome: ConsumeAccountRateLimitResetCreditOutcome,
 ) -> ConsumeAccountRateLimitResetCreditResponse {
-    ConsumeAccountRateLimitResetCreditResponse {
-        outcome,
-        reset_completion: None,
-    }
+    ConsumeAccountRateLimitResetCreditResponse { outcome }
 }
 
 fn finish_reset_consume_outcome(

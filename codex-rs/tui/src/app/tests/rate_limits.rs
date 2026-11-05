@@ -41,7 +41,6 @@ fn rate_limit_snapshot(
 
 fn account_rate_limits_response(snapshot: RateLimitSnapshot) -> GetAccountRateLimitsResponse {
     GetAccountRateLimitsResponse {
-        reset_admission: None,
         ordinary_usage_allowed: None,
         account_id: None,
         rate_limit_upsell: None,
@@ -63,7 +62,6 @@ async fn deliver_rolling_rate_limit_snapshot(
         app_server,
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::AccountRateLimitsUpdated(AccountRateLimitsUpdatedNotification {
-                inference: None,
                 rate_limits: snapshot,
             }),
         )),
@@ -94,8 +92,6 @@ fn deliver_usage_limit_error(app: &mut App) {
     app.chat_widget.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "Usage limit reached.".to_string(),
                 codex_error_info: Some(CodexErrorInfo::UsageLimitExceeded),

@@ -32,58 +32,15 @@ pub enum ResetAttemptPhase {
     ManualRedeeming {
         redeem_request_id: String,
         credit_id: Option<String>,
-        source: ResetCredentialSource,
     },
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(deny_unknown_fields)]
 pub struct ResetCompletion {
     pub id: String,
     pub completed_at: i64,
     #[serde(default)]
     pub manual: bool,
-    /// Native source of an owned-backend completion; the account is bound by this state file.
-    pub source: Option<ResetCredentialSource>,
-    #[serde(default)]
-    pub reconciliation: ResetReconciliation,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResetReconciliation {
-    #[default]
-    Pending,
-    DispatchedUnknown,
-    Acknowledged,
-    ObservedClear,
-}
-
-impl ResetCompletion {
-    pub fn needs_proxy_reconciliation(&self) -> bool {
-        self.source.is_some()
-            && matches!(
-                self.reconciliation,
-                ResetReconciliation::Pending | ResetReconciliation::DispatchedUnknown
-            )
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ResetCredentialSource {
-    Root,
-    Imported,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum ManualResetAttempt {
-    Fresh,
-    Pending {
-        redeem_request_id: String,
-        credit_id: Option<String>,
-    },
-    Completed,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -116,39 +73,6 @@ impl PersistedState {
 }
 
 impl AccountStore {
-    /// Enumerate existing completions, including root manual resets without an imported profile.
-    pub fn pending_proxy_resets(&self) -> io::Result<Vec<(AccountId, ResetCompletion)>> {
-        let entries = match std::fs::read_dir(self.accounts_dir()) {
-            Ok(entries) => entries,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(error),
-        };
-        let mut pending = Vec::new();
-        for entry in entries {
-            let entry = entry?;
-            if !entry.file_type()?.is_dir() || !entry.path().join(STATE_FILE).is_file() {
-                continue;
-            }
-            let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
-                continue;
-            };
-            let account = AccountId(name);
-            if let Some(lease) = self.try_acquire_reset_mutation_lease(&account)? {
-                let state = lease.state()?;
-                if matches!(
-                    state.phase,
-                    None | Some(ResetAttemptPhase::ActivatingWeekly)
-                ) && let Some(completion) = state
-                    .completion
-                    .filter(ResetCompletion::needs_proxy_reconciliation)
-                {
-                    pending.push((account, completion));
-                }
-            }
-        }
-        Ok(pending)
-    }
-
     pub async fn acquire_reset_mutation_lease_for_auth(
         &self,
         auth: &CodexAuth,
@@ -267,7 +191,6 @@ impl ResetMutationLease {
         &mut self,
         redeem_request_id: &str,
         completed_at: i64,
-        source: Option<ResetCredentialSource>,
     ) -> io::Result<bool> {
         let mut state = read_state(&self.state_path)?;
         let Some(id) = state.phase.as_ref().and_then(|phase| match phase {
@@ -286,8 +209,6 @@ impl ResetMutationLease {
             id,
             completed_at,
             manual: false,
-            source,
-            reconciliation: ResetReconciliation::Pending,
         });
         write_state(&self.state_path, &state)?;
         Ok(true)
@@ -300,119 +221,12 @@ impl ResetMutationLease {
             Some(ResetAttemptPhase::Redeeming {
                 redeem_request_id: current,
                 ..
-            } | ResetAttemptPhase::ManualRedeeming {
-                redeem_request_id: current,
-                ..
             }) if current == redeem_request_id
         );
         if !matches {
             return Ok(false);
         }
         state.phase = None;
-        write_state(&self.state_path, &state)?;
-        Ok(true)
-    }
-
-    pub fn begin_manual(
-        &mut self,
-        request_id: &str,
-        source: ResetCredentialSource,
-        credit_id: Option<&str>,
-    ) -> io::Result<ManualResetAttempt> {
-        let mut state = read_state(&self.state_path)?;
-        match state.phase.as_ref() {
-            Some(ResetAttemptPhase::ManualRedeeming {
-                redeem_request_id,
-                credit_id,
-                source: current,
-            }) if *current == source => {
-                return Ok(ManualResetAttempt::Pending {
-                    redeem_request_id: redeem_request_id.clone(),
-                    credit_id: credit_id.clone(),
-                });
-            }
-            Some(_) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::WouldBlock,
-                    "another usage reset is pending",
-                ));
-            }
-            None => {}
-        }
-        if let Some(done) = &state.completion
-            && done.id == request_id
-        {
-            if done.manual && done.source == Some(source) {
-                return Ok(ManualResetAttempt::Completed);
-            }
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "reset request belongs to a different account source",
-            ));
-        }
-        state.phase = Some(ResetAttemptPhase::ManualRedeeming {
-            redeem_request_id: request_id.to_owned(),
-            credit_id: credit_id.map(str::to_owned),
-            source,
-        });
-        write_state(&self.state_path, &state)?;
-        Ok(ManualResetAttempt::Fresh)
-    }
-
-    pub fn confirm_manual(&mut self, request_id: &str, completed_at: i64) -> io::Result<bool> {
-        let mut state = read_state(&self.state_path)?;
-        let Some(ResetAttemptPhase::ManualRedeeming {
-            redeem_request_id,
-            source,
-            ..
-        }) = state.phase
-        else {
-            return Ok(false);
-        };
-        if redeem_request_id != request_id {
-            return Ok(false);
-        }
-        state.phase = None;
-        state.completion = Some(ResetCompletion {
-            id: redeem_request_id,
-            completed_at,
-            manual: true,
-            source: Some(source),
-            reconciliation: ResetReconciliation::Pending,
-        });
-        write_state(&self.state_path, &state)?;
-        Ok(true)
-    }
-
-    /// Compare the complete receipt before writing; an old attempt cannot acknowledge a successor.
-    pub fn reconcile_proxy(
-        &mut self,
-        expected: &ResetCompletion,
-        next: ResetReconciliation,
-    ) -> io::Result<bool> {
-        let mut state = read_state(&self.state_path)?;
-        if state.completion.as_ref() != Some(expected)
-            || !matches!(
-                state.phase,
-                None | Some(ResetAttemptPhase::ActivatingWeekly)
-            )
-            || expected.source.is_none()
-            || !matches!(
-                (expected.reconciliation, next),
-                (
-                    ResetReconciliation::Pending,
-                    ResetReconciliation::DispatchedUnknown | ResetReconciliation::ObservedClear
-                ) | (
-                    ResetReconciliation::DispatchedUnknown,
-                    ResetReconciliation::Acknowledged | ResetReconciliation::ObservedClear
-                )
-            )
-        {
-            return Ok(false);
-        }
-        let mut completion = expected.clone();
-        completion.reconciliation = next;
-        state.completion = Some(completion);
         write_state(&self.state_path, &state)?;
         Ok(true)
     }

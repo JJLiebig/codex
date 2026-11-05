@@ -300,7 +300,6 @@ async fn switching_agent_threads_preserves_backend_voice_and_routes_pending_spee
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: source.to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: turn_id.into(),
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer.clone())],
@@ -668,7 +667,6 @@ async fn replay_reconciles_only_matching_voice_captions_one_for_one() {
     app.pending_realtime_transcript_replay
         .insert(source, records);
     let voice = Turn {
-        inference_attribution: None,
         id: "voice-turn".into(),
         root_turn_id: None,
         items: vec![
@@ -938,7 +936,6 @@ async fn unrendered_buffered_items_do_not_consume_retained_captions() {
             TurnCompletedNotification {
                 thread_id: source.to_string(),
                 turn: Turn {
-                    inference_attribution: None,
                     id: turn_id.into(),
                     root_turn_id: None,
                     items: items.into_iter().map(ThreadItem::untimed).collect(),
@@ -1226,7 +1223,6 @@ async fn rejected_realtime_speech_restores_the_delegated_final_answer() -> Resul
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: thread_id.to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: "rejected-turn".to_string(),
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer)],
@@ -1327,7 +1323,6 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: original.to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: "switched-turn".to_string(),
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer)],
@@ -1409,7 +1404,6 @@ async fn switching_threads_retains_undelivered_voice_answer_after_replay_evictio
             delegated_turns: Vec::new(),
             session: Some(test_thread_session(original, app.config.cwd.to_path_buf())),
             turns: vec![Turn {
-                inference_attribution: None,
                 id: "replayed-turn".to_string(),
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(replayed_item)],
@@ -1616,7 +1610,6 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: thread_id.to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: turn_id.to_string(),
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(answer)],
@@ -1695,7 +1688,6 @@ async fn delegated_final_speech_reaches_app_server_once_and_stale_speech_is_reje
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: thread_id.to_string(),
             turn: Turn {
-                inference_attribution: None,
                 id: second_turn.to_string(),
                 root_turn_id: None,
                 items: vec![ThreadItem::untimed(second_answer)],

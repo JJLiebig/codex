@@ -235,8 +235,6 @@ impl<H: ReviewHost> SynchronousApprovalReviewer for ReviewRequest<'_, H> {
                                     message: message.clone(),
                                 }),
                                 ErrorEvent {
-                                    usage_limit_observed_at_ns: None,
-                                    inference_attribution: None,
                                     message,
                                     codex_error_info: Some(CodexErrorInfo::TooManyDenials),
                                     misalignment: None,

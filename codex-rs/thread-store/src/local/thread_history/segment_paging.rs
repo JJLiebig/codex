@@ -71,7 +71,6 @@ pub(super) async fn page_turn_rows(
     rollout_ordinal,
     status,
     error_json,
-    inference_attribution_json,
     started_at,
     completed_at,
     duration_ms,

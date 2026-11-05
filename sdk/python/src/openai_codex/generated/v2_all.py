@@ -1080,13 +1080,13 @@ class ConsumeAccountRateLimitResetCreditParams(BaseModel):
             description="Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
         ),
     ]
-    thread_id: Annotated[
-        str | None,
-        Field(
-            alias="threadId",
-            description="Optional loaded thread whose provider needs source-bound reset completion.",
-        ),
-    ] = None
+
+
+class ConsumeAccountRateLimitResetCreditResponse(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    outcome: ConsumeAccountRateLimitResetCreditOutcome
 
 
 class InputTextContentItem(BaseModel):
@@ -1824,6 +1824,26 @@ class GetAccountParams(BaseModel):
     ] = None
 
 
+class GetAccountRateLimitsParams(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    exclude_reset_credit_details: Annotated[
+        bool | None,
+        Field(
+            alias="excludeResetCreditDetails",
+            description="Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
+        ),
+    ] = None
+    supports_luna_reserve: Annotated[
+        bool | None,
+        Field(
+            alias="supportsLunaReserve",
+            description="The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
+        ),
+    ] = None
+
+
 class GetAccountTokenUsageParams(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -2073,25 +2093,6 @@ class InAppBrowserRequirements(BaseModel):
     allow_external_browser_settings_import: Annotated[
         bool | None, Field(alias="allowExternalBrowserSettingsImport")
     ] = None
-
-
-class ClaudeInferenceAttribution(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Annotated[Literal["claude"], Field(title="ClaudeInferenceAttributionType")]
-
-
-class UnknownInferenceAttribution(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    type: Annotated[Literal["unknown"], Field(title="UnknownInferenceAttributionType")]
-
-
-class InferenceNativeSource(Enum):
-    root = "root"
-    imported = "imported"
 
 
 class InitializeCapabilities(BaseModel):
@@ -3027,6 +3028,12 @@ class NetworkUnixSocketPermission(Enum):
 class NonSteerableTurnKind(Enum):
     review = "review"
     compact = "compact"
+
+
+class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
+    root: Annotated[
+        GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
+    ]
 
 
 class NullableGetAccountTokenUsageParams(RootModel[GetAccountTokenUsageParams | None]):
@@ -6697,60 +6704,6 @@ class TurnSteerResponse(BaseModel):
     turn_id: Annotated[str, Field(alias="turnId")]
 
 
-class UsageResetCompletion(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    account_id: Annotated[str, Field(alias="accountId")]
-    completed_at: Annotated[
-        int,
-        Field(
-            alias="completedAt",
-            description="Unix seconds; does not prove present quota or proxy readiness.",
-        ),
-    ]
-    completed_at_ns: Annotated[
-        str,
-        Field(
-            alias="completedAtNs",
-            description="Decimal Unix nanoseconds preserve ordering within a second without JavaScript integer loss.",
-        ),
-    ]
-    id: str
-    source: InferenceNativeSource
-
-
-class UsageResetTargetParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    account_id: Annotated[str, Field(alias="accountId")]
-    completion_id: Annotated[
-        str | None,
-        Field(
-            alias="completionId",
-            description="When supplied, admission requires this exact durable completion.",
-        ),
-    ] = None
-    failed_at: Annotated[
-        int,
-        Field(
-            alias="failedAt",
-            description="Earliest eligible completion, in Unix seconds on the inference host.",
-        ),
-    ]
-    failed_at_ns: Annotated[
-        str | None,
-        Field(
-            alias="failedAtNs",
-            description="Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.",
-        ),
-    ] = None
-    source: InferenceNativeSource
-    thread_id: Annotated[str, Field(alias="threadId")]
-    turn_id: Annotated[str, Field(alias="turnId")]
-
-
 class TextUserInput(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -7942,6 +7895,17 @@ class AccountLogoutRequest(BaseModel):
     params: Annotated[None, Field(None)] = None
 
 
+class AccountRateLimitsReadRequest(BaseModel):
+    model_config = ConfigDict(
+        populate_by_name=True,
+    )
+    id: RequestId
+    method: Annotated[
+        Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
+    ]
+    params: GetAccountRateLimitsParams | None = None
+
+
 class AccountRateLimitResetCreditConsumeRequest(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8379,14 +8343,6 @@ class ConfigurationReasoning(BaseModel):
     effort: ReasoningEffort
 
 
-class ConsumeAccountRateLimitResetCreditResponse(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    outcome: ConsumeAccountRateLimitResetCreditOutcome
-    reset_completion: Annotated[UsageResetCompletion | None, Field(alias="resetCompletion")] = None
-
-
 class InputImageContentItem(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -8706,33 +8662,6 @@ class GatewayOAuthReadResponse(BaseModel):
     ] = None
 
 
-class GetAccountRateLimitsParams(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    exclude_reset_credit_details: Annotated[
-        bool | None,
-        Field(
-            alias="excludeResetCreditDetails",
-            description="Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
-        ),
-    ] = None
-    reset_admission: Annotated[
-        UsageResetTargetParams | None,
-        Field(
-            alias="resetAdmission",
-            description="Read-only reset admission for an exact failed native source.",
-        ),
-    ] = None
-    supports_luna_reserve: Annotated[
-        bool | None,
-        Field(
-            alias="supportsLunaReserve",
-            description="The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
-        ),
-    ] = None
-
-
 class GetAccountResponse(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
@@ -9002,56 +8931,6 @@ class HooksListResponse(BaseModel):
         populate_by_name=True,
     )
     data: list[HooksListEntry]
-
-
-class ServedNativeInferenceAttribution(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    account_id: Annotated[str, Field(alias="accountId")]
-    display_label: Annotated[str | None, Field(alias="displayLabel")] = None
-    source: InferenceNativeSource
-    type: Annotated[Literal["servedNative"], Field(title="ServedNativeInferenceAttributionType")]
-
-
-class IntendedNativeInferenceAttribution(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    account_id: Annotated[str, Field(alias="accountId")]
-    display_label: Annotated[str | None, Field(alias="displayLabel")] = None
-    source: InferenceNativeSource
-    type: Annotated[
-        Literal["intendedNative"], Field(title="IntendedNativeInferenceAttributionType")
-    ]
-
-
-class InferenceAttribution(
-    RootModel[
-        ServedNativeInferenceAttribution
-        | IntendedNativeInferenceAttribution
-        | ClaudeInferenceAttribution
-        | UnknownInferenceAttribution
-    ]
-):
-    root: Annotated[
-        ServedNativeInferenceAttribution
-        | IntendedNativeInferenceAttribution
-        | ClaudeInferenceAttribution
-        | UnknownInferenceAttribution,
-        Field(
-            description="Discovery or the current native login cannot establish which account served a request."
-        ),
-    ]
-
-
-class InferenceScope(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    attribution: InferenceAttribution
-    thread_id: Annotated[str, Field(alias="threadId")]
-    turn_id: Annotated[str, Field(alias="turnId")]
 
 
 class ListMcpServerStatusParams(BaseModel):
@@ -9336,12 +9215,6 @@ class NewThreadModelDefaults(BaseModel):
         ReasoningEffort | None, Field(alias="modelReasoningEffort")
     ] = None
     service_tier: Annotated[str | None, Field(alias="serviceTier")] = None
-
-
-class NullableGetAccountRateLimitsParams(RootModel[GetAccountRateLimitsParams | None]):
-    root: Annotated[
-        GetAccountRateLimitsParams | None, Field(title="Nullable_GetAccountRateLimitsParams")
-    ]
 
 
 class OtlpHttp(BaseModel):
@@ -11056,9 +10929,6 @@ class ThreadTokenUsageUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    inference_attribution: Annotated[
-        InferenceAttribution | None, Field(alias="inferenceAttribution")
-    ] = None
     thread_id: Annotated[str, Field(alias="threadId")]
     token_usage: Annotated[ThreadTokenUsage, Field(alias="tokenUsage")]
     turn_id: Annotated[str, Field(alias="turnId")]
@@ -11129,21 +10999,11 @@ class TurnError(BaseModel):
     )
     additional_details: Annotated[str | None, Field(alias="additionalDetails")] = None
     codex_error_info: Annotated[CodexErrorInfo | None, Field(alias="codexErrorInfo")] = None
-    inference_attribution: Annotated[
-        InferenceAttribution | None, Field(alias="inferenceAttribution")
-    ] = None
     message: str
     misalignment: Annotated[
         MisalignmentErrorDetails | None,
         Field(
             description="Optional public explanation and continuation instruction for a misalignment block."
-        ),
-    ] = None
-    usage_limit_observed_at_ns: Annotated[
-        str | None,
-        Field(
-            alias="usageLimitObservedAtNs",
-            description="Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.",
         ),
     ] = None
 
@@ -11218,7 +11078,6 @@ class AccountRateLimitsUpdatedNotification(BaseModel):
     model_config = ConfigDict(
         populate_by_name=True,
     )
-    inference: InferenceScope | None = None
     rate_limits: Annotated[RateLimitSnapshot, Field(alias="rateLimits")]
 
 
@@ -11410,17 +11269,6 @@ class AccountLoginStartRequest(BaseModel):
         Literal["account/login/start"], Field(title="Account/login/startRequestMethod")
     ]
     params: LoginAccountParams
-
-
-class AccountRateLimitsReadRequest(BaseModel):
-    model_config = ConfigDict(
-        populate_by_name=True,
-    )
-    id: RequestId
-    method: Annotated[
-        Literal["account/rateLimits/read"], Field(title="Account/rateLimits/readRequestMethod")
-    ]
-    params: GetAccountRateLimitsParams | None = None
 
 
 class FeedbackSaveRequest(BaseModel):
@@ -11694,13 +11542,6 @@ class GetAccountRateLimitsResponse(BaseModel):
         Field(
             alias="rateLimitsByLimitId",
             description="Multi-bucket view keyed by metered `limit_id` (for example, `codex`).",
-        ),
-    ] = None
-    reset_admission: Annotated[
-        UsageResetCompletion | None,
-        Field(
-            alias="resetAdmission",
-            description="Present only after fresh exact reset admission succeeds.",
         ),
     ] = None
 
@@ -12399,9 +12240,6 @@ class Turn(BaseModel):
     id: Annotated[
         str, Field(description="Identifier for this turn. Codex-generated turn IDs are UUIDv7.")
     ]
-    inference_attribution: Annotated[
-        InferenceAttribution | None, Field(alias="inferenceAttribution")
-    ] = None
     items: Annotated[
         list[ThreadItem], Field(description="Thread items currently included in this turn payload.")
     ]

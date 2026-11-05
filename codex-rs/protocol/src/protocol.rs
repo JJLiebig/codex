@@ -2297,16 +2297,11 @@ impl fmt::Debug for MisalignmentSteer {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema, TS)]
+#[derive(Debug, Clone, Serialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct ErrorEvent {
-    /// Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
-    #[serde(default)]
-    pub usage_limit_observed_at_ns: Option<String>,
     pub message: String,
     #[serde(default)]
     pub codex_error_info: Option<CodexErrorInfo>,
-    #[serde(default)]
-    pub inference_attribution: Option<crate::inference_attribution::InferenceAttribution>,
     /// Sensitive explanation and steering are delivered live but never enter rollout storage.
     #[serde(skip)]
     #[schemars(skip)]
@@ -2317,11 +2312,9 @@ pub struct ErrorEvent {
 impl ErrorEvent {
     /// Whether this error should mark the current turn as failed when replaying history.
     pub fn affects_turn_status(&self) -> bool {
-        self.inference_attribution.is_some()
-            || self
-                .codex_error_info
-                .as_ref()
-                .is_none_or(CodexErrorInfo::affects_turn_status)
+        self.codex_error_info
+            .as_ref()
+            .is_none_or(CodexErrorInfo::affects_turn_status)
     }
 }
 
@@ -2384,9 +2377,6 @@ pub struct ContextCompactedEvent;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TurnCompleteEvent {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub inference_attribution: Option<crate::inference_attribution::InferenceAttribution>,
     /// Resolved causal root for this turn; absent on older or synthetic events.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -2585,9 +2575,6 @@ impl TokenUsageInfo {
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
 pub struct TokenCountEvent {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub inference_attribution: Option<crate::inference_attribution::InferenceAttribution>,
     pub info: Option<TokenUsageInfo>,
     pub rate_limits: Option<RateLimitSnapshot>,
 }
@@ -6092,8 +6079,6 @@ mod tests {
     #[test]
     fn rollback_failed_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             misalignment: None,
             message: "rollback failed".into(),
             codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
@@ -6104,8 +6089,6 @@ mod tests {
     #[test]
     fn active_turn_not_steerable_error_does_not_affect_turn_status() {
         let event = ErrorEvent {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             misalignment: None,
             message: "cannot steer a review turn".into(),
             codex_error_info: Some(CodexErrorInfo::ActiveTurnNotSteerable {
@@ -6118,8 +6101,6 @@ mod tests {
     #[test]
     fn generic_error_affects_turn_status() {
         let event = ErrorEvent {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             misalignment: None,
             message: "generic".into(),
             codex_error_info: Some(CodexErrorInfo::Other),
@@ -6130,8 +6111,6 @@ mod tests {
     #[test]
     fn misalignment_explanation_and_steer_are_never_serialized_into_error_events() {
         let event = ErrorEvent {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             message: "This request violated the misalignment policy.".to_string(),
             codex_error_info: Some(CodexErrorInfo::MisalignmentPolicyViolation),
             misalignment: Some(MisalignmentErrorDetails {
@@ -6150,8 +6129,6 @@ mod tests {
             json!({
                 "message": "This request violated the misalignment policy.",
                 "codex_error_info": "misalignment_policy_violation",
-                "usage_limit_observed_at_ns": null,
-                "inference_attribution": null
             })
         );
         let restored: ErrorEvent =

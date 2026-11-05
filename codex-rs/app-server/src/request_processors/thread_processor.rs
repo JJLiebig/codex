@@ -6419,8 +6419,6 @@ fn stored_turn_to_api_turn(
         StoredTurnStatus::InProgress => TurnStatus::InProgress,
     };
     let error = turn.error.map(|error| TurnError {
-        usage_limit_observed_at_ns: error.usage_limit_observed_at_ns,
-        inference_attribution: error.inference_attribution,
         misalignment: None,
         message: error.message,
         codex_error_info: error.codex_error_info,
@@ -6432,7 +6430,6 @@ fn stored_turn_to_api_turn(
         .map(stored_thread_item_to_api_item)
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Turn {
-        inference_attribution: turn.inference_attribution,
         id: turn.turn_id,
         root_turn_id: turn.root_turn_id,
         items,

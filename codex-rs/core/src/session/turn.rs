@@ -245,14 +245,9 @@ pub(crate) async fn run_turn(
             .await;
         // Publish the failure only after prompt hooks finish, so clients cannot react to
         // an error by steering follow-up input into a turn still preserving its prompt.
-        let message_prefix = match (
-            turn_context.provider.info().is_cli_proxy(),
-            turn_context.provider.capabilities().remote_compaction,
-        ) {
-            (false, RemoteCompactionSupport::V2) => {
-                Some("Error running remote compact task".to_string())
-            }
-            (true, _) | (_, RemoteCompactionSupport::Unsupported) => None,
+        let message_prefix = match turn_context.provider.capabilities().remote_compaction {
+            RemoteCompactionSupport::V2 => Some("Error running remote compact task".to_string()),
+            RemoteCompactionSupport::Unsupported => None,
         };
         sess.send_event(
             turn_context.as_ref(),
@@ -966,10 +961,6 @@ pub(crate) async fn run_turn(
                 )
                 .await;
                 let event = EventMsg::Error(ErrorEvent {
-                    usage_limit_observed_at_ns: codex_error
-                        .usage_limit_observed_at_ns()
-                        .map(|at| at.to_string()),
-                    inference_attribution: codex_error.inference_attribution().cloned(),
                     misalignment: None,
                     message: "Invalid image in your last message. Please remove it and try again."
                         .to_string(),
@@ -1995,17 +1986,12 @@ async fn run_sampling_request(
                             &turn_context,
                             e,
                         )
-                        .map(|replacement| replacement.with_inference_attribution_from(&err))
                         .unwrap_or(err),
                     );
                 }
                 _ => err,
             },
         };
-
-        if client_session.owned_retry_forbidden(&err) {
-            return Err(err);
-        }
 
         let retry = crate::codex_plus_plus::model_capacity_retry::handle_sampling_error(
             &mut capacity_retries,
@@ -2954,7 +2940,6 @@ async fn try_run_sampling_request(
             return Err(error);
         }
     };
-    turn_context.begin_inference_request(client_session).await;
     if cancellation_token.is_cancelled() {
         return Err(CodexErr::TurnAborted);
     }
@@ -3052,9 +3037,9 @@ async fn try_run_sampling_request(
         }
 
         let event = match event.unwrap_or_else(|| {
-            Err(client_session.attribute_owned_error(CodexErr::Stream(
+            Err(CodexErr::Stream(
                 "stream closed before response.completed".into(),
-            )))
+            ))
         }) {
             Ok(event) => event,
             Err(err) => {
@@ -3384,7 +3369,7 @@ async fn try_run_sampling_request(
             ResponseEvent::RateLimits(snapshot) => {
                 // Update internal state with latest rate limits, but defer sending until
                 // token usage is available to avoid duplicate TokenCount events.
-                sess.record_rate_limits_info(&turn_context, snapshot).await;
+                sess.record_rate_limits_info(snapshot).await;
                 should_emit_token_count = true;
             }
             ResponseEvent::ModelsEtag(etag) => {

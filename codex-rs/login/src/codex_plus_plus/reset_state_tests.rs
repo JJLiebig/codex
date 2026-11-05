@@ -74,22 +74,16 @@ fn confirmed_redemption_recovers_weekly_activation_and_completion() {
     let request_id = redeeming(&attempt).1.to_string();
     let completed_at = 100;
     let confirmed = lease
-        .confirm_redeemed("wrong-request", completed_at, /*source*/ None)
+        .confirm_redeemed("wrong-request", completed_at)
         .unwrap();
     assert!(!confirmed);
-    assert!(
-        lease
-            .confirm_redeemed(&request_id, completed_at, /*source*/ None)
-            .unwrap()
-    );
+    assert!(lease.confirm_redeemed(&request_id, completed_at).unwrap());
     let expected = ResetState {
         phase: Some(ResetAttemptPhase::ActivatingWeekly),
         completion: Some(ResetCompletion {
             id: request_id,
             completed_at: 100,
             manual: false,
-            source: None,
-            reconciliation: ResetReconciliation::Pending,
         }),
     };
     assert_eq!(lease.state().unwrap(), expected);
@@ -189,195 +183,27 @@ async fn auth_lease_uses_exact_identity_and_has_a_deadline() {
 }
 
 #[test]
-fn manual_attempt_survives_reopen_without_aliasing_sources_or_automatic_redemption() {
-    let (_home, store, account_id) = test_store();
+fn old_manual_attempt_and_completed_receipt_survive_without_repeating_redemption() {
+    let (home, store, account_id) = test_store();
+    let path = home.path().join("accounts/acct_test").join(STATE_FILE);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let old = br#"{"version":1,"phase":{"type":"manual_redeeming","redeem_request_id":"original","credit_id":"credit-a","source":"root"},"completion":{"id":"completed","completed_at":100,"manual":true,"source":"imported","reconciliation":"dispatched_unknown"}}"#;
+    std::fs::write(&path, old).unwrap();
     let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
     assert_eq!(
-        lease
-            .begin_manual("manual", ResetCredentialSource::Root, Some("credit-a"))
-            .unwrap(),
-        ManualResetAttempt::Fresh
-    );
-    let pending = lease.state().unwrap();
-    drop(lease);
-    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
-    assert_eq!(lease.state().unwrap(), pending);
-    assert_eq!(
-        lease
-            .begin_manual("manual", ResetCredentialSource::Root, Some("credit-a"))
-            .unwrap(),
-        ManualResetAttempt::Pending {
-            redeem_request_id: "manual".into(),
-            credit_id: Some("credit-a".into()),
+        lease.load_or_begin("new-credit").unwrap(),
+        ResetAttemptPhase::ManualRedeeming {
+            redeem_request_id: "original".into(),
+            credit_id: Some("credit-a".into())
         }
     );
     assert_eq!(
-        lease.load_or_begin("another-credit").unwrap(),
-        pending.phase.unwrap()
-    );
-    assert!(
-        lease
-            .begin_manual(
-                "manual",
-                ResetCredentialSource::Imported,
-                /*credit_id*/ None
-            )
-            .is_err()
-    );
-    assert_eq!(
-        lease
-            .begin_manual("different", ResetCredentialSource::Root, Some("credit-b"))
-            .unwrap(),
-        ManualResetAttempt::Pending {
-            redeem_request_id: "manual".into(),
-            credit_id: Some("credit-a".into()),
-        }
-    );
-    assert!(
-        !lease
-            .confirm_redeemed("manual", /*completed_at*/ 100, /*source*/ None)
-            .unwrap()
-    );
-    assert!(
-        !lease
-            .confirm_manual("different", /*completed_at*/ 100)
-            .unwrap()
-    );
-    assert!(
-        lease
-            .confirm_manual("manual", /*completed_at*/ 100)
-            .unwrap()
-    );
-    let completed = ResetState {
-        phase: None,
-        completion: Some(ResetCompletion {
-            id: "manual".into(),
+        lease.state().unwrap().completion,
+        Some(ResetCompletion {
+            id: "completed".into(),
             completed_at: 100,
-            manual: true,
-            source: Some(ResetCredentialSource::Root),
-            reconciliation: ResetReconciliation::Pending,
-        }),
-    };
-    assert_eq!(lease.state().unwrap(), completed);
-    drop(lease);
-    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
-    assert_eq!(
-        lease
-            .begin_manual("manual", ResetCredentialSource::Root, Some("credit-a"))
-            .unwrap(),
-        ManualResetAttempt::Completed
+            manual: true
+        })
     );
-    assert!(
-        !lease
-            .confirm_manual("manual", /*completed_at*/ 200)
-            .unwrap()
-    );
-    assert!(
-        lease
-            .begin_manual(
-                "manual",
-                ResetCredentialSource::Imported,
-                /*credit_id*/ None
-            )
-            .is_err()
-    );
-    assert_eq!(lease.state().unwrap(), completed);
-    assert_eq!(
-        lease
-            .begin_manual(
-                "new",
-                ResetCredentialSource::Imported,
-                /*credit_id*/ None
-            )
-            .unwrap(),
-        ManualResetAttempt::Fresh
-    );
-    // Pending takes precedence even when the incoming key matches an older completion.
-    assert_eq!(
-        lease
-            .begin_manual("manual", ResetCredentialSource::Imported, Some("credit-b"))
-            .unwrap(),
-        ManualResetAttempt::Pending {
-            redeem_request_id: "new".into(),
-            credit_id: None
-        }
-    );
-    assert!(!lease.clear_redeeming("manual").unwrap());
-    assert!(lease.clear_redeeming("new").unwrap());
-    assert_eq!(lease.state().unwrap(), completed);
-}
-
-#[test]
-fn proxy_receipt_survives_reopen_and_cannot_replay_or_acknowledge_a_successor() {
-    let (_home, store, account_id) = test_store();
-    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
-    lease
-        .begin_manual(
-            "reset-a",
-            ResetCredentialSource::Root,
-            /*credit_id*/ None,
-        )
-        .unwrap();
-    lease.confirm_manual("reset-a", /*completed_at*/ 1).unwrap();
-    let pending = lease.state().unwrap().completion.unwrap();
-    drop(lease);
-    assert_eq!(
-        store.pending_proxy_resets().unwrap(),
-        vec![(account_id.clone(), pending.clone())]
-    );
-    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
-    assert!(
-        !lease
-            .reconcile_proxy(&pending, ResetReconciliation::Acknowledged)
-            .unwrap()
-    );
-    assert!(
-        lease
-            .reconcile_proxy(&pending, ResetReconciliation::DispatchedUnknown)
-            .unwrap()
-    );
-    drop(lease);
-    let mut lease = store.acquire_reset_mutation_lease(&account_id).unwrap();
-    let unknown = lease.state().unwrap().completion.unwrap();
-    assert_eq!(
-        unknown.reconciliation,
-        ResetReconciliation::DispatchedUnknown
-    );
-    assert!(
-        !lease
-            .reconcile_proxy(&unknown, ResetReconciliation::Pending)
-            .unwrap()
-    );
-    assert!(
-        !lease
-            .reconcile_proxy(&pending, ResetReconciliation::DispatchedUnknown)
-            .unwrap()
-    );
-    lease
-        .begin_manual(
-            "reset-b",
-            ResetCredentialSource::Imported,
-            /*credit_id*/ None,
-        )
-        .unwrap();
-    // The prior completion cannot dispatch or acknowledge while another native reset is pending.
-    assert!(
-        !lease
-            .reconcile_proxy(&unknown, ResetReconciliation::ObservedClear)
-            .unwrap()
-    );
-    lease.confirm_manual("reset-b", /*completed_at*/ 2).unwrap();
-    let newer = lease.state().unwrap().completion.unwrap();
-    assert!(
-        !lease
-            .reconcile_proxy(&unknown, ResetReconciliation::Acknowledged)
-            .unwrap()
-    );
-    assert!(
-        lease
-            .reconcile_proxy(&newer, ResetReconciliation::ObservedClear)
-            .unwrap()
-    );
-    drop(lease);
-    assert_eq!(store.pending_proxy_resets().unwrap(), vec![]);
+    assert_eq!(std::fs::read(path).unwrap(), old);
 }

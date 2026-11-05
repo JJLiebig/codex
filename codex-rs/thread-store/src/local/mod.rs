@@ -1265,13 +1265,11 @@ mod tests {
                 ),
                 RolloutItem::EventMsg(EventMsg::TokenCount(
                     codex_protocol::protocol::TokenCountEvent {
-                        inference_attribution: None,
                         info: None,
                         rate_limits: None,
                     },
                 )),
                 RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
-                    inference_attribution: None,
                     root_turn_id: None,
                     turn_id: "turn-1".to_string(),
                     started_at: None,
@@ -1394,7 +1392,6 @@ mod tests {
         live_thread
             .append_items(&[RolloutItem::EventMsg(EventMsg::TokenCount(
                 codex_protocol::protocol::TokenCountEvent {
-                    inference_attribution: None,
                     info: None,
                     rate_limits: None,
                 },

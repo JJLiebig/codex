@@ -7,8 +7,6 @@ pub(crate) mod files;
 mod guardian_assessment;
 pub(crate) mod images;
 pub(crate) mod provider;
-#[path = "codex_plus_plus/proxy_trace.rs"]
-pub(crate) mod proxy_trace;
 pub(crate) mod rate_limits;
 pub(crate) mod requests;
 mod responses_headers;

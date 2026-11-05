@@ -1,6 +1,4 @@
 use crate::notification_media::without_notification_media;
-#[path = "codex_plus_plus/inference_failure.rs"]
-mod inference_failure;
 use crate::outgoing_message::ClientRequestResult;
 use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::request_processors::thread_settings_from_config_snapshot;
@@ -181,7 +179,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                 let state = thread_state.lock().await;
                 let turn = state.active_turn_metadata_snapshot().map(Turn::from);
                 turn.unwrap_or_else(|| Turn {
-                    inference_attribution: None,
                     id: payload.turn_id.clone(),
                     root_turn_id: payload.root_turn_id.clone(),
                     items: Vec::new(),
@@ -1051,7 +1048,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 return;
             }
 
-            let turn_error = inference_failure::error_event(ev);
+            let turn_error = turn_error_from_event(ev);
             handle_error_notification(
                 conversation_id,
                 &event_turn_id,
@@ -1065,8 +1062,6 @@ pub(crate) async fn apply_bespoke_event_handling(
             // We don't need to update the turn summary store for stream errors as they are intermediate error states for retries,
             // but we notify the client.
             let turn_error = TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: ev.message,
                 codex_error_info: ev.codex_error_info.map(V2CodexErrorInfo::from),
@@ -1192,10 +1187,9 @@ pub(crate) async fn apply_bespoke_event_handling(
                     private.thread_id,
                     event_turn_id,
                     TurnCompletionMetadata {
-                        inference_attribution: None,
                         status: TurnStatus::Interrupted,
                         root_turn_id: aborted.root_turn_id,
-                        error: aborted.error.map(inference_failure::error_event),
+                        error: aborted.error.map(turn_error_from_event),
                         last_agent_message: None,
                         started_at: aborted.started_at,
                         completed_at: aborted.completed_at,
@@ -1358,7 +1352,6 @@ async fn handle_turn_plan_update(
 }
 
 struct TurnCompletionMetadata {
-    inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     status: TurnStatus,
     root_turn_id: Option<String>,
     error: Option<TurnError>,
@@ -1381,7 +1374,6 @@ async fn emit_turn_completed_with_status(
     let notification = TurnCompletedNotification {
         thread_id: conversation_id.to_string(),
         turn: Turn {
-            inference_attribution: turn_completion_metadata.inference_attribution,
             id: event_turn_id,
             root_turn_id: turn_completion_metadata.root_turn_id,
             items,
@@ -1556,9 +1548,7 @@ async fn handle_turn_complete(
 ) {
     let turn_summary = find_and_remove_turn_summary(conversation_id, thread_state).await;
 
-    let error = turn_summary
-        .last_error
-        .or_else(|| inference_failure::completed_error(turn_complete_event.error));
+    let error = turn_summary.last_error;
     let (status, error, last_agent_message) = match error {
         Some(error) => (TurnStatus::Failed, Some(error), None),
         None => (TurnStatus::Completed, None, turn_summary.last_agent_message),
@@ -1568,7 +1558,6 @@ async fn handle_turn_complete(
         conversation_id,
         event_turn_id,
         TurnCompletionMetadata {
-            inference_attribution: turn_complete_event.inference_attribution,
             status,
             root_turn_id: turn_complete_event.root_turn_id,
             error,
@@ -1595,10 +1584,9 @@ async fn handle_turn_interrupted(
         conversation_id,
         event_turn_id,
         TurnCompletionMetadata {
-            inference_attribution: None,
             status: TurnStatus::Interrupted,
             root_turn_id: turn_aborted_event.root_turn_id,
-            error: turn_aborted_event.error.map(inference_failure::error_event),
+            error: turn_aborted_event.error.map(turn_error_from_event),
             last_agent_message: None,
             started_at: turn_summary.started_at,
             completed_at: turn_aborted_event.completed_at,
@@ -1631,14 +1619,9 @@ async fn handle_token_count_event(
     token_count_event: TokenCountEvent,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let TokenCountEvent {
-        info,
-        rate_limits,
-        inference_attribution,
-    } = token_count_event;
+    let TokenCountEvent { info, rate_limits } = token_count_event;
     if let Some(token_usage) = info.map(ThreadTokenUsage::from) {
         let notification = ThreadTokenUsageUpdatedNotification {
-            inference_attribution: inference_attribution.clone(),
             thread_id: conversation_id.to_string(),
             turn_id: turn_id.clone(),
             token_usage,
@@ -1651,13 +1634,6 @@ async fn handle_token_count_event(
         outgoing
             .send_server_notification(ServerNotification::AccountRateLimitsUpdated(
                 AccountRateLimitsUpdatedNotification {
-                    inference: inference_attribution.map(|attribution| {
-                        codex_protocol::inference_attribution::InferenceScope {
-                            thread_id: conversation_id.to_string(),
-                            turn_id,
-                            attribution,
-                        }
-                    }),
                     rate_limits: rate_limits.into(),
                 },
             ))
@@ -1896,8 +1872,6 @@ async fn on_request_permissions_response(
                 conversation_id,
                 &turn_id,
                 TurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message,
                     codex_error_info: None,
@@ -2178,6 +2152,15 @@ fn now_unix_timestamp_ms() -> i64 {
         .unwrap_or_default()
 }
 
+fn turn_error_from_event(error: codex_protocol::protocol::ErrorEvent) -> TurnError {
+    TurnError {
+        message: error.message,
+        codex_error_info: error.codex_error_info.map(Into::into),
+        additional_details: None,
+        misalignment: error.misalignment.map(Into::into),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2260,7 +2243,6 @@ mod tests {
 
     fn turn_complete_event(turn_id: &str) -> TurnCompleteEvent {
         TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: turn_id.to_string(),
             started_at: None,
@@ -3111,8 +3093,6 @@ mod tests {
         handle_error(
             conversation_id,
             TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "boom".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::InternalServerError),
@@ -3126,8 +3106,6 @@ mod tests {
         assert_eq!(
             turn_summary.last_error,
             Some(TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "boom".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::InternalServerError),
@@ -3569,8 +3547,6 @@ mod tests {
         handle_error(
             conversation_id,
             TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "oops".to_string(),
                 codex_error_info: None,
@@ -3626,8 +3602,6 @@ mod tests {
         handle_error(
             conversation_id,
             TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "bad".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::Other),
@@ -3664,8 +3638,6 @@ mod tests {
                 assert_eq!(
                     n.turn.error,
                     Some(TurnError {
-                        usage_limit_observed_at_ns: None,
-                        inference_attribution: None,
                         misalignment: None,
                         message: "bad".to_string(),
                         codex_error_info: Some(V2CodexErrorInfo::Other),
@@ -3791,7 +3763,6 @@ mod tests {
             conversation_id,
             turn_id.clone(),
             TokenCountEvent {
-                inference_attribution: None,
                 info: Some(info),
                 rate_limits: Some(rate_limits),
             },
@@ -3845,7 +3816,6 @@ mod tests {
             conversation_id,
             turn_id.clone(),
             TokenCountEvent {
-                inference_attribution: None,
                 info: None,
                 rate_limits: None,
             },
@@ -3883,8 +3853,6 @@ mod tests {
         handle_error(
             conversation_a,
             TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "a1".to_string(),
                 codex_error_info: Some(V2CodexErrorInfo::BadRequest),
@@ -3907,8 +3875,6 @@ mod tests {
         handle_error(
             conversation_b,
             TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "b1".to_string(),
                 codex_error_info: None,
@@ -3946,8 +3912,6 @@ mod tests {
                 assert_eq!(
                     n.turn.error,
                     Some(TurnError {
-                        usage_limit_observed_at_ns: None,
-                        inference_attribution: None,
                         misalignment: None,
                         message: "a1".to_string(),
                         codex_error_info: Some(V2CodexErrorInfo::BadRequest),
@@ -3967,8 +3931,6 @@ mod tests {
                 assert_eq!(
                     n.turn.error,
                     Some(TurnError {
-                        usage_limit_observed_at_ns: None,
-                        inference_attribution: None,
                         misalignment: None,
                         message: "b1".to_string(),
                         codex_error_info: None,
@@ -4032,7 +3994,3 @@ mod tests {
         Ok(())
     }
 }
-
-#[cfg(test)]
-#[path = "codex_plus_plus/inference_usage_tests.rs"]
-mod inference_usage_tests;

@@ -106,8 +106,6 @@ async fn interrupted_turn_restores_queued_messages_with_images_and_elements() {
 async fn entered_review_mode_uses_request_hint() {
     let (mut chat, mut rx, _ops) = make_chatwidget_manual(/*model_override*/ None).await;
 
-    chat.config.model_provider =
-        codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
     chat.thread_id = Some(ThreadId::new());
     handle_turn_started(&mut chat, "review-child");
     handle_entered_review_mode(&mut chat, "feature branch");
@@ -394,8 +392,6 @@ async fn failed_turn_completion_preserves_queued_review_start() {
                 AppServerTurnStatus::Failed,
                 /*duration_ms*/ None,
                 Some(AppServerTurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     message: ERROR.to_string(),
                     codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
                     additional_details: None,
@@ -1312,7 +1308,6 @@ async fn interrupted_turn_after_goal_budget_limited_uses_budget_message_snapshot
             codex_app_server_protocol::TurnStartedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: codex_app_server_protocol::Turn {
-                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1351,7 +1346,6 @@ async fn interrupted_turn_after_goal_budget_limited_uses_budget_message_snapshot
             codex_app_server_protocol::TurnCompletedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: codex_app_server_protocol::Turn {
-                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,

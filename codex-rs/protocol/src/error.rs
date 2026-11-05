@@ -37,9 +37,6 @@ pub use agent::AgentErrorContext;
 
 pub type Result<T> = std::result::Result<T, CodexErr>;
 
-#[path = "codex_plus_plus/attributed_error.rs"]
-mod attributed_error;
-
 /// Limit UI error messages to a reasonable size while keeping useful context.
 const ERROR_MESSAGE_UI_MAX_BYTES: usize = 2 * 1024;
 
@@ -81,8 +78,6 @@ pub enum SandboxErr {
 pub struct CodexErr {
     details: CodexErrorDetails,
     retry_after: Option<RetryAfter>,
-    usage_limit_observed_at_ns: Option<i64>,
-    inference_attribution: Option<Box<crate::inference_attribution::InferenceAttribution>>,
     agent_context: Option<AgentErrorContext>,
 }
 
@@ -274,8 +269,6 @@ impl From<CodexErrorDetails> for CodexErr {
         Self {
             details,
             retry_after: None,
-            usage_limit_observed_at_ns: None,
-            inference_attribution: None,
             agent_context: None,
         }
     }
@@ -341,8 +334,6 @@ macro_rules! codex_err_unit_constructors {
             pub const $variant: Self = Self {
                 details: CodexErrorDetails::$variant,
                 retry_after: None,
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 agent_context: None,
             };
         )*
@@ -560,8 +551,6 @@ impl CodexErr {
         ErrorEvent {
             message,
             codex_error_info: Some(self.to_codex_protocol_error()),
-            usage_limit_observed_at_ns: self.usage_limit_observed_at_ns().map(|at| at.to_string()),
-            inference_attribution: self.inference_attribution.as_deref().cloned(),
             misalignment: match &self.details {
                 CodexErrorDetails::MisalignmentPolicyViolation { misalignment, .. } => {
                     misalignment.clone()

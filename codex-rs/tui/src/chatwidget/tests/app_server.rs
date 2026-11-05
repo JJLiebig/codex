@@ -194,7 +194,6 @@ fn start_safety_buffering_test_turn(
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: thread_id.to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: turn_id.to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -911,7 +910,6 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -961,7 +959,6 @@ async fn live_app_server_turn_completed_clears_working_status_after_answer_item(
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Summary,
@@ -1000,7 +997,6 @@ async fn live_app_server_turn_started_sets_feedback_turn_id() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1668,7 +1664,6 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1686,8 +1681,6 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "permission denied".to_string(),
                 codex_error_info: None,
@@ -1707,15 +1700,12 @@ async fn live_app_server_failed_turn_does_not_duplicate_error_history() {
         ServerNotification::TurnCompleted(TurnCompletedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
                 items: Vec::new(),
                 status: AppServerTurnStatus::Failed,
                 error: Some(AppServerTurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message: "permission denied".to_string(),
                     codex_error_info: None,
@@ -1884,7 +1874,6 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1903,8 +1892,6 @@ async fn live_app_server_stream_recovery_restores_previous_status_header() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "Reconnecting... 1/5".to_string(),
                 codex_error_info: Some(CodexErrorInfo::Other),
@@ -1974,7 +1961,6 @@ async fn live_app_server_server_overloaded_error_renders_error() {
             ServerNotification::TurnStarted(TurnStartedNotification {
                 thread_id: "thread-1".to_string(),
                 turn: AppServerTurn {
-                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1993,8 +1979,6 @@ async fn live_app_server_server_overloaded_error_renders_error() {
         chat.handle_server_notification(
             ServerNotification::Error(ErrorNotification {
                 error: AppServerTurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message: message.to_string(),
                     codex_error_info: Some(error_info),
@@ -2029,7 +2013,6 @@ async fn live_app_server_cyber_policy_error_renders_dedicated_notice() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -2048,8 +2031,6 @@ async fn live_app_server_cyber_policy_error_renders_dedicated_notice() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "server fallback message".to_string(),
                 codex_error_info: Some(CodexErrorInfo::CyberPolicy),
@@ -2094,16 +2075,8 @@ async fn app_server_safety_access_errors_render_dedicated_notice() {
     let mut rendered_cases = Vec::new();
     for (case, message) in cases {
         let (mut chat, mut rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-        for attribution in [
-            None,
-            Some(codex_protocol::inference_attribution::InferenceAttribution::Claude),
-        ] {
-            chat.handle_non_retry_error(
-                message.clone(),
-                /*codex_error_info*/ None,
-                attribution,
-            );
-
+        {
+            chat.handle_non_retry_error(message.clone(), /*codex_error_info*/ None);
             let cells = drain_insert_history(&mut rx);
             assert_eq!(cells.len(), 1);
             let rendered = lines_to_single_string(&cells[0]);

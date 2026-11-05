@@ -292,8 +292,6 @@ async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
         .await
         .unwrap();
     config.chatgpt_base_url = server.uri();
-    config.model_provider =
-        codex_model_provider_info::ModelProviderInfo::create_cli_proxy_provider();
     let auth = CodexAuth::from_external_chatgpt_tokens(
         TEST_ID_TOKEN,
         "account-123",
@@ -350,8 +348,6 @@ async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
                 id: redeem_request_id,
                 completed_at: completed.completion.as_ref().unwrap().completed_at,
                 manual: false,
-                source: Some(ResetCredentialSource::Imported),
-                reconciliation: codex_login::ResetReconciliation::Pending,
             }),
         }
     );
@@ -390,7 +386,6 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
         .confirm_redeemed(
             &redeem_request_id,
             Utc::now().timestamp_nanos_opt().unwrap(),
-            Some(ResetCredentialSource::Imported),
         )
         .unwrap();
     drop(lease);
@@ -407,82 +402,14 @@ fn completion_notice_precedes_ready_signals_until_recovery_finishes() {
         .unwrap()
         .finish_weekly_activation()
         .unwrap();
-    notices.poll(&store, &tx);
-    assert!(
-        events.try_recv().is_err(),
-        "native activation alone cannot acknowledge the proxy"
-    );
-    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
-    let completion = lease.state().unwrap().completion.unwrap();
-    lease
-        .reconcile_proxy(&completion, codex_login::ResetReconciliation::ObservedClear)
-        .unwrap();
-    drop(lease);
     for _ in 0..2 {
         notices.poll(&store, &tx);
-        let AppEvent::UsageResetCompleted {
-            account_id,
-            completed_at,
-            completion: Some(actual),
-        } = events.try_recv().unwrap()
-        else {
-            panic!("exact completion notice");
-        };
-        assert_eq!(
-            (account_id, completed_at, actual),
-            (
-                id.clone(),
-                completion.completed_at,
-                codex_app_server_protocol::UsageResetCompletion {
-                    id: completion.id.clone(),
-                    source: codex_protocol::inference_attribution::InferenceNativeSource::Imported,
-                    account_id: id.to_string(),
-                    completed_at: completion.completed_at / 1_000_000_000,
-                    completed_at_ns: completion.completed_at.to_string(),
-                }
-            )
+        assert!(
+            matches!(events.try_recv(), Ok(AppEvent::UsageResetCompleted { account_id, .. }) if account_id == id)
         );
         assert!(
             events.try_recv().is_err(),
             "redemption notice must remain deduplicated"
         );
     }
-}
-
-#[tokio::test]
-async fn pending_manual_attempt_skips_automatic_redemption_and_completion_notices() {
-    let home = tempfile::tempdir().unwrap();
-    let store = AccountStore::new(home.path().into());
-    let id: AccountId = serde_json::from_str("\"acct_test\"").unwrap();
-    let config = crate::legacy_core::config::ConfigBuilder::default()
-        .codex_home(home.path().into())
-        .build()
-        .await
-        .unwrap();
-    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
-    lease
-        .begin_manual(
-            "manual",
-            ResetCredentialSource::Imported,
-            /*credit_id*/ None,
-        )
-        .unwrap();
-    let pending = lease.state().unwrap();
-    drop(lease);
-    // No profile or auth is available: touching either would fail this scan.
-    process_account(&config, &store, &id, settings(), &FreshRedemption::Allowed)
-        .await
-        .unwrap();
-    let mut notices = CompletionNotices::new();
-    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
-    assert_eq!(lease.state().unwrap(), pending);
-    lease
-        .confirm_manual("manual", Utc::now().timestamp_nanos_opt().unwrap())
-        .unwrap();
-    drop(lease);
-    std::fs::write(home.path().join("accounts/index.json"),
-        r#"{"accounts":[{"id":"acct_test","label":"Primary","auth":{"scope":"file","path":"accounts/acct_test/auth.json"}}]}"#).unwrap();
-    let (tx, mut events) = tokio::sync::mpsc::unbounded_channel();
-    notices.poll(&store, &AppEventSender::new(tx));
-    assert!(events.try_recv().is_err());
 }

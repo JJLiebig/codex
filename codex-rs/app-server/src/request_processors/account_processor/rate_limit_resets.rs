@@ -52,7 +52,7 @@ impl AccountRequestProcessor {
             return Err(invalid_request("creditId must not be empty"));
         }
 
-        let (response, reset_completion) = reset_credit::consume(self, &params).await?;
+        let response = reset_credit::consume(self, &params).await?;
         let outcome = match response.code {
             BackendConsumeRateLimitResetCreditCode::Reset => {
                 ConsumeAccountRateLimitResetCreditOutcome::Reset
@@ -68,11 +68,7 @@ impl AccountRequestProcessor {
             }
         };
         Ok(Some(
-            ConsumeAccountRateLimitResetCreditResponse {
-                outcome,
-                reset_completion,
-            }
-            .into(),
+            ConsumeAccountRateLimitResetCreditResponse { outcome }.into(),
         ))
     }
 }

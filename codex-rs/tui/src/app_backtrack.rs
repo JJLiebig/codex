@@ -828,7 +828,6 @@ mod tests {
 
     fn turn(turn_id: &str, status: TurnStatus, user_messages: usize) -> Turn {
         Turn {
-            inference_attribution: None,
             id: turn_id.to_string(),
             root_turn_id: None,
             items: (0..user_messages)

@@ -29,8 +29,6 @@ mod environment;
 pub mod error;
 pub mod exec_output;
 pub mod hooks;
-#[path = "codex_plus_plus/inference_attribution.rs"]
-pub mod inference_attribution;
 pub mod items;
 mod legacy_events;
 pub mod local_media;
@@ -59,3 +57,6 @@ pub mod security_risk;
 pub mod shell_environment;
 pub mod turn_input;
 pub mod user_input;
+
+#[path = "codex_plus_plus/legacy_error.rs"]
+mod legacy_error;

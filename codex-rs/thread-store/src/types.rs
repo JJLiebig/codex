@@ -427,11 +427,6 @@ pub enum StoredTurnStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredTurnError {
-    /// Exact host quota observation as decimal Unix nanoseconds, without JavaScript integer loss.
-    #[serde(default)]
-    pub usage_limit_observed_at_ns: Option<String>,
-    #[serde(default)]
-    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// User-visible error message.
     pub message: String,
     /// Structured Codex error classification, when available.
@@ -460,8 +455,6 @@ pub struct ListTurnsParams {
 /// Store-owned turn representation used by turn pagination APIs.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct StoredTurn {
-    #[serde(default)]
-    pub inference_attribution: Option<codex_protocol::inference_attribution::InferenceAttribution>,
     /// Turn id.
     pub turn_id: String,
     /// Causal root recorded for this turn. Older projected turns may not have one.

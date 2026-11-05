@@ -332,7 +332,6 @@ mod thread_processor_behavior_tests {
             },
         ))];
         let active_turn = Turn {
-            inference_attribution: None,
             id: "live-turn".to_string(),
             root_turn_id: None,
             items: vec![ThreadItem::untimed(ThreadItemPayload::UserMessage {

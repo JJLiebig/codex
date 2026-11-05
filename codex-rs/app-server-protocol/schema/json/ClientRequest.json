@@ -637,13 +637,6 @@
         "idempotencyKey": {
           "description": "Identifies one logical reset attempt. A UUID is recommended; reuse the same value when retrying that attempt.",
           "type": "string"
-        },
-        "threadId": {
-          "description": "Optional loaded thread whose provider needs source-bound reset completion.",
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -1671,17 +1664,6 @@
           "description": "Skip the separate reset-credit detail lookup for background usage polls. The usage response still includes the available count; omitted/false preserves detailed reads.",
           "type": "boolean"
         },
-        "resetAdmission": {
-          "anyOf": [
-            {
-              "$ref": "#/definitions/UsageResetTargetParams"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Read-only reset admission for an exact failed native source."
-        },
         "supportsLunaReserve": {
           "description": "The client supports automatic Luna Reserve fallback. For eligible ChatGPT CLI users, allow the backend to record experiment exposure after ordinary usage is blocked.",
           "type": "boolean"
@@ -1737,13 +1719,6 @@
         "low",
         "high",
         "original"
-      ],
-      "type": "string"
-    },
-    "InferenceNativeSource": {
-      "enum": [
-        "root",
-        "imported"
       ],
       "type": "string"
     },
@@ -6096,50 +6071,6 @@
       "required": [
         "name",
         "output"
-      ],
-      "type": "object"
-    },
-    "UsageResetTargetParams": {
-      "description": "An existing live wait's exact native source; this read never changes account selection.",
-      "properties": {
-        "accountId": {
-          "type": "string"
-        },
-        "completionId": {
-          "description": "When supplied, admission requires this exact durable completion.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "failedAt": {
-          "description": "Earliest eligible completion, in Unix seconds on the inference host.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "failedAtNs": {
-          "description": "Exact host quota observation. Decimal Unix nanoseconds avoid rounding away reset ordering.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "source": {
-          "$ref": "#/definitions/InferenceNativeSource"
-        },
-        "threadId": {
-          "type": "string"
-        },
-        "turnId": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "accountId",
-        "failedAt",
-        "source",
-        "threadId",
-        "turnId"
       ],
       "type": "object"
     },

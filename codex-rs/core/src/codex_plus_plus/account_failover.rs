@@ -51,19 +51,6 @@ pub(crate) async fn switch_and_report(
     turn_context: &TurnContext,
     usage_limit: &UsageLimitReachedError,
 ) -> Result<UsageLimitFailoverOutcome, CodexErr> {
-    if let Some(outcome) = client_session
-        .switch_owned_quota(attempted_account_ids, usage_limit)
-        .await
-        .map_err(|error| client_session.attribute_owned_error(error))?
-    {
-        report_tracked_client_failovers(client_session, attempted_account_ids, sess, turn_context)
-            .await;
-        return Ok(if outcome == ImportedAccountSwitchOutcome::ReadyToRetry {
-            UsageLimitFailoverOutcome::Retried
-        } else {
-            UsageLimitFailoverOutcome::Unavailable
-        });
-    }
     if let Some(rate_limits) = usage_limit.rate_limits.clone() {
         sess.update_rate_limits(turn_context, *rate_limits).await;
     }

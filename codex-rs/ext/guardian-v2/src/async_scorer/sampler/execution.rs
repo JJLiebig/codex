@@ -106,16 +106,7 @@ impl SamplingExecution {
         error: &LunaSamplerError,
         auth_recovery: &mut Option<UnauthorizedRecovery>,
         retries: &mut usize,
-        lease: Option<&super::connection_pool::ConnectionLease>,
     ) -> bool {
-        if let Some(lease) = lease
-            && let Some(retry) = lease.retry_owned_auth(error, auth_recovery).await
-        {
-            if retry {
-                self.connections.clear();
-            }
-            return retry;
-        }
         let retryable = match error {
             LunaSamplerError::ConnectionTimeout
             | LunaSamplerError::Api(
@@ -163,8 +154,8 @@ impl SamplingExecution {
                 )
                 | ApiError::ContextWindowExceeded
                 | ApiError::ResponseIncomplete(_)
-                | ApiError::QuotaExceeded
                 | ApiError::UsageLimitReached { .. }
+                | ApiError::QuotaExceeded
                 | ApiError::UsageNotIncluded
                 | ApiError::RateLimit(_)
                 | ApiError::InvalidRequest { .. }
@@ -246,12 +237,7 @@ impl SamplingExecution {
                 Ok(lease) => lease,
                 Err(error) => {
                     if self
-                        .retry_after_failure(
-                            &error,
-                            &mut auth_recovery,
-                            &mut retries,
-                            /*lease*/ None,
-                        )
+                        .retry_after_failure(&error, &mut auth_recovery, &mut retries)
                         .await
                     {
                         continue;
@@ -322,7 +308,7 @@ impl SamplingExecution {
                 Err(error) => {
                     let error = LunaSamplerError::Api(error);
                     if self
-                        .retry_after_failure(&error, &mut auth_recovery, &mut retries, Some(&lease))
+                        .retry_after_failure(&error, &mut auth_recovery, &mut retries)
                         .await
                     {
                         continue;
@@ -333,7 +319,6 @@ impl SamplingExecution {
 
             let mut response = PendingResponse::new(stream, lease, self.config.metrics.clone());
             let mut output = String::new();
-            let mut accepted_output = false;
             while let Some(event) = tokio::select! {
                 biased;
                 _ = &mut owner_changed => return Err(account_changed_error()),
@@ -347,24 +332,15 @@ impl SamplingExecution {
                         if completion.ready.is_none() {
                             return Err(error);
                         }
-                        if !accepted_output
-                            && self
-                                .retry_after_failure(
-                                    &error,
-                                    &mut auth_recovery,
-                                    &mut retries,
-                                    response.lease(),
-                                )
-                                .await
+                        if self
+                            .retry_after_failure(&error, &mut auth_recovery, &mut retries)
+                            .await
                         {
                             continue 'retry;
                         }
                         return Err(error);
                     }
                 };
-                accepted_output |= response
-                    .lease()
-                    .is_some_and(|lease| lease.accepts_owned_output(&event));
                 match event {
                     ResponseEvent::OutputTextDelta(delta) => {
                         if completion.ready.is_none() {

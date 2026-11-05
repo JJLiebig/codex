@@ -6,5 +6,4 @@ pub(crate) enum StatusAccountDisplay {
         workspace: Option<String>,
     },
     ApiKey,
-    Inference(String),
 }

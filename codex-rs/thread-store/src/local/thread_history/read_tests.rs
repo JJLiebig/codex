@@ -110,10 +110,6 @@ async fn list_turns_pages_projected_rows_and_applies_item_views() {
     assert_eq!(
         first_page.turns[1].error,
         Some(StoredTurnError {
-            usage_limit_observed_at_ns: None,
-            inference_attribution: Some(
-                codex_protocol::inference_attribution::InferenceAttribution::Claude
-            ),
             message: "turn failed".to_string(),
             codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
             additional_details: Some("retry later".to_string()),

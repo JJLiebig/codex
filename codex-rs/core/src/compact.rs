@@ -385,25 +385,6 @@ async fn run_compact_task_inner_impl(
                 return Err(e);
             }
             Err(e) => {
-                if let CodexErrorDetails::UsageLimitReached(usage) = e.details()
-                    && client_session.owned_quota_attribution().is_some()
-                {
-                    let outcome = crate::codex_plus_plus::account_failover::switch_and_report(
-                        &mut client_session,
-                        usage_limit_account_attempts,
-                        &sess,
-                        turn_context.as_ref(),
-                        usage,
-                    )
-                    .await?;
-                    if matches!(outcome, crate::codex_plus_plus::account_failover::UsageLimitFailoverOutcome::Retried) {
-                        continue;
-                    }
-                    return Err(e);
-                }
-                if client_session.owned_retry_forbidden(&e) {
-                    return Err(e);
-                }
                 if retries < max_retries {
                     retries += 1;
                     let delay = backoff(retries);
@@ -428,9 +409,9 @@ async fn run_compact_task_inner_impl(
         get_last_assistant_message_from_turn(compaction_response.output.iter())
             .filter(|summary| !summary.trim().is_empty())
             .ok_or_else(|| {
-                client_session.attribute_owned_error(CodexErr::Stream(
+                CodexErr::Stream(
                     "Post-turn compaction completed without an assistant summary".into(),
-                ))
+                )
             })?
     } else {
         get_last_assistant_message_from_turn(history_snapshot.raw_items()).unwrap_or_default()
@@ -893,14 +874,13 @@ async fn drain_to_completed(
     )
     .await;
     let mut stream = stream?;
-    turn_context.begin_inference_request(client_session).await;
     let mut output = Vec::new();
     loop {
         let maybe_event = stream.next().await;
         let Some(event) = maybe_event else {
-            return Err(client_session.attribute_owned_error(CodexErr::Stream(
+            return Err(CodexErr::Stream(
                 "stream closed before response.completed".into(),
-            )));
+            ));
         };
         match event {
             // Keep each attempt isolated until the response completes successfully.

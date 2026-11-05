@@ -247,8 +247,6 @@ async fn replayed_turn_completions_do_not_start_live_billing_refreshes() {
             (
                 TurnStatus::Failed,
                 Some(TurnError {
-                    usage_limit_observed_at_ns: None,
-                    inference_attribution: None,
                     misalignment: None,
                     message: "the replayed turn failed".to_string(),
                     codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
@@ -276,7 +274,6 @@ async fn replayed_turn_completions_do_not_start_live_billing_refreshes() {
 
             chat.replay_thread_turns(
                 vec![Turn {
-                    inference_attribution: None,
                     id: "replayed-turn".to_string(),
                     root_turn_id: None,
                     items: Vec::new(),
@@ -329,8 +326,6 @@ async fn replayed_errors_do_not_start_live_billing_refreshes() {
 
         let notification = ServerNotification::Error(ErrorNotification {
             error: TurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "the replayed turn failed".to_string(),
                 codex_error_info: Some(CodexErrorInfo::ServerOverloaded),

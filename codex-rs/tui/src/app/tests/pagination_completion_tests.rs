@@ -95,7 +95,6 @@ pub(super) async fn completed_history_app(
             })
         }));
         events.push(EventMsg::TurnComplete(TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id,
             last_agent_message: Some(format!("{name} answer")),

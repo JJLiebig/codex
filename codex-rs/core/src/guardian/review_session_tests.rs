@@ -225,7 +225,6 @@ fn turn_complete_event(
     Event {
         id: turn_id.to_string(),
         msg: EventMsg::TurnComplete(TurnCompleteEvent {
-            inference_attribution: None,
             root_turn_id: None,
             turn_id: turn_id.to_string(),
             started_at: None,
@@ -802,8 +801,6 @@ async fn wait_for_guardian_review_ignores_prior_turn_errors() {
         .send(Event {
             id: "prior-turn".to_string(),
             msg: EventMsg::Error(ErrorEvent {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "stale guardian error".to_string(),
                 codex_error_info: None,
@@ -852,8 +849,6 @@ async fn wait_for_guardian_review_preserves_structured_session_error() {
         .send(Event {
             id: "current-turn".to_string(),
             msg: EventMsg::Error(ErrorEvent {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "temporary failure".to_string(),
                 codex_error_info: Some(CodexErrorInfo::ServerOverloaded),

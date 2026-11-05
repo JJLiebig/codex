@@ -3082,7 +3082,6 @@ mod tests {
     #[test]
     fn app_server_rate_limit_snapshots_deduplicates_top_level_limit_from_map() {
         let response = GetAccountRateLimitsResponse {
-            reset_admission: None,
             ordinary_usage_allowed: None,
             account_id: None,
             rate_limit_upsell: None,
@@ -4561,7 +4560,6 @@ mod tests {
                 git_info: None,
                 name: None,
                 turns: vec![Turn {
-                    inference_attribution: None,
                     id: "turn-1".to_string(),
                     root_turn_id: None,
                     items_view: codex_app_server_protocol::TurnItemsView::Full,

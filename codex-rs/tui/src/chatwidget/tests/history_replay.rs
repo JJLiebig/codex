@@ -149,8 +149,6 @@ async fn replayed_failed_turns_preserve_overload_warnings_between_retries() {
             /*duration_ms*/ None,
             /*error*/
             Some(AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: error_message.to_string(),
                 codex_error_info: Some(CodexErrorInfo::ServerOverloaded),
@@ -1192,7 +1190,6 @@ async fn replayed_retryable_app_server_error_keeps_turn_running() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1211,8 +1208,6 @@ async fn replayed_retryable_app_server_error_keeps_turn_running() {
     chat.handle_server_notification(
         ServerNotification::Error(ErrorNotification {
             error: AppServerTurnError {
-                usage_limit_observed_at_ns: None,
-                inference_attribution: None,
                 misalignment: None,
                 message: "Reconnecting... 1/5".to_string(),
                 codex_error_info: None,
@@ -1528,7 +1523,6 @@ async fn live_reasoning_summary_is_not_rendered_twice_when_item_completes() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -1590,7 +1584,6 @@ async fn live_reasoning_summary_drops_empty_parts_without_losing_content() {
         ServerNotification::TurnStarted(TurnStartedNotification {
             thread_id: "thread-1".to_string(),
             turn: AppServerTurn {
-                inference_attribution: None,
                 id: "turn-1".to_string(),
                 root_turn_id: None,
                 items_view: codex_app_server_protocol::TurnItemsView::Full,

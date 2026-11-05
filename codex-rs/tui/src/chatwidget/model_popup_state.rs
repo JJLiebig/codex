@@ -43,13 +43,12 @@ impl ChatWidget {
         let Ok(presets) = result else {
             return false;
         };
-        if self.ignore_empty_model_catalogue(&presets)
+        if presets.is_empty()
             || self.model_catalog.try_list_models().ok().as_ref() == Some(&presets)
         {
             return false;
         }
         Arc::make_mut(&mut self.model_catalog).models = presets;
-        self.dismiss_stale_owned_reasoning_choices();
         self.set_daybreak_enabled(self.daybreak_enabled);
         self.refresh_effective_service_tier();
         self.refresh_model_dependent_surfaces();

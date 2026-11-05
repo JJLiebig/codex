@@ -364,7 +364,6 @@ async fn run_remote_compaction_request_v2(
         .await;
         let result = match stream {
             Ok(stream) => {
-                turn_context.begin_inference_request(client_session).await;
                 collect_compaction_output(
                     sess,
                     turn_context,
@@ -374,11 +373,9 @@ async fn run_remote_compaction_request_v2(
                 .await
             }
             Err(err) => Err(err),
-        }
-        .map_err(|error| client_session.attribute_owned_error(error));
+        };
         match result {
             Ok(compaction_output) => return Ok(compaction_output),
-            Err(err) if client_session.owned_retry_forbidden(&err) => return Err(err),
             Err(err) if matches!(err.details(), CodexErrorDetails::UsageLimitReached(_)) => {
                 let CodexErrorDetails::UsageLimitReached(usage_limit) = err.details() else {
                     unreachable!();
@@ -482,11 +479,7 @@ async fn collect_compaction_output(
                     }
                 }
             }
-            ResponseEvent::RateLimits(snapshot) => {
-                if matches!(request_kind, CompactionRequestKind::Foreground) {
-                    turn_context.record_inference_rate_limits(&snapshot).await;
-                }
-            }
+            ResponseEvent::RateLimits(_) => {}
             ResponseEvent::Completed {
                 response_id,
                 token_usage,

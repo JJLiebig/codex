@@ -371,7 +371,6 @@ pub struct TurnContext {
     pub(crate) turn_metadata_state: Arc<TurnMetadataState>,
     pub(crate) extension_data: Arc<codex_extension_api::ExtensionData>,
     pub(crate) turn_timing_state: Arc<TurnTimingState>,
-    pub(crate) inference_usage: Arc<Mutex<crate::codex_plus_plus::inference_usage::InferenceUsage>>,
     pub(crate) terminal_error: Arc<Mutex<Option<ErrorEvent>>>,
     /// Shares the session-owned store; session approvals remain live across turns.
     session_grants: Arc<StdMutex<HashMap<String, AdditionalPermissionProfile>>>,
@@ -455,7 +454,6 @@ impl TurnContext {
             turn_metadata_state,
             extension_data,
             turn_timing_state: Arc::new(TurnTimingState::default()),
-            inference_usage: Default::default(),
             terminal_error: Arc::new(Mutex::new(None)),
             session_grants: Arc::clone(&self.session_grants),
             turn_grants: Arc::default(),
@@ -867,7 +865,6 @@ impl TurnContext {
             turn_metadata_state: self.turn_metadata_state.clone(),
             extension_data: Arc::clone(&self.extension_data),
             turn_timing_state: Arc::clone(&self.turn_timing_state),
-            inference_usage: Arc::clone(&self.inference_usage),
             terminal_error: Arc::clone(&self.terminal_error),
             session_grants: Arc::clone(&self.session_grants),
             turn_grants: Arc::clone(&self.turn_grants),
@@ -1152,7 +1149,6 @@ impl Session {
             turn_metadata_state,
             extension_data,
             turn_timing_state: Arc::new(TurnTimingState::default()),
-            inference_usage: Default::default(),
             terminal_error: Arc::new(Mutex::new(None)),
             session_grants,
             turn_grants: Arc::default(),
@@ -1199,8 +1195,6 @@ impl Session {
                 self.send_event_raw(Event {
                     id: sub_id,
                     msg: EventMsg::Error(ErrorEvent {
-                        usage_limit_observed_at_ns: None,
-                        inference_attribution: None,
                         misalignment: None,
                         message: message.clone(),
                         codex_error_info: Some(CodexErrorInfo::BadRequest),

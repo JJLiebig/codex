@@ -378,7 +378,6 @@ fn folding_a_reasoning_only_page_retains_its_find_and_copy_revision() {
         content: Vec::new(),
     };
     let current = Turn {
-        inference_attribution: None,
         id: "turn".to_owned(),
         root_turn_id: None,
         items: vec![call, ThreadItem::untimed(reasoning)],

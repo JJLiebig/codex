@@ -10,7 +10,6 @@ async fn replay_preserves_typed_updates_before_voice_steers_the_turn() {
     chat.thread_id = Some(ThreadId::new());
     chat.replay_thread_turns(
         vec![Turn {
-            inference_attribution: None,
             id: "typed-then-voice".into(),
             root_turn_id: None,
             items: vec![
@@ -81,7 +80,6 @@ async fn in_progress_voice_replay_restores_the_late_reasoning_guard() {
         user_item("<realtime_delegation><input>question</input></realtime_delegation>");
     chat.replay_thread_turns(
         vec![Turn {
-            inference_attribution: None,
             id: "saved-voice-turn".into(),
             root_turn_id: None,
             items: vec![ThreadItem::untimed(voice_request.clone())],

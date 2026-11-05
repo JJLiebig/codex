@@ -119,7 +119,6 @@ async fn prompt_cache_survives_background_completion_rebuild_and_switch() {
     );
     let mut resumed_store = crate::app::thread_events::ThreadEventStore::new(/*capacity*/ 8);
     resumed_store.set_turns(vec![codex_app_server_protocol::Turn {
-        inference_attribution: None,
         id: "previous".into(),
         root_turn_id: None,
         items_view: codex_app_server_protocol::TurnItemsView::Full,

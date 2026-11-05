@@ -101,7 +101,6 @@ pub fn spawn_response_stream(
     ResponseStream {
         routing_affinity: None,
         rx_event,
-        proxy_trace_id: crate::proxy_trace::from_headers(&stream_response.headers),
         upstream_request_id,
         interrupt: None,
     }

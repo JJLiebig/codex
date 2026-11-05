@@ -22,7 +22,6 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
     match &line.item {
         RolloutItem::EventMsg(EventMsg::TurnStarted(event)) => ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
-                inference_attribution: None,
                 turn_id: event.turn_id.clone(),
                 root_turn_id: event.root_turn_id.clone(),
                 status: TurnStatus::InProgress,
@@ -35,7 +34,6 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
         },
         RolloutItem::EventMsg(EventMsg::TurnComplete(event)) => ThreadHistoryChangeSet {
             changed_turns: vec![ThreadHistoryTurnMetadata {
-                inference_attribution: event.inference_attribution.clone(),
                 turn_id: event.turn_id.clone(),
                 root_turn_id: event.root_turn_id.clone(),
                 status: if event.error.is_some() {
@@ -44,8 +42,6 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
                     TurnStatus::Completed
                 },
                 error: event.error.as_ref().map(|error| TurnError {
-                    usage_limit_observed_at_ns: error.usage_limit_observed_at_ns.clone(),
-                    inference_attribution: error.inference_attribution.clone(),
                     misalignment: error.misalignment.clone().map(Into::into),
                     message: error.message.clone(),
                     codex_error_info: error.codex_error_info.clone().map(Into::into),
@@ -63,13 +59,10 @@ pub fn project_rollout_line(line: &RolloutLine) -> ThreadHistoryChangeSet {
             };
             ThreadHistoryChangeSet {
                 changed_turns: vec![ThreadHistoryTurnMetadata {
-                    inference_attribution: None,
                     turn_id: turn_id.clone(),
                     root_turn_id: event.root_turn_id.clone(),
                     status: TurnStatus::Interrupted,
                     error: event.error.as_ref().map(|error| TurnError {
-                        usage_limit_observed_at_ns: error.usage_limit_observed_at_ns.clone(),
-                        inference_attribution: error.inference_attribution.clone(),
                         message: error.message.clone(),
                         codex_error_info: error.codex_error_info.clone().map(Into::into),
                         misalignment: error.misalignment.clone().map(Into::into),
