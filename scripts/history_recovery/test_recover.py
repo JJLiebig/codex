@@ -73,6 +73,7 @@ class RecoveryTests(unittest.TestCase):
             expected=state,
             stopped=True,
             backup_dir=self.root / "backup",
+            target_profile=recovery.TARGET_PROFILE,
         )
 
     def test_repair_and_backup_preserve_committed_data_in_both_journal_modes(self):
@@ -83,6 +84,9 @@ class RecoveryTests(unittest.TestCase):
                     self.root = Path(folder)
                     self.path = self.root / "thread_history_1.sqlite"
                     db = self.fixture(journal=journal, newline="crlf")
+                    db.execute(
+                        "UPDATE _sqlx_migrations SET execution_time=-1 WHERE version=9"
+                    )
                     if journal == "wal":
                         self.assertGreater(
                             self.path.with_name(self.path.name + "-wal").stat().st_size,
@@ -143,7 +147,7 @@ class RecoveryTests(unittest.TestCase):
             ):
                 self.root = Path(folder)
                 self.path = self.root / "thread_history_1.sqlite"
-                db = self.fixture(state, newline="crlf", version=version)
+                db = self.fixture(state, newline="lf", version=version)
                 before_schema = recovery.schema(db)
                 self.assertEqual(self.apply(state)["normalize"], [])
                 self.assertEqual(recovery.schema(db), before_schema)
@@ -212,7 +216,6 @@ class RecoveryTests(unittest.TestCase):
                 self.apply()
         self.assertEqual(recovery.fingerprint(db), before)
 
-
     def test_revalidation_rejects_intervening_commit(self):
         db = self.fixture()
         original_connect = recovery.connect
@@ -222,8 +225,9 @@ class RecoveryTests(unittest.TestCase):
                 db.execute("UPDATE thread_turns SET status='intervening-writer'")
             return original_connect(path, mode)
 
-        with patch.object(recovery, "connect", intervene), self.assertRaisesRegex(
-            recovery.Refused, "changed since inspection"
+        with (
+            patch.object(recovery, "connect", intervene),
+            self.assertRaisesRegex(recovery.Refused, "changed since inspection"),
         ):
             self.apply()
         self.assertEqual(recovery.classify(db, self.target)[0], "mixed")

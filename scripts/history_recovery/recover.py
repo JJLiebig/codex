@@ -14,7 +14,8 @@ import sys
 import time
 
 
-MANIFEST_SHA256 = "1a1b202a54e7801d58c75e3e2a534fa03d37ed3c82d14cfa7a5caf2fa5e641eb"
+MANIFEST_SHA256 = "a5bd50a93666810cd9ec40c72d220f1fef105335f3adbf2448e0a54c569d1dee"
+TARGET_PROFILE = "upstream-alpha6-windows"
 LEDGER_SQL = """CREATE TABLE _sqlx_migrations (
     version BIGINT PRIMARY KEY,
     description TEXT NOT NULL,
@@ -30,7 +31,7 @@ class Refused(Exception):
 
 
 def manifest():
-    # Read bytes: the target is LF even on Windows; never infer it from the OS.
+    # Source bytes are pinned LF; the verified binary profile chooses the target hash.
     raw = Path(__file__).with_name("manifest.json").read_bytes()
     if hashlib.sha256(raw).hexdigest() != MANIFEST_SHA256:
         raise Refused("pinned manifest bytes changed")
@@ -113,7 +114,7 @@ def classify(db, target):
             or not isinstance(row[4], bytes)
             or row[4].hex() not in (entry["lf"], entry["crlf"])
             or not isinstance(row[5], int)
-            or row[5] < 0
+            or row[5] < -1
         ):
             raise Refused("unknown or unsuccessful migration ledger entry")
     actual = schema(db)
@@ -124,7 +125,9 @@ def classify(db, target):
     if actual != expected:
         raise Refused("schema does not match the known migration chain")
     normalize = [
-        row[0] for row, entry in zip(rows, entries) if row[4].hex() != entry["lf"]
+        row[0]
+        for row, entry in zip(rows, entries)
+        if row[4].hex() != entry[target["target"]["checksum_variant"]]
     ]
     return state, normalize
 
@@ -201,7 +204,7 @@ def mutate(db, state, target):
             "installed_on=CURRENT_TIMESTAMP, execution_time=? WHERE version=8",
             (
                 description(root),
-                bytes.fromhex(root["lf"]),
+                bytes.fromhex(root[target["target"]["checksum_variant"]]),
                 time.monotonic_ns() - started,
             ),
         )
@@ -211,11 +214,19 @@ def mutate(db, state, target):
     for version, entry in enumerate(target["canonical"], 1):
         db.execute(
             "UPDATE _sqlx_migrations SET checksum=? WHERE version=?",
-            (bytes.fromhex(entry["lf"]), version),
+            (bytes.fromhex(entry[target["target"]["checksum_variant"]]), version),
         )
 
 
-def recover(path, *, apply=False, expected=None, stopped=False, backup_dir=None):
+def recover(
+    path,
+    *,
+    apply=False,
+    expected=None,
+    stopped=False,
+    backup_dir=None,
+    target_profile=None,
+):
     path = path.resolve(strict=True)
     if path.name != "thread_history_1.sqlite" or not path.is_file():
         raise Refused("expected the explicit thread_history_1.sqlite file")
@@ -225,9 +236,14 @@ def recover(path, *, apply=False, expected=None, stopped=False, backup_dir=None)
         before = inspect(reader, target)
     if not apply:
         return before
-    if not stopped or expected != before["class"] or backup_dir is None:
+    if (
+        target_profile != TARGET_PROFILE
+        or not stopped
+        or expected != before["class"]
+        or backup_dir is None
+    ):
         raise Refused(
-            "apply requires writer shutdown/upgrade attestation, matching class, and new backup directory"
+            "apply requires verified target profile, writer shutdown/upgrade attestation, matching class, and new backup directory"
         )
     lock = path.with_name(path.name + ".recovery-lock")
     try:
@@ -307,6 +323,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("database", type=Path)
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--target-profile", choices=[TARGET_PROFILE])
     parser.add_argument(
         "--expect-class", choices=["healthy", "canonical", "attribution-only", "mixed"]
     )
@@ -320,6 +337,7 @@ def main():
             expected=args.expect_class,
             stopped=args.all_writers_stopped_and_upgraded,
             backup_dir=args.backup_dir,
+            target_profile=args.target_profile,
         )
     except (Refused, OSError, sqlite3.Error) as error:
         # SQLite diagnostics can contain user values; do not print arbitrary errors.
@@ -331,6 +349,7 @@ def main():
         f"normalize[{len(result['normalize'])}]: "
         + ",".join(map(str, result["normalize"]))
     )
+    print(f"target_profile: {TARGET_PROFILE}")
     print(f"tables[{len(result['content'])}]{{name,rows,sha256}}:")
     for name, value in result["content"].items():
         print(f"  {name},{value['rows']},{value['sha256']}")

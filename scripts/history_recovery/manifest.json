@@ -75,5 +75,11 @@
       "lf": "94635cd58535adb1679f4ad07a9d14231b69004405fa88a22db1b6a7e5feac8b6b66ad97ea16fce464b99bff5b3548d3",
       "crlf": "745e4ee42b02c79c4bc742a5405acbf460fcdaaa44394367ce93d3a3ff29f3876830f1bbeb44bdc87d7ad9af060a9587"
     }
-  ]
+  ],
+  "target": {
+    "profile": "upstream-alpha6-windows",
+    "checksum_variant": "crlf",
+    "executable_version": "0.166.0-alpha.6",
+    "executable_sha256": "925c7d0665ffa49b0dcf748e034a805a04da984164ac92301432073b47789b99"
+  }
 }
