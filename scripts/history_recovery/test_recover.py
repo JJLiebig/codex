@@ -188,6 +188,9 @@ class RecoveryTests(unittest.TestCase):
         real_mutate = recovery.mutate
 
         def fail(*args):
+            # A second full invocation can inspect, but cannot enter this repair.
+            with self.assertRaisesRegex(recovery.Refused, "recovery lock exists"):
+                self.apply()
             real_mutate(*args)
             raise RuntimeError("synthetic failure before commit")
 
@@ -203,6 +206,14 @@ class RecoveryTests(unittest.TestCase):
         with self.assertRaises(recovery.Refused):
             recovery.recover(
                 self.path, apply=True, expected="mixed", backup_dir=self.root / "backup"
+            )
+        with self.assertRaises(recovery.Refused):
+            recovery.recover(
+                self.path,
+                apply=True,
+                expected="mixed",
+                stopped=True,
+                backup_dir=self.root / "backup",
             )
         lock = self.path.with_name(self.path.name + ".recovery-lock")
         lock.mkdir()
