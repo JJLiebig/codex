@@ -271,6 +271,15 @@ def recover(path, *, apply=False, expected=None, stopped=False, backup_dir=None)
                         "backup": backup.name,
                     },
                 )
+                # POSIX file fsync does not persist the newly created names.
+                # Windows exposes file flushing through os.fsync, not directory fds.
+                if os.name != "nt":
+                    for directory in (backup_dir, backup_dir.parent):
+                        fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+                        try:
+                            os.fsync(fd)
+                        finally:
+                            os.close(fd)
                 preserved = fingerprint(
                     db, future_root=before["class"] == "attribution-only"
                 )
