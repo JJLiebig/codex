@@ -1,5 +1,6 @@
 #![cfg_attr(debug_assertions, allow(dead_code))]
 
+pub(crate) mod history_upgrade;
 mod standalone_switch;
 mod upstream_switch;
 

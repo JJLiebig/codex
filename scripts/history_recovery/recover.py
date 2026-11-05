@@ -2,7 +2,7 @@
 """Offline, opt-in repair of the issue #260 history migration collision."""
 
 import argparse
-from contextlib import closing
+from contextlib import closing, contextmanager
 import hashlib
 import json
 import os
@@ -218,6 +218,39 @@ def mutate(db, state, target):
         )
 
 
+@contextmanager
+def invocation_lock(path):
+    if os.name == "nt":
+        import msvcrt
+
+        try:
+            stream = path.open("a+b")
+        except OSError:
+            raise Refused(
+                "another recovery invocation or stale recovery lock exists"
+            ) from None
+        with stream:
+            stream.seek(0)
+            try:
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            except OSError:
+                raise Refused(
+                    "another recovery invocation or stale recovery lock exists"
+                ) from None
+            yield
+    else:
+        try:
+            path.mkdir()
+        except FileExistsError:
+            raise Refused(
+                "another recovery invocation or stale recovery lock exists"
+            ) from None
+        try:
+            yield
+        finally:
+            path.rmdir()
+
+
 def recover(
     path,
     *,
@@ -246,13 +279,7 @@ def recover(
             "apply requires verified target profile, writer shutdown/upgrade attestation, matching class, and new backup directory"
         )
     lock = path.with_name(path.name + ".recovery-lock")
-    try:
-        lock.mkdir()
-    except FileExistsError:
-        raise Refused(
-            "another recovery invocation or stale recovery lock exists"
-        ) from None
-    try:
+    with invocation_lock(lock):
         with closing(connect(path, "rw")) as db:
             db.execute("BEGIN IMMEDIATE")
             try:
@@ -315,8 +342,6 @@ def recover(
             except BaseException:
                 db.rollback()
                 raise
-    finally:
-        lock.rmdir()
 
 
 def main():

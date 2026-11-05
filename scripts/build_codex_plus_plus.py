@@ -277,6 +277,8 @@ def install_package(package_args: list[str]) -> int:
             str(REPO_ROOT / "scripts" / "install" / "install-codex-plus-plus.ps1"),
             "-TargetExe",
             str(target_exe),
+            "-PythonExe",
+            sys.executable,
             "-Install",
             "-AddToUserPath",
         ]

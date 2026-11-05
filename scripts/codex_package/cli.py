@@ -248,6 +248,10 @@ def assemble_package(args: argparse.Namespace) -> Path:
     )
     prepare_package_dir(package_dir, force=args.force)
     build_package_dir(package_dir, args.package_version, variant, spec, inputs)
+    if spec.target == "x86_64-pc-windows-msvc" and "-fork." in args.package_version:
+        from .codex_plus_plus.history_upgrade import add_recovery
+
+        add_recovery(package_dir)
     for filename, prebuilt in (
         (variant.entrypoint_name(spec), args.entrypoint_bin),
         (f"codex-code-mode-host{spec.exe_suffix}", args.code_mode_host_bin),

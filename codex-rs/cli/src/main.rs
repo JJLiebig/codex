@@ -278,6 +278,8 @@ struct DebugCommand {
 
 #[derive(Debug, clap::Subcommand)]
 enum DebugSubcommand {
+    #[clap(hide = true)]
+    HistoryUpgradeTarget,
     /// Render the raw model catalog as JSON.
     Models(DebugModelsCommand),
 
@@ -873,6 +875,10 @@ fn run_update_action(
                 .status()?
         }
     };
+    if let Some(message) = codex_plus_plus::history_upgrade::pending_message(action, status) {
+        println!("{message}");
+        return Ok(());
+    }
     if !status.success() {
         anyhow::bail!("`{cmd_str}` failed with status {status}");
     }
@@ -1857,6 +1863,14 @@ async fn cli_main(
             }
         }
         Some(Subcommand::Debug(DebugCommand { subcommand })) => match subcommand {
+            DebugSubcommand::HistoryUpgradeTarget => {
+                reject_remote_mode_for_subcommand(
+                    root_remote.as_deref(),
+                    root_remote_auth_token_env.as_deref(),
+                    "debug history-upgrade-target",
+                )?;
+                codex_plus_plus::history_upgrade::print_target().await?;
+            }
             DebugSubcommand::Models(cmd) => {
                 reject_remote_mode_for_subcommand(
                     root_remote.as_deref(),

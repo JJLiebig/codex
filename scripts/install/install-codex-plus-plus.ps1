@@ -1,5 +1,7 @@
 param(
     [string]$TargetExe,
+    [string]$PythonExe,
+    [switch]$ResumeUpgrade,
 
     [string]$ShimDir = (Join-Path $env:LOCALAPPDATA "Programs\CodexPlusPlus\bin"),
 
@@ -10,6 +12,17 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$pendingPath = Join-Path $ShimDir '.codex-plus-plus-pending.json'
+$pending = $null
+if ($ResumeUpgrade) {
+    if (-not (Test-Path -LiteralPath $pendingPath)) { exit 0 }
+    $pending = Get-Content -LiteralPath $pendingPath -Raw | ConvertFrom-Json
+    $TargetExe = $pending.TargetExe
+    $PythonExe = $pending.PythonExe
+    $env:CODEX_HOME = $pending.CodexHome
+    $AddToUserPath = $pending.AddToUserPath
+    $Install = $true
+}
 
 if (-not ("CodexPlusPlus.PhysicalPath" -as [type])) {
     Add-Type -TypeDefinition @'
@@ -305,6 +318,7 @@ if ($Remove) {
         New-Item -ItemType Directory -Force -Path (Split-Path -Parent $lockPath) | Out-Null
     }
     Invoke-WithInstallLocks -LockPaths $installLockPaths -Script {
+        if (Test-Path -LiteralPath $pendingPath) { throw "Finish the pending Codex upgrade before removing this installation." }
         if (Test-Path -LiteralPath $shimPath -PathType Leaf) {
             Remove-Item -LiteralPath $shimPath
             Write-Host "==> Removed shim at $shimPath"
@@ -392,6 +406,12 @@ if ($ShimDir.Equals($releasesRoot, [System.StringComparison]::OrdinalIgnoreCase)
 $cmdContent = @"
 @echo off
 setlocal DisableDelayedExpansion
+if exist "%~dp0.codex-plus-plus-pending.json" (
+  set "CODEX_PLUS_PLUS_FINISH_ONLY=1"
+  "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0codex.ps1"
+  if errorlevel 1 exit /b 1
+  set "CODEX_PLUS_PLUS_FINISH_ONLY="
+)
 for %%I in ("%~dp0.") do set "CODEX_PLUS_PLUS_SHIM_DIR=%%~fI"
 set "CODEX_PLUS_PLUS_IDENTITY_FILE=%~dp0.codex-plus-plus-leases\.identity.%RANDOM%%RANDOM%%RANDOM%"
 set "CODEX_PLUS_PLUS_PARENT_IDENTITY=1"
@@ -428,6 +448,24 @@ foreach ($lockPath in $installLockPaths) {
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $lockPath) | Out-Null
 }
 Invoke-WithInstallLocks -LockPaths $installLockPaths -Script {
+    if ($ResumeUpgrade -and -not (Test-Path -LiteralPath $pendingPath)) { return }
+    if (-not $ResumeUpgrade -and (Test-Path -LiteralPath $pendingPath)) {
+        Write-Host "Upgrade pending. Close existing Codex sessions, then launch Codex to finish."
+        exit 75
+    }
+    $historyTools = Join-Path $packageDir 'codex-resources\history-upgrade'
+    $upgrade = $null
+    if (Test-Path -LiteralPath (Join-Path $historyTools 'windows_upgrade.ps1')) {
+        . (Join-Path $historyTools 'windows_upgrade.ps1')
+        if (-not $ResumeUpgrade) {
+            $upgrade = Get-HistoryUpgrade -Target $targetPath -Python $PythonExe -Helper (Join-Path $historyTools 'windows_upgrade.py')
+        }
+    }
+    if (($upgrade -or $ResumeUpgrade) -and (Test-Path -LiteralPath $releasesRoot)) {
+        if (@(Get-ChildItem -LiteralPath $releasesRoot -Directory | Where-Object { $_.Name -ne $shimLockId }).Count) {
+            throw "History maintenance requires a single managed Codex installation. Installation was left unchanged."
+        }
+    }
     $existingMarker = Get-Item -LiteralPath $markerPath -Force -ErrorAction SilentlyContinue
     $ownsCompanion = $existingMarker -and
         (Test-Path -LiteralPath $cmdShimPath -PathType Leaf) -and
@@ -459,13 +497,13 @@ Invoke-WithInstallLocks -LockPaths $installLockPaths -Script {
     New-Item -ItemType Directory -Force -Path $releasesDir | Out-Null
     New-Item -ItemType Directory -Force -Path $generationLinksDir | Out-Null
     New-Item -ItemType Directory -Force -Path $generationLeasesDir | Out-Null
-    $releaseName = [DateTime]::UtcNow.ToString(
+    $releaseName = if ($ResumeUpgrade) { Split-Path -Leaf $packageDir } else { [DateTime]::UtcNow.ToString(
         "yyyyMMddTHHmmssfffffffZ",
         [System.Globalization.CultureInfo]::InvariantCulture
-    )
+    ) }
     $releaseDir = Join-Path $releasesDir $releaseName
     $stagingDir = Join-Path $releasesDir ".staging.$releaseName.$PID"
-    try {
+    if (-not $ResumeUpgrade) { try {
         New-Item -ItemType Directory -Path $stagingDir | Out-Null
         Get-ChildItem -LiteralPath $packageDir -Force |
             Copy-Item -Destination $stagingDir -Recurse -Force
@@ -474,18 +512,27 @@ Invoke-WithInstallLocks -LockPaths $installLockPaths -Script {
         if (Test-Path -LiteralPath $stagingDir) {
             Remove-Item -LiteralPath $stagingDir -Recurse -Force -ErrorAction SilentlyContinue
         }
-    }
+    } }
     $installedBinDir = Join-Path $releaseDir "bin"
     $generationLinkPath = Join-Path $generationLinksDir $releaseName
-    New-Item -ItemType Junction -Path $generationLinkPath -Target $installedBinDir | Out-Null
+    if (-not $ResumeUpgrade) { New-Item -ItemType Junction -Path $generationLinkPath -Target $installedBinDir | Out-Null }
     $generationLeaseDir = Join-Path $generationLeasesDir $releaseName
-    New-Item -ItemType Directory -Path $generationLeaseDir | Out-Null
-    [System.IO.File]::WriteAllBytes(
+    if (-not $ResumeUpgrade) { New-Item -ItemType Directory -Path $generationLeaseDir | Out-Null }
+    if (-not $ResumeUpgrade) { [System.IO.File]::WriteAllBytes(
         (Join-Path $generationLeaseDir "powershell.lock"),
         [byte[]]::new(0)
-    )
+    ) }
     $installedTargetPath = Join-Path $generationLinkPath $targetFileName
     $content = @"
+if (`$env:CODEX_PLUS_PLUS_PARENT_IDENTITY -ne '1') {
+    `$pendingPath = Join-Path `$PSScriptRoot '.codex-plus-plus-pending.json'
+    if (Test-Path -LiteralPath `$pendingPath) {
+        `$pending = Get-Content -LiteralPath `$pendingPath -Raw | ConvertFrom-Json
+        & (Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File `$pending.Installer -ShimDir `$PSScriptRoot -ResumeUpgrade
+        if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
+    }
+    if (`$env:CODEX_PLUS_PLUS_FINISH_ONLY -eq '1') { exit 0 }
+}
 if (`$env:CODEX_PLUS_PLUS_PARENT_IDENTITY -eq '1') {
     Add-Type -TypeDefinition @'
 using System;
@@ -567,12 +614,26 @@ try {
     `$lease.Dispose()
 }
 "@
+    if (-not $ResumeUpgrade) {
     [System.IO.File]::WriteAllText($shimPath, $content, [System.Text.UTF8Encoding]::new($true))
     [System.IO.File]::WriteAllText($cmdShimPath, $cmdContent, [System.Text.UTF8Encoding]::new($false))
     [System.IO.File]::WriteAllText($markerPath, (Get-Sha256 -Path $cmdShimPath), [System.Text.UTF8Encoding]::new($false))
+    }
     if (-not (Test-Path -LiteralPath $installedTargetPath -PathType Leaf)) {
         throw "Installed Codex++ target is not reachable: $installedTargetPath"
     }
+    if ($upgrade) {
+        $installedTools = Join-Path $releaseDir 'codex-resources\history-upgrade'
+        $installer = Join-Path $installedTools 'install.ps1'
+        Copy-Item -LiteralPath $PSCommandPath -Destination $installer
+        $upgrade += @{ TargetExe = (Join-Path $releaseDir 'bin\codex.exe'); Installer = $installer; CodexHome = $codexHome; AddToUserPath = [bool]$AddToUserPath }
+        $temporary = "$pendingPath.$PID.tmp"
+        [System.IO.File]::WriteAllText($temporary, ($upgrade | ConvertTo-Json), [System.Text.UTF8Encoding]::new($false))
+        Move-Item -LiteralPath $temporary -Destination $pendingPath
+        Write-Host "Upgrade pending. Close existing Codex sessions, then launch Codex to finish."
+        exit 75
+    }
+    $activate = {
     $targetPointerTempPath = "$targetPointerPath.$PID.tmp"
     $targetPointerBackupPath = "$targetPointerPath.$PID.bak"
     try {
@@ -596,6 +657,11 @@ try {
     }
     Write-Host "==> Installed shims at $shimPath and $cmdShimPath"
     Write-Host "==> Active release: $releaseDir"
+    if ($ResumeUpgrade) { Remove-Item -LiteralPath $pendingPath }
+    }
+    if ($ResumeUpgrade) {
+        Invoke-HistoryUpgrade -Pending $pending -Leases $generationLeasesDir -Activate $activate
+    } else { & $activate }
     Remove-StaleReleases `
         -ReleasesDir $releasesDir `
         -GenerationLinksDir $generationLinksDir `

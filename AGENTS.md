@@ -61,7 +61,10 @@ add local requirements but must not weaken these rules.
   approval. Verbatim merged upstream migrations are allowed. Fork-only state needs its own
   storage and ledger; a different migration number in a shared chain is not isolation.
 - The reviewed, offline issue #260 history canonicalization is a specific recovery exception,
-  not permission for runtime repair or future shared-chain divergence.
+  including explicitly requested managed Windows upgrade maintenance: fence managed launches,
+  drain old writers, verify a consistent backup, repair only the pinned known states, then
+  activate the staged upgrade. This is not permission for runtime migration repair or future
+  shared-chain divergence.
 - `repo-checks` compares paths and blobs with actual merged `openai/codex` ancestry. Review
   changes to the state migrator, SQLite open/recovery code, and thread-history startup explicitly;
   the equality gate does not detect arbitrary SQL writes outside migration directories.
