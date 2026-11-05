@@ -135,6 +135,9 @@ impl ConnectionPool {
 
     /// Never waits for another opener or sleeps through the cooldown.
     pub(super) fn replenish(self: &Arc<Self>) -> Option<JoinHandle<()>> {
+        if !self.config.provider.info().supports_websockets {
+            return None;
+        }
         let guard = Arc::clone(&self.replenishing).try_lock_owned().ok()?;
         self.start_refill(guard)
     }

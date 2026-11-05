@@ -95,7 +95,7 @@ pub type ProviderAccountResult = std::result::Result<ProviderAccountState, Provi
 /// require a backend-specific model ID.
 pub const DEFAULT_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "codex-auto-review";
 
-const API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "gpt-6-luna";
+const API_KEY_APPROVAL_REVIEW_PREFERRED_MODEL: &str = "gpt-5.6-luna";
 
 const FEDRAMP_API_BASE_URL: &str = "https://gov.api.openai.com/v1";
 
@@ -967,7 +967,7 @@ mod tests {
             ))),
         );
 
-        assert_eq!(provider.approval_review_preferred_model(), "gpt-6-luna");
+        assert_eq!(provider.approval_review_preferred_model(), "gpt-5.6-luna");
     }
 
     #[test]
@@ -1542,8 +1542,8 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                 ("openai.gpt-6-sol", "GPT-6 Sol"),
                 ("openai.gpt-6-luna", "GPT-6 Luna"),
                 ("openai.gpt-5.6-sol", "GPT-5.6 Sol"),
-                ("openai.gpt-6.1-terra", "GPT-5.6 Terra"),
-                ("openai.gpt-6-luna", "GPT-5.6 Luna"),
+                ("openai.gpt-5.6-terra", "GPT-5.6 Terra"),
+                ("openai.gpt-5.6-luna", "GPT-5.6 Luna"),
                 ("openai.gpt-5.5", "GPT-5.5"),
             ]
         );
@@ -1566,8 +1566,8 @@ printf '%s\n' '{"AccessKeyId":"exported","SecretAccessKey":"secret"}'
                 "openai.gpt-6-sol",
                 "openai.gpt-6-luna",
                 "openai.gpt-5.6-sol",
-                "openai.gpt-6.1-terra",
-                "openai.gpt-6-luna",
+                "openai.gpt-5.6-terra",
+                "openai.gpt-5.6-luna",
                 "openai.gpt-5.5",
             ]
         );

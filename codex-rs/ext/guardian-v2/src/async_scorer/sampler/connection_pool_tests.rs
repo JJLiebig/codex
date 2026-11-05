@@ -89,6 +89,32 @@ impl Drop for Gateway {
 }
 
 #[tokio::test]
+async fn http_only_provider_skips_websocket_pool_and_samples_over_http() -> Result<()> {
+    skip_if_no_network!(Ok(()));
+    let http = responses::start_mock_server().await;
+    let http_mock = responses::mount_sse_once(
+        &http,
+        responses::sse(vec![
+            responses::ev_output_text_delta("low"),
+            responses::ev_completed("score"),
+        ]),
+    )
+    .await;
+    let ws = responses::start_websocket_server(Vec::new()).await;
+    let gateway = Gateway::new(&http.uri(), ws.uri()).await?;
+    let mut config = sampler_config(format!("{}/v1", gateway.url));
+    let mut info = config.provider.info().clone();
+    info.supports_websockets = false;
+    config.provider = create_model_provider(info, config.provider.auth_manager());
+    let sampler = LunaSampler::new(config);
+    assert!(sampler.connections.replenish().is_none());
+    assert_eq!(sampler.sample(sample_request("http-only")).await?, "low");
+    assert_eq!(gateway.opens.load(Ordering::SeqCst), 0);
+    assert_eq!(http_mock.single_request().path(), "/v1/responses");
+    Ok(())
+}
+
+#[tokio::test]
 async fn stalled_handshake_does_not_delay_other_warm_sockets() -> Result<()> {
     skip_if_no_network!(Ok(()));
     let stalled = responses::start_websocket_server_with_headers(vec![
