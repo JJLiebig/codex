@@ -7,13 +7,10 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 
 use anyhow::Result;
-use base64::Engine;
 use chrono::Utc;
 use codex_http_client::HttpClientFactory;
 use codex_login::AuthManager;
 use codex_login::CodexAuth;
-use codex_model_provider::create_model_provider;
-use codex_model_provider_info::built_in_model_providers;
 use codex_models_manager::cache::ModelsCache;
 use codex_models_manager::cache::ModelsCacheEntry;
 use codex_models_manager::cache::ModelsCacheError;
@@ -25,11 +22,9 @@ use codex_models_manager::manager::OpenAiModelsManager;
 use codex_models_manager::manager::RefreshStrategy;
 use codex_models_manager::manager::SharedModelsManager;
 use codex_models_manager::model_info::model_info_from_slug;
-use codex_protocol::config_types::ReasoningSummary;
 use codex_protocol::error::Result as CoreResult;
 use codex_protocol::openai_models::ModelInfo;
 use codex_protocol::openai_models::ModelVisibility;
-use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::user_input::UserInput;
@@ -43,10 +38,7 @@ use core_test_support::submit_thread_settings;
 use core_test_support::test_codex::test_codex;
 use core_test_support::wait_for_event;
 use pretty_assertions::assert_eq;
-use tempfile::TempDir;
 use tokio::sync::oneshot;
-use tokio::time::Duration;
-use tokio::time::timeout;
 
 #[derive(Debug)]
 struct StoreGate {
