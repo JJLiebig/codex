@@ -19,7 +19,7 @@ BOM, lone CR, platform guess, working-checkout SQL, or unrelated database is use
 
 | Class | Accepted schema/ledger | Apply behavior |
 | --- | --- | --- |
-| `healthy` | Contiguous known 1 through 1–7, no attribution/root | Only normalize recognized LF checksums to verified CRLF; leave migrations pending |
+| `healthy` | Contiguous known 1 through 1–7, no attribution/root | Only normalize recognized checksums to the selected qualified profile; leave migrations pending |
 | `canonical` | Known canonical 1–8, nullable TEXT root, optionally retained known attribution | Noop except known checksum normalization |
 | `attribution-only` | Known 1–7 + attribution-8, no root | Execute exact canonical root SQL; replace 8 metadata with this root installation |
 | `mixed` | Known attribution-8/root-9, both columns | Retire attribution ledger row; promote root-9 to 8, preserving its installation time and duration |
@@ -29,13 +29,34 @@ definitions are refused. Attribution values, including nonempty values, remain
 in place. Existing root IDs, rowids, item JSON and projection checkpoints remain
 unchanged. Only attribution-only adds NULL root values. Repeating repair is a noop.
 
-The only apply profile is `upstream-alpha6-windows`. Actual bundled executable
+The Windows apply profile is `upstream-alpha6-windows`. Actual bundled executable
 `0.166.0-alpha.6`, SHA256
 `925c7d0665ffa49b0dcf748e034a805a04da984164ac92301432073b47789b99`,
 created all eight known CRLF ledger hashes in an isolated synthetic home. Its public
 resume/read/turns/items calls and reopen projected the synthetic root successfully.
 The same executable rejected canonical LF at migration 1. Source LF is therefore
-not a valid apply target for this installed app. No other apply profile is supported.
+not a valid apply target for this Windows app.
+
+The Unix apply profile is `fork-0.166.0-unix` (LF). The released Linux x64
+`0.166.0-fork.6` executable, SHA256
+`bfe29321dc599d47a04c885404b62bcd7b2afe7d3a023bdb8677b59ae1189446`,
+opened a repaired copy of jjdev history and projected a synthetic turn and item,
+then reopened successfully. See [Unix qualification](qualification-unix.md).
+Profile selection is explicit; the host OS never chooses checksums.
+
+## Unix manual command
+
+Use Python 3.10+ from the repository or an extracted GitHub source release checkout.
+After stopping and upgrading **all** writers and disabling relaunchers as described
+below, run from the checkout root (replace both paths; backup directory must be new):
+
+```sh
+python3 scripts/history_recovery/recover.py /srv/jjdev/.codex/thread_history_1.sqlite --apply --target-profile fork-0.166.0-unix --expect-class mixed --all-writers-stopped-and-upgraded --backup-dir /srv/jjdev/.codex/history-recovery-unix-backup
+```
+
+To inspect first, omit `--apply` and retain `--target-profile fork-0.166.0-unix`.
+This is manual maintenance; Unix installers/npm postinstall do not own all external
+writers or relaunchers, so cannot supply the required fence.
 
 ## Operator procedure (separate offline authorization required)
 
@@ -58,14 +79,15 @@ not a valid apply target for this installed app. No other apply profile is suppo
    backup directory on private storage with sufficient space:
    `python scripts/history_recovery/recover.py <path>/thread_history_1.sqlite --apply --target-profile upstream-alpha6-windows --expect-class mixed --all-writers-stopped-and-upgraded --backup-dir <new-private-directory>`.
    Keep writers stopped until verification and application-open qualification finish.
-5. Inspect again; expect canonical CRLF ledger (or unchanged healthy prefix), preserved
+5. Inspect again with the same profile; expect its canonical ledger (or unchanged healthy prefix), preserved
    counts/hashes and journal mode. Retain the backup and manifests securely: the
    backup contains private conversation data even though manifests contain only
    metadata and hashes. Resume only qualified upstream and fixed-fork clients.
 
 Apply obtains a separate invocation lock, inspects only under `BEGIN IMMEDIATE`, and
 uses a second read connection's SQLite backup API while writes are excluded. It
-verifies backup integrity, schema, ledger and typed content, then flushes the backup
+creates the backup directory private to its owner on Unix, verifies backup integrity,
+schema, ledger and typed content, then flushes the backup
 and metadata manifest before mutation. All changes and post-validation share one
 transaction. A failed run leaves the original logically unchanged and any completed
 backup intact. `verified-before-commit.json` is verification evidence, **not** proof

@@ -1,6 +1,10 @@
 from contextlib import closing
 from pathlib import Path
+import os
 import sqlite3
+import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -122,6 +126,79 @@ class RecoveryTests(unittest.TestCase):
                     )
                     self.assertEqual(self.apply("canonical")["result"], "noop")
                     db.close()
+
+    def test_unix_target_repairs_all_states_and_preserves_typed_content(self):
+        for state in ("mixed", "attribution-only", "canonical", "healthy"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as folder:
+                self.root = Path(folder)
+                self.path = self.root / "thread_history_1.sqlite"
+                db = self.fixture(state, newline="crlf")
+                before = recovery.fingerprint(
+                    db, future_root=state == "attribution-only"
+                )
+                result = recovery.recover(
+                    self.path,
+                    apply=True,
+                    expected=state,
+                    stopped=True,
+                    backup_dir=self.root / "backup",
+                    target_profile=recovery.UNIX_TARGET_PROFILE,
+                )
+                self.assertEqual(result["normalize"], [])
+                self.assertEqual(
+                    db.execute(
+                        "SELECT checksum FROM _sqlx_migrations ORDER BY version"
+                    ).fetchall(),
+                    [
+                        (bytes.fromhex(entry["lf"]),)
+                        for entry in self.target["canonical"][
+                            : 7 if state == "healthy" else 8
+                        ]
+                    ],
+                )
+                before.pop("_sqlx_migrations")
+                after = recovery.fingerprint(db)
+                after.pop("_sqlx_migrations")
+                self.assertEqual(after, before)
+                self.assertEqual(
+                    recovery.recover(
+                        self.path,
+                        apply=True,
+                        expected=result["class"],
+                        stopped=True,
+                        backup_dir=self.root / "second-backup",
+                        target_profile=recovery.UNIX_TARGET_PROFILE,
+                    )["result"],
+                    "noop",
+                )
+                db.close()
+
+    @unittest.skipUnless(os.name == "posix", "Unix backup directory permissions")
+    def test_unix_backup_is_private_with_permissive_umask(self):
+        self.fixture().close()
+        process = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os,runpy,sys; os.umask(0o022); "
+                "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')",
+                str(Path(recovery.__file__).resolve()),
+                str(self.path),
+                "--apply",
+                "--target-profile",
+                recovery.UNIX_TARGET_PROFILE,
+                "--expect-class",
+                "mixed",
+                "--all-writers-stopped-and-upgraded",
+                "--backup-dir",
+                str(self.root / "backup"),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertIn("status: applied", process.stdout)
+        self.assertEqual(stat.S_IMODE((self.root / "backup").stat().st_mode), 0o700)
 
     def test_attribution_only_adds_null_root_preserving_nonzero_attribution(self):
         db = self.fixture("attribution-only")
