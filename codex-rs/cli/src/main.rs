@@ -833,7 +833,9 @@ fn run_update_action(
     println!();
     let cmd_str = action.display_command();
     println!("Updating Codex via `{cmd_str}`...");
-    let status = {
+    let status = if let UpdateAction::CodexPlusPlusStandalone(platform) = action {
+        codex_plus_plus::published_update::run(platform)?
+    } else {
         #[cfg(windows)]
         {
             let (cmd, args) = action.command_args();
