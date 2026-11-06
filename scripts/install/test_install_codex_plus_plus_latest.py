@@ -178,7 +178,9 @@ class InstallLatestTest(unittest.TestCase):
                 )
                 pointer = root / "shim/.codex-plus-plus-current"
                 previous = pointer.read_bytes()
-                refused = run_installer(root, release, {"CODEX_PLUS_PLUS_CURRENT_VERSION": "1.2.5-fork.1"})
+                refused = run_installer(
+                    root, release, {"CODEX_PLUS_PLUS_CURRENT_VERSION": "1.2.5-fork.1"}
+                )
                 self.assertNotEqual(refused.returncode, 0)
                 self.assertEqual(pointer.read_bytes(), previous)
                 if os.name != "nt":
@@ -192,6 +194,7 @@ class InstallLatestTest(unittest.TestCase):
     def test_npm_availability_falls_back_but_integrity_failure_does_not(self) -> None:
         for failure in (
             "missing tarball",
+            "missing verifier",
             "bad integrity",
             "missing integrity",
             "malformed archive",
@@ -208,8 +211,18 @@ class InstallLatestTest(unittest.TestCase):
                     previous = pointer.read_bytes()
                     release.requests.clear()
                     release.publish_npm()
+                    extra_env = {}
                     if failure == "missing tarball":
                         del release.assets["payload.tgz"]
+                    elif failure == "missing verifier":
+                        if os.name == "nt":
+                            continue
+                        tools = root / "tools"
+                        tools.mkdir()
+                        for name in "sh cat sleep uname curl tar gzip sha256sum shasum awk mktemp rm fold grep dirname sed ps cp mv date cksum tr basename chmod mkdir".split():
+                            if executable := shutil.which(name):
+                                (tools / name).symlink_to(executable)
+                        extra_env["PATH"] = str(tools)
                     elif failure == "missing integrity":
                         del release.npm["dist"]["integrity"]
                     elif failure == "bad integrity":
@@ -222,8 +235,8 @@ class InstallLatestTest(unittest.TestCase):
                                 hashlib.sha512(b"not a tar").digest()
                             ).decode()
                         )
-                    result = run_installer(root, release)
-                    if failure == "missing tarball":
+                    result = run_installer(root, release, extra_env)
+                    if failure in ("missing tarball", "missing verifier"):
                         self.assertEqual(result.returncode, 0, result.stderr)
                     else:
                         self.assertNotEqual(result.returncode, 0)

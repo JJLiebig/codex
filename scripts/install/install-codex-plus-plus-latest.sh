@@ -149,7 +149,7 @@ fi
 
 download() {
   name=$1
-  curl --fail --silent --show-error --location \
+  curl --fail --silent --show-error --location --connect-timeout 10 --max-time 1800 --speed-limit 1 --speed-time 30 \
     "$download_base/$name" --output "$temp_dir/$name" || {
     echo "Could not download required Codex++ release asset: $name" >&2
     return 1
@@ -212,8 +212,8 @@ npm_package() {
   printf '%s\n' "$integrity" | grep -Eq '^sha512-[A-Za-z0-9+/]{86}==$' || {
     echo "Invalid npm SHA-512 integrity." >&2; exit 1;
   }
-  curl -fsSL "$tarball" -o "$temp_dir/npm.tgz" || return 1
-  command -v openssl >/dev/null 2>&1 || { echo "openssl is required to verify npm payloads." >&2; exit 1; }
+  command -v openssl >/dev/null 2>&1 || return 1
+  curl -fsSL --connect-timeout 10 --max-time 1800 --speed-limit 1 --speed-time 30 "$tarball" -o "$temp_dir/npm.tgz" || return 1
   actual=$(openssl dgst -sha512 -binary "$temp_dir/npm.tgz" | openssl base64 -A)
   [ "sha512-$actual" = "$integrity" ] || { echo "npm SHA-512 mismatch." >&2; exit 1; }
   mkdir "$temp_dir/npm"

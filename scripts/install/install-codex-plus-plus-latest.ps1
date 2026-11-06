@@ -35,7 +35,7 @@ function Save-Asset {
     )
 
     try {
-        Invoke-WebRequest -UseBasicParsing -Uri "$downloadBase/$Name" -OutFile $Destination
+        Invoke-WebRequest -UseBasicParsing -Uri "$downloadBase/$Name" -OutFile $Destination -TimeoutSec 1800
         return $true
     } catch {
         return $false
@@ -144,7 +144,7 @@ function Get-NpmPackage {
         throw 'Invalid npm SHA-512 integrity.'
     }
     $archivePath = Join-Path $tempDir 'npm.tgz'
-    try { Invoke-WebRequest -UseBasicParsing -Uri $npm.dist.tarball -OutFile $archivePath }
+    try { Invoke-WebRequest -UseBasicParsing -Uri $npm.dist.tarball -OutFile $archivePath -TimeoutSec 1800 }
     catch { return $false }
     $stream = [IO.File]::OpenRead($archivePath)
     $sha512 = [Security.Cryptography.SHA512]::Create()
