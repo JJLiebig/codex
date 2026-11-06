@@ -21,6 +21,26 @@ pub(super) fn from_target(target: UpdateTarget, dir: Option<&Path>) -> Option<Up
 pub(super) fn standalone_action(platform: StandalonePlatform, dir: &Path) -> Option<UpdateAction> {
     (dir.is_absolute() && dir.is_dir()).then_some(UpdateAction::CodexPlusPlusStandalone(platform))
 }
+
+impl UpdateAction {
+    /// Command shown to users. Codex++ installer commands stay internal to `codex update`.
+    pub fn display_command(self) -> String {
+        match self {
+            Self::CodexPlusPlusPackageManager(_) | Self::CodexPlusPlusStandalone(_) => {
+                "codex update".to_string()
+            }
+            Self::Daemon(_)
+            | Self::NpmGlobalLatest
+            | Self::BunGlobalLatest
+            | Self::VitePlusGlobalLatest
+            | Self::PnpmGlobalLatest
+            | Self::BrewUpgrade
+            | Self::StandaloneUnix
+            | Self::StandaloneWindows => self.command_str(),
+        }
+    }
+}
+
 pub(super) fn package_manager_command_args(manager: planner::PackageManager) -> CommandArgs {
     match manager {
         planner::PackageManager::Npm => ("npm", &["install", "-g", "@jjliebig/codex-plus-plus"]),
