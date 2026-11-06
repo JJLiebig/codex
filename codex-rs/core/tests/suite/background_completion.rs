@@ -126,6 +126,13 @@ async fn background_completion(finish: Finish) -> Result<()> {
     let mut builder = test_codex().with_session_source(source);
     if matches!(finish, Finish::Compact | Finish::StoppedAudio) {
         builder = builder.with_config(|config| {
+            // The fixture returns an assistant summary for local compaction.
+            config
+                .model_provider
+                .capabilities
+                .get_or_insert_default()
+                .remote_compaction =
+                Some(codex_model_provider_info::RemoteCompactionSupport::Unsupported);
             config
                 .features
                 .enable(Feature::WakeOnAgentMessages)
@@ -317,6 +324,10 @@ print(json.dumps({"continue": False, "stopReason": "stop completion continuation
             .await?;
         harness.test().codex.submit(Op::Compact).await?;
         wait_for_event(&harness.test().codex, |event| {
+            assert!(
+                !matches!(event, EventMsg::Error(_)),
+                "compaction failed: {event:?}"
+            );
             matches!(event, EventMsg::TurnComplete(_))
         })
         .await;
@@ -364,13 +375,11 @@ print(json.dumps({"continue": False, "stopReason": "stop completion continuation
     harness.write_file("release", b"go").await?;
     if matches!(finish, Finish::StoppedAudio) {
         let home = harness.test().codex_home_path();
-        tokio::time::timeout(std::time::Duration::from_secs(20), async {
-            while !home.join("hook_started").exists() {
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("completion continuation reached stopping hook");
+        core_test_support::fs_wait::wait_for_path_exists(
+            home.join("hook_started"),
+            std::time::Duration::from_secs(20),
+        )
+        .await?;
         harness
             .test()
             .codex

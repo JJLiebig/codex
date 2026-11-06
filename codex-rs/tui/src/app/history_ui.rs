@@ -346,7 +346,8 @@ impl App {
         self.reset_terminal_display_state();
         self.transcript_cells
             .retain(|cell| !cell.as_any().is::<history_cell::ClearScreenHeader>());
-        let header = history_cell::ClearScreenHeader(self.clear_ui_header_cell(CODEX_CLI_VERSION));
+        let header =
+            history_cell::ClearScreenHeader(self.clear_ui_header_cell(codex_cli_version()));
         self.insert_history_cell(tui, Box::new(header));
     }
 

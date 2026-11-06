@@ -3338,7 +3338,7 @@ impl AuthManager {
             let loaded_auth = self
                 .load_auth(/*cached_auth*/ None, guard)
                 .await
-                .unwrap_or_else(|_| LoadedAuth::from_current_source(None));
+                .unwrap_or_else(|_| LoadedAuth::from_current_source(/*auth*/ None));
             if let Some(publication) = self.publish_reloaded_auth(generation, loaded_auth) {
                 return publication.changed;
             }

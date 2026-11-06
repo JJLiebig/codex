@@ -787,7 +787,7 @@ pub(crate) fn save_file_auth_if_unchanged(
     guard: &AuthRefreshGuard,
 ) -> std::io::Result<()> {
     guard.ensure_matches(codex_home)?;
-    storage_commit::codex_plus_plus::save_file_if_unchanged(codex_home, expected, auth, guard)
+    storage_commit::account_handoff::save_file_if_unchanged(codex_home, expected, auth, guard)
 }
 
 pub(super) fn create_auth_storage_with_store(

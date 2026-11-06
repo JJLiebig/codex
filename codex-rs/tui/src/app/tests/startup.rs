@@ -961,7 +961,7 @@ async fn unattended_modals_survive_unfinished_terminal_input() -> Result<()> {
         &mut app_server,
         &mut app_event_rx,
         connected,
-        CODEX_CLI_VERSION,
+        codex_cli_version(),
     )
     .await?;
 

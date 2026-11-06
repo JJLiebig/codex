@@ -105,9 +105,14 @@ async fn submit_yolo_hook_review_turn(test: &TestCodex, prompt: &str) -> Result<
             }])
             .with_thread_settings(
                 codex_protocol::protocol::ThreadSettingsOverrides {
-                    environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(
+                    environments: Some(codex_protocol::protocol::TurnEnvironmentRequests::new(
                         test.config.cwd.clone(),
-                        vec![test.executor_environment().selection().clone()],
+                        vec![
+                            test.executor_environment()
+                                .selection()
+                                .clone()
+                                .into_request(),
+                        ],
                     )),
                     approval_policy: Some(AskForApproval::Never),
                     approvals_reviewer: Some(ApprovalsReviewer::User),
@@ -5749,10 +5754,20 @@ async fn assert_guardian_allows_initial_unified_exec_once() -> Result<()> {
     let target = cwd.join(&target_name)?;
     let executed_shell = cwd.join(&executed_shell_name)?;
     test.fs()
-        .write_file(&counter, Vec::new(), /*sandbox*/ None)
+        .write_file(
+            &counter,
+            Vec::new(),
+            codex_file_system::WriteFileOptions::default(),
+            /*sandbox*/ None,
+        )
         .await?;
     test.fs()
-        .write_file(&target, b"seed".to_vec(), /*sandbox*/ None)
+        .write_file(
+            &target,
+            b"seed".to_vec(),
+            codex_file_system::WriteFileOptions::default(),
+            /*sandbox*/ None,
+        )
         .await?;
 
     submit_yolo_hook_review_turn(&test, "deny the dangerous command").await?;
@@ -5789,7 +5804,12 @@ async fn assert_guardian_allows_initial_unified_exec_once() -> Result<()> {
     let mut expected_counter = b"x".to_vec();
     for (index, (label, _, _)) in cases.iter().skip(2).enumerate() {
         test.fs()
-            .write_file(&target, b"seed".to_vec(), /*sandbox*/ None)
+            .write_file(
+                &target,
+                b"seed".to_vec(),
+                codex_file_system::WriteFileOptions::default(),
+                /*sandbox*/ None,
+            )
             .await?;
         submit_yolo_hook_review_turn(&test, "use unreviewed execution semantics").await?;
         wait_for_response_request_count(&responses, /*expected_count*/ (index + 3) * 3).await;

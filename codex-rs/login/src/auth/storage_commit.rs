@@ -1,8 +1,8 @@
 //! Serializes cooperating processes' credential commits, including compare-and-save.
 //! The stable sidecar is never renamed or removed; network requests never hold it.
 
-#[path = "storage_commit/codex_plus_plus.rs"]
-pub(super) mod codex_plus_plus;
+#[path = "storage_commit/codex_plus_plus/account_handoff.rs"]
+pub(super) mod account_handoff;
 
 use super::*;
 use std::fs::OpenOptions;
@@ -83,7 +83,9 @@ impl AuthStorageBackend for CommittedStorage {
         self.inner.load_with_guard(guard)
     }
     fn save_with_guard(&self, auth: &AuthDotJson, guard: &AuthRefreshGuard) -> std::io::Result<()> {
-        self.save_guarded(auth, guard)
+        guard.ensure_matches(&self.home)?;
+        let _commit = self.lock()?;
+        self.inner.save_with_guard(auth, guard)
     }
     fn compare_and_save_with_guard(
         &self,
@@ -91,10 +93,15 @@ impl AuthStorageBackend for CommittedStorage {
         auth: &AuthDotJson,
         guard: &AuthRefreshGuard,
     ) -> std::io::Result<()> {
-        self.compare_and_save_guarded(expected, auth, guard)
+        guard.ensure_matches(&self.home)?;
+        let _commit = self.lock()?;
+        self.inner
+            .compare_and_save_with_guard(expected, auth, guard)
     }
     fn delete_with_guard(&self, guard: &AuthRefreshGuard) -> std::io::Result<bool> {
-        self.delete_guarded(guard)
+        guard.ensure_matches(&self.home)?;
+        let _commit = self.lock()?;
+        self.inner.delete_with_guard(guard)
     }
     fn save_preserving_file(&self, auth: &AuthDotJson) -> std::io::Result<()> {
         let _commit = self.lock()?;
