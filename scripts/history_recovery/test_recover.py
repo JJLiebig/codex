@@ -1,6 +1,10 @@
 from contextlib import closing
 from pathlib import Path
+import os
 import sqlite3
+import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -168,6 +172,33 @@ class RecoveryTests(unittest.TestCase):
                     "noop",
                 )
                 db.close()
+
+    @unittest.skipUnless(os.name == "posix", "Unix backup directory permissions")
+    def test_unix_backup_is_private_with_permissive_umask(self):
+        self.fixture().close()
+        process = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                "import os,runpy,sys; os.umask(0o022); "
+                "sys.argv=sys.argv[1:]; runpy.run_path(sys.argv[0],run_name='__main__')",
+                str(Path(recovery.__file__).resolve()),
+                str(self.path),
+                "--apply",
+                "--target-profile",
+                recovery.UNIX_TARGET_PROFILE,
+                "--expect-class",
+                "mixed",
+                "--all-writers-stopped-and-upgraded",
+                "--backup-dir",
+                str(self.root / "backup"),
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        self.assertIn("status: applied", process.stdout)
+        self.assertEqual(stat.S_IMODE((self.root / "backup").stat().st_mode), 0o700)
 
     def test_attribution_only_adds_null_root_preserving_nonzero_attribution(self):
         db = self.fixture("attribution-only")

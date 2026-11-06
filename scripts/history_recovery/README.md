@@ -86,7 +86,8 @@ writers or relaunchers, so cannot supply the required fence.
 
 Apply obtains a separate invocation lock, inspects only under `BEGIN IMMEDIATE`, and
 uses a second read connection's SQLite backup API while writes are excluded. It
-verifies backup integrity, schema, ledger and typed content, then flushes the backup
+creates the backup directory private to its owner on Unix, verifies backup integrity,
+schema, ledger and typed content, then flushes the backup
 and metadata manifest before mutation. All changes and post-validation share one
 transaction. A failed run leaves the original logically unchanged and any completed
 backup intact. `verified-before-commit.json` is verification evidence, **not** proof

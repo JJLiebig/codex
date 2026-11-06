@@ -306,7 +306,9 @@ def recover(
                     db.rollback()
                     return {**before, "result": "noop"}
                 backup_dir = backup_dir.resolve()
-                backup_dir.mkdir()  # Never overwrite a previous recovery artifact.
+                backup_dir.mkdir(
+                    mode=0o700
+                )  # Private; never overwrite a recovery artifact.
                 backup = backup_dir / path.name
                 # Use a second reader while the reserved writer lock prevents commits.
                 # Backing up the active write connection itself would deadlock.

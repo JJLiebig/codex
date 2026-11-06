@@ -33,7 +33,9 @@ thread/read, thread/turns/list and thread/items/list. A new synthetic paginated
 rollout projected `fixture-turn`, `fixture-root`, and a user item. Reopen retained
 that projection and all eight LF checksums. Neither post-repair stderr contained
 the migration mismatch. This checks real application projection, beyond Python
-migration emulation. Synthetic tests additionally cover attribution-only, healthy
+migration emulation. A separate Unix CLI test runs with umask 022 and verifies
+that backup directory mode is 0700, protecting conversation data from other users.
+Synthetic tests additionally cover attribution-only, healthy
 prefixes, canonical histories, WAL backup, refusal and rollback behavior.
 
 ## Writer fence verdict
