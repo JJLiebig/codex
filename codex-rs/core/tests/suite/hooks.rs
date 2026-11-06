@@ -517,7 +517,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
     Ok(())
 }
 
-fn write_pre_tool_use_hook(
+pub(super) fn write_pre_tool_use_hook(
     home: &Path,
     matcher: Option<&str>,
     mode: &str,
@@ -611,7 +611,7 @@ elif mode == "create_shell":
     Ok(())
 }
 
-fn write_updating_pre_tool_use_hook(
+pub(super) fn write_updating_pre_tool_use_hook(
     home: &Path,
     matcher: &str,
     updated_input: &Value,
@@ -800,7 +800,7 @@ elif mode == "exit_2":
     Ok(())
 }
 
-fn install_allow_permission_request_hook(home: &Path) -> Result<()> {
+pub(super) fn install_allow_permission_request_hook(home: &Path) -> Result<()> {
     write_permission_request_hook(
         home,
         Some(PERMISSION_REQUEST_HOOK_MATCHER),
@@ -1263,7 +1263,7 @@ fn read_pre_tool_use_hook_inputs(home: &Path) -> Result<Vec<serde_json::Value>> 
     read_hook_inputs_from_log(home.join("pre_tool_use_hook_log.jsonl").as_path())
 }
 
-fn read_permission_request_hook_inputs(home: &Path) -> Result<Vec<serde_json::Value>> {
+pub(super) fn read_permission_request_hook_inputs(home: &Path) -> Result<Vec<serde_json::Value>> {
     fs::read_to_string(home.join("permission_request_hook_log.jsonl"))
         .context("read permission request hook log")?
         .lines()
@@ -6488,7 +6488,7 @@ async fn post_tool_use_records_apply_patch_context_with_edit_alias() -> Result<(
     Ok(())
 }
 
-fn write_lifecycle_hooks(home: &Path, events: &[&str]) -> Result<()> {
+pub(super) fn write_lifecycle_hooks(home: &Path, events: &[&str]) -> Result<()> {
     let mut hooks = serde_json::Map::new();
     for event in events {
         let log = home.join(format!("{event}.jsonl"));

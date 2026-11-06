@@ -87,7 +87,7 @@ fn selected_profile_round_trips_without_losing_metadata() {
     let codex_home = tempdir().expect("tempdir");
     let store = AccountStore::new(codex_home.path().to_path_buf());
     let first = import_test_account(&store, codex_home.path(), "first", "account-a");
-    let _second = import_test_account(&store, codex_home.path(), "second", "account-b");
+    let second = import_test_account(&store, codex_home.path(), "second", "account-b");
     let first = update_profile(&store, &first.id, |profile| {
         profile.label = "preserved".to_string();
         profile.automation_enabled = false;
@@ -115,6 +115,16 @@ fn selected_profile_round_trips_without_losing_metadata() {
     );
     assert_eq!(snapshot(&store).0[0], expected);
     assert_no_handoff(&store, reconcile);
+    let preserved = snapshot(&store);
+    let second_auth = load_auth(&store.account_home(&second.id)).expect("second auth");
+    store
+        .apply_imported_account_to_root_auth(&second.id, FILE, Default::default())
+        .expect("select second account");
+    assert_eq!(export(&store), AccountHandoffOutcome::Completed(second));
+    assert_eq!(
+        snapshot(&store),
+        (preserved.0, preserved.1, Some(second_auth))
+    );
 }
 
 #[test]

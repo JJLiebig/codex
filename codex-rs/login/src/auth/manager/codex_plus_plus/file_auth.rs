@@ -36,6 +36,8 @@ pub(in crate::auth::manager) async fn new_manager(
         AuthKeyringBackendKind::default(),
         agent_identity_authapi_base_url.as_deref(),
         &auth_config.auth_route_config,
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .filter(|auth| {
@@ -63,11 +65,17 @@ pub(in crate::auth::manager) async fn new_manager(
 
 pub(in crate::auth::manager) async fn load(
     manager: &AuthManager,
+    cached_auth: Option<&CodexAuth>,
     guard: Option<&AuthRefreshGuard>,
-) -> Option<CodexAuth> {
+) -> std::io::Result<Option<CodexAuth>> {
     let allowed_login_methods = manager.allowed_login_methods();
     let effective_chatgpt_workspaces = manager.effective_chatgpt_workspaces();
-    load_auth_from_storage_with_guard(
+    let allowed_auth_modes = manager
+        .allowed_auth_modes
+        .read()
+        .map_err(|_| std::io::Error::other("credential policy is unavailable"))?
+        .clone();
+    Ok(load_auth_from_storage_with_guard(
         &manager.active_auth_home(),
         manager.active_auth_credentials_store_mode(),
         Some(&allowed_login_methods),
@@ -76,11 +84,11 @@ pub(in crate::auth::manager) async fn load(
         manager.active_keyring_backend_kind(),
         manager.agent_identity_authapi_base_url.as_deref(),
         &manager.auth_route_config,
+        cached_auth,
+        allowed_auth_modes.as_deref(),
         guard,
     )
-    .await
-    .ok()
-    .flatten()
+    .await?
     .filter(|auth| {
         validate_auth_restrictions(
             Some(&allowed_login_methods),
@@ -88,5 +96,5 @@ pub(in crate::auth::manager) async fn load(
             auth,
         )
         .is_ok()
-    })
+    }))
 }

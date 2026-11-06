@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fs::File;
 use std::fs::OpenOptions;
+use std::io::Read;
+use std::io::Write;
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +20,12 @@ use tracing::warn;
 
 #[path = "storage_error.rs"]
 mod storage_error;
+
+#[path = "storage_file.rs"]
+mod storage_file;
+
+#[path = "storage_commit.rs"]
+mod storage_commit;
 
 #[path = "storage_telemetry.rs"]
 mod storage_telemetry;
@@ -45,7 +53,6 @@ pub(crate) use codex_plus_plus::account_removal;
 
 use crate::account_lease::AuthRefreshGuard;
 use codex_plus_plus::FileAuthorityMarker;
-use codex_plus_plus::atomic_file;
 
 /// Expected structure for $CODEX_HOME/auth.json.
 #[derive(Deserialize, Serialize, Clone, Debug, PartialEq)]
@@ -140,8 +147,9 @@ where
 
 impl AgentIdentityAuthRecord {
     pub(crate) fn from_agent_identity_jwt(jwt: &str) -> std::io::Result<Self> {
-        let claims =
-            decode_agent_identity_jwt(jwt, /*jwks*/ None).map_err(std::io::Error::other)?;
+        let claims = decode_agent_identity_jwt(jwt, /*jwks*/ None).map_err(|error| {
+            storage_error::with_context("failed to decode agent identity JWT", error)
+        })?;
 
         Ok(claims.into())
     }
@@ -229,6 +237,31 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
     fn save_preserving_file(&self, auth: &AuthDotJson) -> std::io::Result<()> {
         self.save(auth)
     }
+    /// Commits only while the selected credential document remains unchanged.
+    fn compare_and_save(&self, expected: &AuthDotJson, auth: &AuthDotJson) -> std::io::Result<()> {
+        // An unavailable keyring cannot prove that a fallback is still current.
+        // Do not overwrite a recovered secure-store generation we could not read.
+        if self.load_account_grant()?.as_ref() != Some(expected) {
+            return Err(std::io::Error::other(
+                "Credentials changed before refresh commit.",
+            ));
+        }
+
+        self.save(auth)
+    }
+    fn compare_and_save_with_guard(
+        &self,
+        expected: &AuthDotJson,
+        auth: &AuthDotJson,
+        guard: &AuthRefreshGuard,
+    ) -> std::io::Result<()> {
+        if self.load_with_guard(guard)?.as_ref() != Some(expected) {
+            return Err(std::io::Error::other(
+                "Credentials changed before refresh commit.",
+            ));
+        }
+        self.save_with_guard(auth, guard)
+    }
     fn delete(&self) -> std::io::Result<bool>;
     fn delete_with_guard(&self, _guard: &AuthRefreshGuard) -> std::io::Result<bool> {
         self.delete()
@@ -238,23 +271,24 @@ pub(super) trait AuthStorageBackend: Debug + Send + Sync {
 #[derive(Debug)]
 pub(super) struct FileAuthStorage {
     codex_home: PathBuf,
-    atomic: atomic_file::AtomicFileStorage,
 }
 
 impl FileAuthStorage {
     pub(super) fn new(codex_home: PathBuf) -> Self {
-        Self {
-            atomic: atomic_file::AtomicFileStorage::new(codex_home.clone()),
-            codex_home,
-        }
+        Self { codex_home }
     }
 
     /// Attempt to read and parse the `auth.json` file in the given `CODEX_HOME` directory.
     /// Returns the full AuthDotJson structure.
-    #[cfg(test)]
     pub(super) fn try_read_auth_json(&self, auth_file: &Path) -> std::io::Result<AuthDotJson> {
-        let contents = std::fs::read_to_string(auth_file)?;
-        serde_json::from_str(&contents).map_err(std::io::Error::other)
+        let mut file = File::open(auth_file)?;
+        let mut contents = String::new();
+        file.read_to_string(&mut contents)?;
+        let auth_dot_json: AuthDotJson = serde_json::from_str(&contents).map_err(|err| {
+            storage_error::with_context("failed to deserialize CLI auth from file", err)
+        })?;
+
+        Ok(auth_dot_json)
     }
 }
 
@@ -264,16 +298,13 @@ impl AuthStorageBackend for FileAuthStorage {
     }
 
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
-        match self.atomic.load_without_recovery() {
-            Ok(auth) => return Ok(auth),
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {}
+        let auth_file = get_auth_file(&self.codex_home);
+        let auth_dot_json = match self.try_read_auth_json(&auth_file) {
+            Ok(auth) => auth,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(err) => return Err(err),
-        }
-        match AuthRefreshGuard::acquire(&self.codex_home) {
-            Ok(guard) => self.load_with_guard(&guard),
-            Err(err) if read_only_lock_error(&err) => self.atomic.load_without_recovery(),
-            Err(err) => Err(err),
-        }
+        };
+        Ok(Some(auth_dot_json))
     }
 
     fn save(&self, auth_dot_json: &AuthDotJson) -> std::io::Result<()> {
@@ -283,7 +314,7 @@ impl AuthStorageBackend for FileAuthStorage {
 
     fn load_with_guard(&self, guard: &AuthRefreshGuard) -> std::io::Result<Option<AuthDotJson>> {
         guard.ensure_matches(&self.codex_home)?;
-        self.atomic.load()
+        self.load()
     }
 
     fn save_with_guard(
@@ -292,7 +323,26 @@ impl AuthStorageBackend for FileAuthStorage {
         guard: &AuthRefreshGuard,
     ) -> std::io::Result<()> {
         guard.ensure_matches(&self.codex_home)?;
-        self.atomic.save(auth_dot_json)
+        let auth_file = storage_file::resolve_auth_file(get_auth_file(&self.codex_home))?;
+        let parent = auth_file
+            .parent()
+            .ok_or_else(|| std::io::Error::other("auth file has no parent"))?;
+        std::fs::create_dir_all(parent)?;
+        let json_data = serde_json::to_string_pretty(auth_dot_json)?;
+        storage_file::check_replaceable(&auth_file)?;
+        // tempfile creates a private (0600 on Unix) file in the same filesystem.
+        // Readers see the complete old or new document, never a truncated auth.json.
+        let mut replacement = storage_file::replacement(&auth_file)?;
+        replacement.write_all(json_data.as_bytes())?;
+        replacement.as_file().sync_all()?;
+        // Clear Windows' temporary attribute, then restore cleanup protection.
+        // std::fs::rename can replace a file held open by a reader on Windows;
+        // tempfile::persist only uses MoveFileExW, which rejects that case.
+        let (_file, path) = replacement.keep().map_err(|error| error.error)?;
+        let mut path = tempfile::TempPath::try_from_path(path)?;
+        std::fs::rename(&path, auth_file)?;
+        path.disable_cleanup(/*disable_cleanup*/ true);
+        Ok(())
     }
 
     fn delete(&self) -> std::io::Result<bool> {
@@ -300,13 +350,6 @@ impl AuthStorageBackend for FileAuthStorage {
         let marker_removed = FileAuthorityMarker::new(&self.codex_home).clear()?;
         Ok(marker_removed || file_removed)
     }
-}
-
-fn read_only_lock_error(err: &std::io::Error) -> bool {
-    matches!(
-        err.kind(),
-        std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
-    )
 }
 
 static CODEX_AUTH_SECRET_NAME: Lazy<SecretName> =
@@ -639,6 +682,21 @@ impl AuthStorageBackend for AutoAuthStorage {
         codex_plus_plus::load_auto_account_grant(self)
     }
 
+    fn compare_and_save(&self, expected: &AuthDotJson, auth: &AuthDotJson) -> std::io::Result<()> {
+        let guard = AuthRefreshGuard::acquire(&self.codex_home)?;
+        self.compare_and_save_with_guard(expected, auth, &guard)
+    }
+
+    fn compare_and_save_with_guard(
+        &self,
+        expected: &AuthDotJson,
+        auth: &AuthDotJson,
+        guard: &AuthRefreshGuard,
+    ) -> std::io::Result<()> {
+        guard.ensure_matches(&self.codex_home)?;
+        codex_plus_plus::auto_auth::compare_and_save(self, expected, auth, guard)
+    }
+
     fn load(&self) -> std::io::Result<Option<AuthDotJson>> {
         let guard = AuthRefreshGuard::acquire(&self.codex_home)?;
         self.load_with_guard(&guard)
@@ -729,7 +787,7 @@ pub(crate) fn save_file_auth_if_unchanged(
     guard: &AuthRefreshGuard,
 ) -> std::io::Result<()> {
     guard.ensure_matches(codex_home)?;
-    atomic_file::AtomicFileStorage::new(codex_home.to_path_buf()).save_if_unchanged(expected, auth)
+    storage_commit::codex_plus_plus::save_file_if_unchanged(codex_home, expected, auth, guard)
 }
 
 pub(super) fn create_auth_storage_with_store(
@@ -738,6 +796,7 @@ pub(super) fn create_auth_storage_with_store(
     keyring_store: Arc<dyn KeyringStore>,
     keyring_backend_kind: AuthKeyringBackendKind,
 ) -> Arc<dyn AuthStorageBackend> {
+    let commit_home = codex_home.clone();
     let storage: Arc<dyn AuthStorageBackend> = match mode {
         AuthCredentialsStoreMode::File => Arc::new(FileAuthStorage::new(codex_home)),
         AuthCredentialsStoreMode::Keyring => {
@@ -750,7 +809,11 @@ pub(super) fn create_auth_storage_with_store(
         )),
         AuthCredentialsStoreMode::Ephemeral => Arc::new(EphemeralAuthStorage::new(codex_home)),
     };
-    storage_telemetry::observe(storage, mode, keyring_backend_kind)
+    storage_commit::wrap(
+        storage_telemetry::observe(storage, mode, keyring_backend_kind),
+        commit_home,
+        mode,
+    )
 }
 
 fn create_keyring_auth_storage(

@@ -87,7 +87,7 @@ pub(super) async fn record_cancelled_input(
     } else {
         input
     };
-    run_hooks_and_collect_inputs(
+    let _ = run_hooks_and_collect_inputs(
         sess,
         turn_context,
         &turn_context.capture_current_model_info(),
@@ -246,7 +246,7 @@ pub(crate) async fn record_claimed_input(
     turn_context: &Arc<TurnContext>,
     input: &[TurnInput],
     completion_claim: &mut Option<u64>,
-) -> bool {
+) -> codex_protocol::error::Result<()> {
     run_hooks_and_collect_inputs(
         sess,
         turn_context,
@@ -255,8 +255,8 @@ pub(crate) async fn record_claimed_input(
         PersistContext::Standard,
         completion_claim,
     )
-    .await
-    .should_stop
+    .await?;
+    Ok(())
 }
 
 async fn record_injections(

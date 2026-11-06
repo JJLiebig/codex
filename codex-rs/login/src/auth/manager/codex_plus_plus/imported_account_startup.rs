@@ -117,6 +117,8 @@ pub(in crate::auth::manager) async fn load_imported_account_auth(
         AuthKeyringBackendKind::default(),
         agent_identity_authapi_base_url,
         auth_route_config,
+        /*cached_auth*/ None,
+        Some(&[codex_protocol::auth::AuthMode::Chatgpt]),
     )
     .await
     .ok()

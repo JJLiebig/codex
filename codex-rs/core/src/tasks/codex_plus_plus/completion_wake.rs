@@ -52,7 +52,7 @@ pub(crate) async fn run_turn_loop(
             }
         };
         if turn_state.stopped {
-            settle_stopped_turn(&sess, &ctx, &mut turn_state, &cancellation_token).await;
+            settle_stopped_turn(&sess, &ctx, &mut turn_state, &cancellation_token).await?;
             return Ok(last_agent_message);
         }
         // Terminal errors are already reported. Let task completion preserve pending
@@ -65,7 +65,7 @@ pub(crate) async fn run_turn_loop(
         }
         if turn_state.completion_claim.is_some() {
             if !cancellation_token.is_cancelled() {
-                settle_completion_claim(&sess, &ctx, &mut turn_state).await;
+                settle_completion_claim(&sess, &ctx, &mut turn_state).await?;
             }
             return Ok(last_agent_message);
         }
@@ -87,37 +87,38 @@ async fn settle_stopped_turn(
     ctx: &Arc<TurnContext>,
     turn_state: &mut TurnRunState,
     cancellation_token: &CancellationToken,
-) {
+) -> codex_protocol::error::Result<()> {
     if cancellation_token.is_cancelled() {
-        return;
+        return Ok(());
     }
-    settle_completion_claim(sess, ctx, turn_state).await;
+    let result = settle_completion_claim(sess, ctx, turn_state).await;
     if !cancellation_token.is_cancelled() {
         sess.services.unified_exec_manager.completion_wake.clear();
     }
+    result
 }
 
 async fn settle_completion_claim(
     sess: &Arc<Session>,
     ctx: &Arc<TurnContext>,
     turn_state: &mut TurnRunState,
-) {
+) -> codex_protocol::error::Result<()> {
     if turn_state.completion_claim.is_none() {
-        return;
+        return Ok(());
     }
     let Some(pending_turn_state) = sess
         .input_queue
         .turn_state_for_sub_id(&sess.active_turn, &ctx.sub_id)
         .await
     else {
-        return;
+        return Ok(());
     };
     let pending_input = sess
         .input_queue
         .take_pending_input_for_turn_state(pending_turn_state.as_ref())
         .await;
     if pending_input.is_empty() {
-        return;
+        return Ok(());
     }
-    record_claimed_input(sess, ctx, &pending_input, &mut turn_state.completion_claim).await;
+    record_claimed_input(sess, ctx, &pending_input, &mut turn_state.completion_claim).await
 }

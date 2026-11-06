@@ -117,3 +117,46 @@ pub(in crate::auth::storage) fn delete(
 #[cfg(test)]
 #[path = "auto_auth_tests.rs"]
 mod tests;
+
+pub(in crate::auth::storage) fn compare_and_save(
+    storage: &AutoAuthStorage,
+    expected: &AuthDotJson,
+    auth: &AuthDotJson,
+    guard: &AuthRefreshGuard,
+) -> std::io::Result<()> {
+    if storage.file_authority.is_active()? {
+        return storage
+            .file_storage
+            .compare_and_save_with_guard(expected, auth, guard);
+    }
+    let keyring_auth = storage.keyring_storage.load();
+    let current = match keyring_auth {
+        Ok(Some(current)) => Some(current),
+        Ok(None) => storage.file_storage.load_with_guard(guard)?,
+        Err(ref error) => {
+            // Preserve refreshed fallback tokens without writing to a keyring
+            // whose current generation we could not read, even if it recovers.
+            let mut telemetry = storage_telemetry::telemetry(
+                AuthCredentialsStoreMode::Auto,
+                storage.keyring_backend_kind,
+                Operation::Save,
+            );
+            telemetry.record_load_attempt(
+                storage_telemetry::keyring_store(storage.keyring_backend_kind),
+                &keyring_auth,
+            );
+            telemetry.record_secure_error(error);
+            let result = storage
+                .file_storage
+                .compare_and_save_with_guard(expected, auth, guard);
+            telemetry.record_save_attempt(Store::File, &result);
+            return result;
+        }
+    };
+    if current.as_ref() != Some(expected) {
+        return Err(std::io::Error::other(
+            "Credentials changed before refresh commit.",
+        ));
+    }
+    storage.save_with_guard(auth, guard)
+}
