@@ -125,9 +125,16 @@ pub(in crate::auth::storage) fn compare_and_save(
     guard: &AuthRefreshGuard,
 ) -> std::io::Result<()> {
     if storage.file_authority.is_active()? {
-        return storage
+        let mut telemetry = storage_telemetry::telemetry(
+            AuthCredentialsStoreMode::Auto,
+            storage.keyring_backend_kind,
+            Operation::Save,
+        );
+        let result = storage
             .file_storage
             .compare_and_save_with_guard(expected, auth, guard);
+        telemetry.record_save_attempt(Store::File, &result);
+        return result;
     }
     let keyring_auth = storage.keyring_storage.load();
     let current = match keyring_auth {

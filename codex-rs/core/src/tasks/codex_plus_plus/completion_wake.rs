@@ -64,8 +64,11 @@ pub(crate) async fn run_turn_loop(
             return Ok(last_agent_message);
         }
         if turn_state.completion_claim.is_some() {
-            if !cancellation_token.is_cancelled() {
-                settle_completion_claim(&sess, &ctx, &mut turn_state).await?;
+            if !cancellation_token.is_cancelled()
+                && let Err(error) = settle_completion_claim(&sess, &ctx, &mut turn_state).await
+            {
+                sess.services.unified_exec_manager.completion_wake.clear();
+                return Err(error);
             }
             return Ok(last_agent_message);
         }

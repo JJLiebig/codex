@@ -74,7 +74,7 @@ async fn auth_refresh_read_failure_is_transient_and_preserves_network_permit() {
     let home = tempfile::tempdir().unwrap();
     let storage = FileAuthStorage::new(home.path().to_path_buf());
     let initial = chatgpt_auth("user-a", "workspace-a", "token-1");
-    let stored = crate::AuthDotJson {
+    let mut stored = crate::AuthDotJson {
         auth_mode: Some(codex_protocol::auth::AuthMode::Chatgpt),
         openai_api_key: None,
         tokens: Some(initial.get_token_data().unwrap()),
@@ -84,6 +84,8 @@ async fn auth_refresh_read_failure_is_transient_and_preserves_network_permit() {
         bedrock_api_key: None,
         bedrock_access_keys: None,
     };
+    // Empty refresh tokens are reserved for imported-account root markers.
+    stored.tokens.as_mut().unwrap().refresh_token = "managed-refresh".into();
     storage.save(&stored).unwrap();
     let controller = NetworkPolicyController::default();
     let policy = controller.policy();

@@ -395,7 +395,9 @@ print(json.dumps({"continue": False, "stopReason": "stop completion continuation
             unreachable!()
         };
         assert!(
-            completed.error.is_some(),
+            completed.error.as_ref().is_some_and(|error| error
+                .message
+                .contains("Uploaded audio file inputs are not enabled")),
             "settlement must report unsupported audio"
         );
         assert_eq!(

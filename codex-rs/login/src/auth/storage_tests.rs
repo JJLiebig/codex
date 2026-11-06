@@ -158,11 +158,15 @@ fn file_storage_failed_replacement_cleans_up_temporary_file() -> anyhow::Result<
     std::fs::create_dir(&auth_path)?;
     let storage = FileAuthStorage::new(home.path().to_path_buf());
     let auth = serde_json::from_value(json!({"OPENAI_API_KEY": "test-key"}))?;
-    assert!(storage.save(&auth).is_err());
+    let guard = AuthRefreshGuard::acquire(home.path())?;
+    let before = std::fs::read_dir(home.path())?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<std::collections::BTreeSet<_>>>()?;
+    assert!(storage.save_with_guard(&auth, &guard).is_err());
     let entries = std::fs::read_dir(home.path())?
         .map(|entry| entry.map(|entry| entry.file_name()))
-        .collect::<std::io::Result<Vec<_>>>()?;
-    assert_eq!(entries, vec![std::ffi::OsString::from("auth.json")]);
+        .collect::<std::io::Result<std::collections::BTreeSet<_>>>()?;
+    assert_eq!(entries, before);
     assert!(auth_path.is_dir());
     Ok(())
 }
