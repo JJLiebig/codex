@@ -97,6 +97,8 @@ async fn prompt_cache_latest_footer_holds_misses_and_preserves_session_average()
                 /*use_theme_colors*/ false
             )
             .unwrap()
+            .into_hyperlink_line()
+            .line
             .to_string(),
         "Cache 88.9%"
     );

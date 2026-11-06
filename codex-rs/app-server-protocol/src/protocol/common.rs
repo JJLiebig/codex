@@ -907,6 +907,13 @@ client_request_definitions! {
         serialization: None,
         response: v2::ThreadItemsReadResponse,
     },
+    #[experimental("thread/guardianReview")]
+    /// Review the idle thread's final injected exec_command without executing it.
+    ThreadGuardianReview => "thread/guardianReview" {
+        params: v2::ThreadGuardianReviewParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadGuardianReviewResponse,
+    },
     /// Append raw Responses API items to the thread history without starting a user turn.
     ThreadInjectItems => "thread/inject_items" {
         params: v2::ThreadInjectItemsParams,
@@ -2010,6 +2017,7 @@ server_notification_definitions! {
     ThreadReverted => "thread/reverted" (v2::ThreadRevertedNotification),
     SkillsChanged => "skills/changed" (v2::SkillsChangedNotification),
     ThreadNameUpdated => "thread/name/updated" (v2::ThreadNameUpdatedNotification),
+    ThreadSectionChanged => "thread/section/changed" (v2::ThreadSectionChangedNotification),
     ThreadAttachmentUpdated => "thread/attachment/updated" (v2::ThreadAttachmentUpdatedNotification),
     ThreadGoalUpdated => "thread/goal/updated" (v2::ThreadGoalUpdatedNotification),
     #[experimental("thread/prediction/updated")]
@@ -2835,6 +2843,7 @@ mod tests {
                     version: "0.1.0".to_string(),
                 },
                 capabilities: Some(v1::InitializeCapabilities {
+                    required_human_approval: false,
                     explicit_gateway_oauth: false,
                     experimental_api: true,
                     request_attestation: true,
@@ -2923,6 +2932,7 @@ mod tests {
                         version: "0.1.0".to_string(),
                     },
                     capabilities: Some(v1::InitializeCapabilities {
+                        required_human_approval: false,
                         explicit_gateway_oauth: false,
                         experimental_api: true,
                         request_attestation: true,

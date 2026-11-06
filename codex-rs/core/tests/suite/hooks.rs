@@ -105,9 +105,14 @@ async fn submit_yolo_hook_review_turn(test: &TestCodex, prompt: &str) -> Result<
             }])
             .with_thread_settings(
                 codex_protocol::protocol::ThreadSettingsOverrides {
-                    environments: Some(codex_protocol::protocol::TurnEnvironmentSelections::new(
+                    environments: Some(codex_protocol::protocol::TurnEnvironmentRequests::new(
                         test.config.cwd.clone(),
-                        vec![test.executor_environment().selection().clone()],
+                        vec![
+                            test.executor_environment()
+                                .selection()
+                                .clone()
+                                .into_request(),
+                        ],
                     )),
                     approval_policy: Some(AskForApproval::Never),
                     approvals_reviewer: Some(ApprovalsReviewer::User),
@@ -517,7 +522,7 @@ with Path(r"{log_path}").open("a", encoding="utf-8") as handle:
     Ok(())
 }
 
-fn write_pre_tool_use_hook(
+pub(super) fn write_pre_tool_use_hook(
     home: &Path,
     matcher: Option<&str>,
     mode: &str,
@@ -611,7 +616,7 @@ elif mode == "create_shell":
     Ok(())
 }
 
-fn write_updating_pre_tool_use_hook(
+pub(super) fn write_updating_pre_tool_use_hook(
     home: &Path,
     matcher: &str,
     updated_input: &Value,
@@ -800,7 +805,7 @@ elif mode == "exit_2":
     Ok(())
 }
 
-fn install_allow_permission_request_hook(home: &Path) -> Result<()> {
+pub(super) fn install_allow_permission_request_hook(home: &Path) -> Result<()> {
     write_permission_request_hook(
         home,
         Some(PERMISSION_REQUEST_HOOK_MATCHER),
@@ -1263,7 +1268,7 @@ fn read_pre_tool_use_hook_inputs(home: &Path) -> Result<Vec<serde_json::Value>> 
     read_hook_inputs_from_log(home.join("pre_tool_use_hook_log.jsonl").as_path())
 }
 
-fn read_permission_request_hook_inputs(home: &Path) -> Result<Vec<serde_json::Value>> {
+pub(super) fn read_permission_request_hook_inputs(home: &Path) -> Result<Vec<serde_json::Value>> {
     fs::read_to_string(home.join("permission_request_hook_log.jsonl"))
         .context("read permission request hook log")?
         .lines()
@@ -5749,10 +5754,20 @@ async fn assert_guardian_allows_initial_unified_exec_once() -> Result<()> {
     let target = cwd.join(&target_name)?;
     let executed_shell = cwd.join(&executed_shell_name)?;
     test.fs()
-        .write_file(&counter, Vec::new(), /*sandbox*/ None)
+        .write_file(
+            &counter,
+            Vec::new(),
+            codex_file_system::WriteFileOptions::default(),
+            /*sandbox*/ None,
+        )
         .await?;
     test.fs()
-        .write_file(&target, b"seed".to_vec(), /*sandbox*/ None)
+        .write_file(
+            &target,
+            b"seed".to_vec(),
+            codex_file_system::WriteFileOptions::default(),
+            /*sandbox*/ None,
+        )
         .await?;
 
     submit_yolo_hook_review_turn(&test, "deny the dangerous command").await?;
@@ -5789,7 +5804,12 @@ async fn assert_guardian_allows_initial_unified_exec_once() -> Result<()> {
     let mut expected_counter = b"x".to_vec();
     for (index, (label, _, _)) in cases.iter().skip(2).enumerate() {
         test.fs()
-            .write_file(&target, b"seed".to_vec(), /*sandbox*/ None)
+            .write_file(
+                &target,
+                b"seed".to_vec(),
+                codex_file_system::WriteFileOptions::default(),
+                /*sandbox*/ None,
+            )
             .await?;
         submit_yolo_hook_review_turn(&test, "use unreviewed execution semantics").await?;
         wait_for_response_request_count(&responses, /*expected_count*/ (index + 3) * 3).await;
@@ -6488,7 +6508,7 @@ async fn post_tool_use_records_apply_patch_context_with_edit_alias() -> Result<(
     Ok(())
 }
 
-fn write_lifecycle_hooks(home: &Path, events: &[&str]) -> Result<()> {
+pub(super) fn write_lifecycle_hooks(home: &Path, events: &[&str]) -> Result<()> {
     let mut hooks = serde_json::Map::new();
     for event in events {
         let log = home.join(format!("{event}.jsonl"));

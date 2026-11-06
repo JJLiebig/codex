@@ -56,6 +56,7 @@ pub(crate) fn review(
             require_guardian: true,
             require_synchronous_review: true,
             model_requires_review: false,
+            serving_assessment: None,
             async_enabled: false,
             retried: false,
             escalated_exec: false,

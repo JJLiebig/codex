@@ -2,6 +2,27 @@ use super::*;
 use crate::account_lease::AuthRefreshGuard;
 
 impl ObservedStorage {
+    pub(super) fn compare_and_save_observed(
+        &self,
+        expected: &AuthDotJson,
+        auth: &AuthDotJson,
+        guard: Option<&AuthRefreshGuard>,
+    ) -> std::io::Result<()> {
+        let mut telemetry = telemetry(self.mode, self.kind, Operation::Save);
+        let result = match guard {
+            Some(guard) => self
+                .inner
+                .compare_and_save_with_guard(expected, auth, guard),
+            None => self.inner.compare_and_save(expected, auth),
+        };
+        telemetry.record_save_attempt(self.store(), &result);
+        if self.mode == AuthCredentialsStoreMode::Keyring
+            && let Err(error) = &result
+        {
+            telemetry.record_secure_error(error);
+        }
+        result
+    }
     pub(super) fn load_guarded(
         &self,
         guard: &AuthRefreshGuard,

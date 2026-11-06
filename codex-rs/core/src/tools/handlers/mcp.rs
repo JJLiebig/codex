@@ -693,6 +693,7 @@ mod tests {
                 tool_name: codex_tools::ToolName::namespaced("memory", "create_entities"),
                 source: ToolCallSource::Direct,
                 payload,
+                native_call: None,
                 environments: Default::default(),
             }),
             Some(PreToolUsePayload {
@@ -729,6 +730,7 @@ mod tests {
                 tool_name: codex_tools::ToolName::namespaced("mcp__foo", "exec_command"),
                 source: ToolCallSource::Direct,
                 payload,
+                native_call: None,
                 environments: Default::default(),
             }),
             Some(PreToolUsePayload {
@@ -761,6 +763,7 @@ mod tests {
                     tool_name: codex_tools::ToolName::namespaced("mcp__foo", "exec_command"),
                     source: ToolCallSource::Direct,
                     payload,
+                    native_call: None,
                     environments: Default::default(),
                 },
                 json!({ "message": "rewritten" }),
@@ -823,6 +826,7 @@ mod tests {
             tool_name: codex_tools::ToolName::namespaced("filesystem", "read_file"),
             source: ToolCallSource::Direct,
             payload,
+            native_call: None,
             environments: Default::default(),
         };
         assert_eq!(
@@ -863,6 +867,7 @@ mod tests {
                 call_id: invocation.call_id.clone(),
                 payload: invocation.payload.clone(),
                 encrypted_function_args: None,
+                native_call: None,
             },
             &invocation.source,
             &invocation.step_context,

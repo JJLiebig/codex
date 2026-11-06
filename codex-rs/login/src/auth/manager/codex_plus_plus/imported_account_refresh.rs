@@ -270,7 +270,7 @@ impl AuthManager {
                 .and_then(CodexAuth::get_account_id);
             if matches!(
                 self.reload_if_account_id_matches(expected_account_id.as_deref(), Some(&guard))
-                    .await,
+                    .await?,
                 ReloadOutcome::ReloadedChanged
             ) {
                 return Ok(());

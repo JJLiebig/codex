@@ -128,6 +128,17 @@ impl AuthStorageBackend for ObservedStorage {
         result
     }
 
+    fn compare_and_save(&self, expected: &AuthDotJson, auth: &AuthDotJson) -> std::io::Result<()> {
+        self.compare_and_save_observed(expected, auth, /*guard*/ None)
+    }
+    fn compare_and_save_with_guard(
+        &self,
+        expected: &AuthDotJson,
+        auth: &AuthDotJson,
+        guard: &crate::account_lease::AuthRefreshGuard,
+    ) -> std::io::Result<()> {
+        self.compare_and_save_observed(expected, auth, Some(guard))
+    }
     fn delete(&self) -> std::io::Result<bool> {
         let store = match self.mode {
             AuthCredentialsStoreMode::File | AuthCredentialsStoreMode::Ephemeral => self.store(),

@@ -44,6 +44,7 @@ enum Finish {
     DeferredMail,
     TriggeredMail,
     Compact,
+    StoppedAudio,
     Steer,
     Read,
     Cancel,
@@ -100,6 +101,7 @@ fn wait_for_release_command() -> &'static str {
 #[test_case(Finish::DeferredMail; "deferred mail keeps completion wait active")]
 #[test_case(Finish::TriggeredMail; "triggering mail interrupts completion wait")]
 #[test_case(Finish::Compact; "completion wakes after compact replacement in plan mode with agent message wakes")]
+#[test_case(Finish::StoppedAudio; "stopped completion reports queued audio and preserves text once")]
 #[test_case(Finish::Steer; "completion wakes after ordinary steering")]
 #[test_case(Finish::Read; "manual observation suppresses duplicate wake")]
 #[test_case(Finish::Cancel; "interrupt disarms idle wake")]
@@ -122,8 +124,15 @@ async fn background_completion(finish: Finish) -> Result<()> {
     };
     let contributions = Arc::new(AtomicUsize::new(0));
     let mut builder = test_codex().with_session_source(source);
-    if matches!(finish, Finish::Compact) {
+    if matches!(finish, Finish::Compact | Finish::StoppedAudio) {
         builder = builder.with_config(|config| {
+            // The fixture returns an assistant summary for local compaction.
+            config
+                .model_provider
+                .capabilities
+                .get_or_insert_default()
+                .remote_compaction =
+                Some(codex_model_provider_info::RemoteCompactionSupport::Unsupported);
             config
                 .features
                 .enable(Feature::WakeOnAgentMessages)
@@ -136,6 +145,28 @@ async fn background_completion(finish: Finish) -> Result<()> {
             &contributions,
         ))));
         builder = builder.with_extensions(Arc::new(extensions.build()));
+    }
+    if matches!(finish, Finish::StoppedAudio) {
+        builder = builder.with_pre_build_hook(|home| {
+            let script = home.join("stop_completion.py");
+            std::fs::write(&script, r#"import json, sys, time
+from pathlib import Path
+json.load(sys.stdin)
+home = Path(__file__).parent
+(home / "hook_started").touch()
+while not (home / "hook_release").exists():
+    time.sleep(0.02)
+print(json.dumps({"continue": False, "stopReason": "stop completion continuation"}))
+"#).unwrap();
+            std::fs::write(home.join("hooks.json"), json!({"hooks": {"SessionStart": [{
+                "matcher": "compact", "hooks": [{"type": "command", "command": format!("python3 {}", script.display())}]
+            }]}}).to_string()).unwrap();
+        }).with_model_info_override("gpt-5.5", |model| {
+            model.input_modalities.push(codex_protocol::openai_models::InputModality::Audio);
+        }).with_config(|config| {
+            core_test_support::hooks::trust_discovered_hooks(config);
+            config.features.disable(Feature::InstantInterrupt).unwrap();
+        });
     }
     let harness = TestCodexHarness::with_auto_env_builder(builder).await?;
     let command = match core_test_support::test_target_os() {
@@ -156,6 +187,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             | Finish::DeferredMail
             | Finish::TriggeredMail
             | Finish::Compact
+            | Finish::StoppedAudio
             | Finish::Steer
             | Finish::Read
             | Finish::Cancel
@@ -180,7 +212,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             ev_completed("r3"),
         ]));
     }
-    if matches!(finish, Finish::Compact) {
+    if matches!(finish, Finish::Compact | Finish::StoppedAudio) {
         responses.push(sse(vec![
             ev_assistant_message("summary", "Compacted."),
             ev_completed("r3"),
@@ -274,7 +306,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         );
     }
 
-    if matches!(finish, Finish::Compact) {
+    if matches!(finish, Finish::Compact | Finish::StoppedAudio) {
         let mut collaboration_mode = harness
             .test()
             .codex
@@ -292,6 +324,10 @@ async fn background_completion(finish: Finish) -> Result<()> {
             .await?;
         harness.test().codex.submit(Op::Compact).await?;
         wait_for_event(&harness.test().codex, |event| {
+            assert!(
+                !matches!(event, EventMsg::Error(_)),
+                "compaction failed: {event:?}"
+            );
             matches!(event, EventMsg::TurnComplete(_))
         })
         .await;
@@ -337,6 +373,57 @@ async fn background_completion(finish: Finish) -> Result<()> {
         );
     }
     harness.write_file("release", b"go").await?;
+    if matches!(finish, Finish::StoppedAudio) {
+        let home = harness.test().codex_home_path();
+        core_test_support::fs_wait::wait_for_path_exists(
+            home.join("hook_started"),
+            std::time::Duration::from_secs(20),
+        )
+        .await?;
+        harness
+            .test()
+            .codex
+            .start_or_steer_turn(TurnInputRequest::user_input(vec![
+                UserInput::Text {
+                    text: "Preserve queued completion text.".into(),
+                    text_elements: Vec::new(),
+                },
+                UserInput::Audio {
+                    audio: codex_protocol::models::AudioReference::File {
+                        file_id: "file_completion_audio".into(),
+                    },
+                },
+            ]))
+            .await?;
+        std::fs::write(home.join("hook_release"), "go")?;
+        let EventMsg::TurnComplete(completed) = wait_for_event(&harness.test().codex, |event| {
+            matches!(event, EventMsg::TurnComplete(_))
+        })
+        .await
+        else {
+            unreachable!()
+        };
+        assert!(
+            completed.error.as_ref().is_some_and(|error| error
+                .message
+                .contains("Uploaded audio file inputs are not enabled")),
+            "settlement must report unsupported audio"
+        );
+        assert_eq!(
+            mock.requests().len(),
+            3,
+            "stopped continuation must not sample"
+        );
+        harness
+            .submit("Continue after the stopped completion.")
+            .await?;
+        let requests = mock.requests();
+        let input = requests.last().unwrap().body_json()["input"].to_string();
+        assert_eq!(input.matches("<background_completion>").count(), 1);
+        assert_eq!(input.matches("Preserve queued completion text.").count(), 1);
+        assert!(!input.contains("input_audio"));
+        return Ok(());
+    }
     if matches!(finish, Finish::TriggeredMail) {
         wait_for_requests(&mock, 4, "completion did not resume the mail turn").await;
     } else if matches!(
@@ -344,7 +431,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
         Finish::Wake | Finish::DeferredMail | Finish::Steer | Finish::Read
     ) {
         submit.as_mut().expect("active submission").await?;
-    } else if matches!(finish, Finish::Compact) {
+    } else if matches!(finish, Finish::Compact | Finish::StoppedAudio) {
         wait_for_event(&harness.test().codex, |event| {
             matches!(event, EventMsg::TurnComplete(_))
         })
@@ -361,7 +448,11 @@ async fn background_completion(finish: Finish) -> Result<()> {
         requests.len(),
         match finish {
             Finish::Wake | Finish::DeferredMail | Finish::Cancel => 3,
-            Finish::TriggeredMail | Finish::Compact | Finish::Steer | Finish::Read => 4,
+            Finish::TriggeredMail
+            | Finish::Compact
+            | Finish::StoppedAudio
+            | Finish::Steer
+            | Finish::Read => 4,
             Finish::Ordinary | Finish::Exec | Finish::Subagent => 2,
         }
     );
@@ -371,6 +462,7 @@ async fn background_completion(finish: Finish) -> Result<()> {
             | Finish::DeferredMail
             | Finish::TriggeredMail
             | Finish::Compact
+            | Finish::StoppedAudio
             | Finish::Steer
     ) {
         let request = if matches!(

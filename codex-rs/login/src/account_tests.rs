@@ -14,8 +14,6 @@ use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::ForcedLoginMethod;
 use pretty_assertions::assert_eq;
 use serde::Serialize;
-use sha2::Digest;
-use sha2::Sha256;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::Barrier;
@@ -215,7 +213,6 @@ fn login_requirement_is_not_recorded_after_account_auth_is_replaced() {
         AuthKeyringBackendKind::default(),
     )
     .expect("replace account auth");
-    let pending = stage_pending_auth_save(&account_home, &replacement_auth);
 
     assert!(
         !store
@@ -230,7 +227,6 @@ fn login_requirement_is_not_recorded_after_account_auth_is_replaced() {
             .find(|account| account.id == profile.id)
             .is_some_and(|account| !account.login_required)
     );
-    assert!(!pending.exists());
     assert_eq!(
         load_auth_dot_json(
             &account_home,
@@ -302,16 +298,6 @@ fn apply_imported_account_to_root_auth_switches_root_auth() {
     let store = AccountStore::new(codex_home.path().to_path_buf());
     let first = import_test_account(&store, codex_home.path(), "first", "account-a");
     let _second = import_test_account(&store, codex_home.path(), "second", "account-b");
-    let first_home = store.account_home(&first.id);
-    let first_auth = load_auth_dot_json(
-        &first_home,
-        AuthCredentialsStoreMode::File,
-        AuthKeyringBackendKind::default(),
-    )
-    .expect("load first account auth")
-    .expect("first account auth");
-    let pending = stage_pending_auth_save(&first_home, &first_auth);
-
     let selected = store
         .apply_imported_account_to_root_auth(
             &first.id,
@@ -319,7 +305,6 @@ fn apply_imported_account_to_root_auth_switches_root_auth() {
             AuthKeyringBackendKind::default(),
         )
         .expect("select imported account");
-    assert!(!pending.exists());
 
     let root_auth = load_auth_dot_json(
         codex_home.path(),
@@ -1053,19 +1038,6 @@ fn save_root_test_auth(codex_home: &std::path::Path, account_id: &str) {
         AuthKeyringBackendKind::default(),
     )
     .expect("save root auth");
-}
-
-fn stage_pending_auth_save(auth_home: &std::path::Path, auth: &AuthDotJson) -> std::path::PathBuf {
-    let bytes = serde_json::to_vec(auth).expect("serialize auth fingerprint");
-    let fingerprint = format!("{:x}", Sha256::digest(bytes));
-    let short = &fingerprint[..16];
-    let pending = auth_home.join(format!(".codex-auth-{short}-{short}"));
-    std::fs::write(
-        &pending,
-        serde_json::to_vec_pretty(auth).expect("serialize pending auth"),
-    )
-    .expect("write pending auth");
-    pending
 }
 
 fn test_auth(account_id: &str, user_id: &str, email: &str) -> AuthDotJson {

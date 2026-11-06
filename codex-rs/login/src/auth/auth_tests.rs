@@ -62,6 +62,122 @@ fn header_auth_exposes_a_valid_chatgpt_account_id() {
 }
 
 #[tokio::test]
+async fn cancelled_refresh_marks_only_started_exchanges_as_unsettled() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    write_auth_file(
+        AuthFileParams {
+            openai_api_key: None,
+            chatgpt_plan_type: Some("pro".into()),
+            chatgpt_account_id: Some(WORKSPACE_ID_ALLOWED.into()),
+        },
+        home.path(),
+    )?;
+    let server = MockServer::start().await;
+    let storage = FileAuthStorage::new(home.path().to_path_buf());
+    let mut stored = storage.load()?.context("stored credentials")?;
+    let tokens = stored.tokens.as_mut().context("stored tokens")?;
+    tokens.oauth_provenance = Some(AccountOAuthProvenance {
+        issuer: server.uri(),
+        client_id: "codex-client".into(),
+    });
+    // Workspace switching retains the original ID and refresh tokens.
+    tokens.account_id = Some(WORKSPACE_ID_SECOND_ALLOWED.into());
+    tokens.access_token = fake_jwt_for_auth_file_params(&AuthFileParams {
+        openai_api_key: None,
+        chatgpt_plan_type: Some("business".into()),
+        chatgpt_account_id: Some(WORKSPACE_ID_SECOND_ALLOWED.into()),
+    })?;
+    storage.save(&stored)?;
+    let manager = Arc::new(
+        AuthManager::new_from_auth_config(
+            build_config(
+                home.path(),
+                /*forced_login_method*/ None,
+                /*forced_chatgpt_workspace_id*/ None,
+            )
+            .await,
+            /*enable_codex_api_key_env*/ false,
+            /*allowed_auth_modes*/ None,
+        )
+        .await,
+    );
+    let initial = manager.auth_cached().context("initial auth")?;
+
+    // Poll directly while the guard is held, then cancel before any OAuth request.
+    let guard = manager.refresh_lock.acquire().await?;
+    let mut waiting = Box::pin(manager.refresh_token_if_unchanged(&initial));
+    assert!(
+        waiting
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(
+                std::task::Waker::noop(),
+            ))
+            .is_pending()
+    );
+    drop(waiting);
+    assert!(!manager.is_chatgpt_refresh_unsettled(&initial)?);
+    assert!(server.received_requests().await.unwrap().is_empty());
+    drop(guard);
+
+    let received = Arc::new(tokio::sync::Notify::new());
+    let notify = Arc::clone(&received);
+    Mock::given(path("/oauth/token"))
+        .respond_with(move |_: &wiremock::Request| {
+            notify.notify_one();
+            ResponseTemplate::new(200)
+                .set_delay(Duration::from_secs(60))
+                .set_body_json(json!({"access_token": "late", "refresh_token": "late-refresh"}))
+        })
+        .expect(1)
+        .mount(&server)
+        .await;
+    let refreshing = Arc::clone(&manager);
+    let task = tokio::spawn(async move { refreshing.refresh_token_from_authority().await });
+    received.notified().await;
+    assert!(manager.is_chatgpt_refresh_unsettled(&initial)?);
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    assert!(manager.is_chatgpt_refresh_unsettled(&initial)?);
+
+    // A later known failure cannot resolve an earlier cancelled exchange.
+    server.reset().await;
+    Mock::given(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(1)
+        .mount(&server)
+        .await;
+    assert!(manager.refresh_token_from_authority().await.is_err());
+    assert!(manager.is_chatgpt_refresh_unsettled(&initial)?);
+
+    // A replacement is usable, and a completed refresh settles its own generation.
+    server.reset().await;
+    Mock::given(path("/oauth/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "access_token": "completed", "refresh_token": "completed-refresh",
+        })))
+        .expect(1)
+        .mount(&server)
+        .await;
+    let tokens = stored.tokens.as_mut().context("replacement tokens")?;
+    tokens.access_token = "replacement".into();
+    tokens.refresh_token = "replacement-refresh".into();
+    storage.save(&stored)?;
+    manager.reload().await;
+    let replacement = manager.auth_cached().context("replacement auth")?;
+    assert!(!manager.is_chatgpt_refresh_unsettled(&replacement)?);
+    manager.refresh_token_from_authority().await?;
+    assert!(!manager.is_chatgpt_refresh_unsettled(&replacement)?);
+    assert_eq!(
+        manager
+            .auth_cached()
+            .context("refreshed auth")?
+            .get_token()?,
+        "completed"
+    );
+    Ok(())
+}
+
+#[tokio::test]
 async fn refresh_without_id_token() -> anyhow::Result<()> {
     let codex_home = tempdir()?;
     let fake_jwt = write_auth_file(
@@ -117,12 +233,10 @@ async fn refresh_without_id_token() -> anyhow::Result<()> {
     assert_eq!(tokens.refresh_token, "new-refresh-token");
     assert_eq!(tokens.oauth_provenance, None);
 
-    // Preserve ordinary same-login refresh behavior when the stored tokens changed.
-    let mut expected = previous.clone();
-    expected.access_token = "stale-access-token".into();
-    expected.refresh_token = "stale-refresh-token".into();
-    expected.oauth_provenance = Some(provenance.clone());
-    assert_eq!(
+    // Reject this stale refresh response: newer tokens have already been saved
+    // for the same account.
+    let before = storage.load()?;
+    assert!(
         super::persist_tokens(
             &storage,
             &previous,
@@ -131,10 +245,10 @@ async fn refresh_without_id_token() -> anyhow::Result<()> {
             Some("stale-access-token".into()),
             Some("stale-refresh-token".into()),
             /*refresh_file_guard*/ None,
-        )?
-        .tokens,
-        Some(expected)
+        )
+        .is_err()
     );
+    assert_eq!(storage.load()?, before);
 
     Ok(())
 }
@@ -200,7 +314,7 @@ async fn refresh_without_id_token_preserves_file_authority() -> anyhow::Result<(
     assert!(matches!(
         manager
             .reload_if_account_id_matches(Some("account-123"), /*guard*/ None)
-            .await,
+            .await?,
         ReloadOutcome::ReloadedNoChange
     ));
     let cached = manager.auth_cached().context("auth should remain cached")?;
@@ -525,6 +639,8 @@ async fn stored_agent_identity_jwt_keeps_auth_json_unchanged() -> anyhow::Result
         AuthKeyringBackendKind::Direct,
         Some(&authapi_base_url),
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should load");
@@ -731,6 +847,8 @@ async fn chatgpt_auth_registers_agent_identity_when_enabled() -> anyhow::Result<
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should load");
@@ -820,6 +938,8 @@ async fn chatgpt_auth_registers_agent_identity_when_enabled() -> anyhow::Result<
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should reload");
@@ -863,6 +983,8 @@ async fn chatgpt_auth_retries_transient_agent_identity_registration() -> anyhow:
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should load");
@@ -930,6 +1052,8 @@ async fn chatgpt_auth_registration_retry_exhaustion_is_fallback_eligible() -> an
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should load");
@@ -992,6 +1116,8 @@ async fn chatgpt_auth_task_registration_retry_exhaustion_is_fallback_eligible() 
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should load");
@@ -1049,6 +1175,8 @@ async fn chatgpt_auth_non_retryable_registration_error_is_hard_failure() -> anyh
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await?
     .expect("auth should load");
@@ -1196,6 +1324,8 @@ async fn pro_account_with_no_api_key_uses_chatgpt_auth() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .unwrap()
@@ -1274,6 +1404,8 @@ async fn loads_api_key_from_auth_json() {
             AuthKeyringBackendKind::Direct,
             /*agent_identity_authapi_base_url*/ None,
             &crate::test_support::transport_default_auth_route_config(),
+            /*cached_auth*/ None,
+            /*allowed_auth_modes*/ None,
         )
         .await
         .unwrap()
@@ -1390,6 +1522,8 @@ async fn refresh_failure_is_scoped_to_the_matching_auth_snapshot() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("load auth")
@@ -1411,6 +1545,7 @@ async fn refresh_failure_is_scoped_to_the_matching_auth_snapshot() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
     )
     .await
     .expect("updated auth should parse");
@@ -2204,6 +2339,8 @@ async fn load_auth_reads_access_token_from_env() {
         AuthKeyringBackendKind::Direct,
         Some(&authapi_base_url),
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("env auth should load")
@@ -2253,6 +2390,8 @@ async fn load_auth_reads_personal_access_token_from_env() {
             AuthKeyringBackendKind::default(),
             /*agent_identity_authapi_base_url*/ None,
             &crate::test_support::transport_default_auth_route_config(),
+            /*cached_auth*/ None,
+            /*allowed_auth_modes*/ None,
         )
         .await
         .expect("env auth should load")
@@ -2494,6 +2633,8 @@ async fn load_auth_keeps_codex_api_key_env_precedence() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("env auth should load")
@@ -3258,6 +3399,8 @@ async fn plan_type_maps_known_plan() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("load auth")
@@ -3291,6 +3434,8 @@ async fn plan_type_maps_self_serve_business_usage_based_plan() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("load auth")
@@ -3327,6 +3472,8 @@ async fn plan_type_maps_enterprise_cbp_usage_based_plan() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("load auth")
@@ -3363,6 +3510,8 @@ async fn plan_type_maps_unknown_to_unknown() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("load auth")
@@ -3396,6 +3545,8 @@ async fn missing_plan_type_maps_to_unknown() {
         AuthKeyringBackendKind::Direct,
         /*agent_identity_authapi_base_url*/ None,
         &crate::test_support::transport_default_auth_route_config(),
+        /*cached_auth*/ None,
+        /*allowed_auth_modes*/ None,
     )
     .await
     .expect("load auth")

@@ -15,64 +15,80 @@ use tempfile::tempdir;
 use codex_keyring_store::tests::MockKeyringStore;
 use keyring::Error as KeyringError;
 
-#[tokio::test]
-async fn file_storage_read_only_fallback_fails_closed_with_pending_save() -> anyhow::Result<()> {
-    let codex_home = tempdir()?;
-    let storage = FileAuthStorage::new(codex_home.path().to_path_buf());
-    let auth_dot_json = AuthDotJson {
-        auth_mode: Some(AuthMode::ApiKey),
-        openai_api_key: Some("test-key".to_string()),
-        tokens: None,
-        last_refresh: Some(Utc::now()),
-        agent_identity: None,
-        personal_access_token: None,
-        bedrock_api_key: None,
-        bedrock_access_keys: None,
-    };
-
-    storage
-        .save(&auth_dot_json)
-        .context("failed to save auth file")?;
-
-    let guard = AuthRefreshGuard::acquire(codex_home.path())?;
-    let loaded = storage.load().context("failed to load auth file")?;
-    drop(guard);
-    assert_eq!(Some(auth_dot_json), loaded);
-
-    storage
-        .atomic
-        .fail_once(atomic_file::FaultPoint::BeforeReplace);
-    let auth = loaded.context("auth should be loaded")?;
-    assert!(storage.save(&auth).is_err());
-    assert!(storage.atomic.load_without_recovery().is_err());
-
-    let lock_path = codex_home.path().join(".auth-refresh.lock");
-    let original_permissions = std::fs::metadata(&lock_path)?.permissions();
-    let mut read_only_permissions = original_permissions.clone();
-    read_only_permissions.set_readonly(true);
-    std::fs::set_permissions(&lock_path, read_only_permissions)?;
-    let read_only_load = storage.load();
-    std::fs::set_permissions(&lock_path, original_permissions)?;
-    assert_eq!(
-        std::io::ErrorKind::WouldBlock,
-        read_only_load.unwrap_err().kind()
+#[cfg(unix)]
+#[test]
+fn file_storage_creates_dangling_symlink_target_and_rejects_cycles() -> anyhow::Result<()> {
+    use std::os::unix::fs::symlink;
+    let home = tempdir()?;
+    let auth = serde_json::from_value(json!({"OPENAI_API_KEY":"fake-key"}))?;
+    let storage = FileAuthStorage::new(home.path().to_path_buf());
+    symlink("intermediate", home.path().join("auth.json"))?;
+    symlink("new-target.json", home.path().join("intermediate"))?;
+    storage.save(&auth)?;
+    assert_eq!(storage.load()?, Some(auth.clone()));
+    assert!(
+        std::fs::symlink_metadata(home.path().join("auth.json"))?
+            .file_type()
+            .is_symlink()
     );
-
-    let guard = AuthRefreshGuard::acquire(codex_home.path())?;
-    let storage = Arc::new(storage);
-    let loader_storage = Arc::clone(&storage);
-    let (sender, receiver) = std::sync::mpsc::channel();
-    let loader = std::thread::spawn(move || sender.send(loader_storage.load()));
+    std::fs::remove_file(home.path().join("new-target.json"))?;
+    symlink("auth.json", home.path().join("new-target.json"))?;
     assert_eq!(
-        std::sync::mpsc::RecvTimeoutError::Timeout,
-        receiver
-            .recv_timeout(Duration::from_millis(100))
-            .unwrap_err()
+        storage.save(&auth).unwrap_err().kind(),
+        std::io::ErrorKind::InvalidInput
     );
-    drop(guard);
-    assert_eq!(Some(auth), receiver.recv_timeout(Duration::from_secs(2))??);
-    loader.join().expect("loader should not panic")?;
+    Ok(())
+}
 
+#[cfg(unix)]
+#[test]
+fn file_storage_does_not_replace_read_only_or_hard_linked_credentials() -> anyhow::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let home = tempdir()?;
+    let path = home.path().join("auth.json");
+    let storage = FileAuthStorage::new(home.path().to_path_buf());
+    let first = serde_json::from_value(json!({"OPENAI_API_KEY":"first"}))?;
+    let second = serde_json::from_value(json!({"OPENAI_API_KEY":"second"}))?;
+    storage.save(&first)?;
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o400))?;
+    assert_eq!(
+        storage.save(&second).unwrap_err().kind(),
+        std::io::ErrorKind::PermissionDenied
+    );
+    assert_eq!(storage.load()?, Some(first.clone()));
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
+    let peer = home.path().join("peer.json");
+    std::fs::hard_link(&path, &peer)?;
+    assert_eq!(
+        storage.save(&second).unwrap_err().kind(),
+        std::io::ErrorKind::Unsupported
+    );
+    assert_eq!(std::fs::read(path)?, std::fs::read(peer)?);
+    assert_eq!(storage.load()?, Some(first));
+    Ok(())
+}
+
+#[test]
+fn refresh_commit_does_not_overwrite_another_writer() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let storage = create_auth_storage(
+        home.path().to_path_buf(),
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    );
+    let first = serde_json::from_value(json!({"OPENAI_API_KEY":"first"}))?;
+    let second = serde_json::from_value(json!({"OPENAI_API_KEY":"second"}))?;
+    let stale = serde_json::from_value(json!({"OPENAI_API_KEY":"stale"}))?;
+    storage.save(&first)?;
+    // An independent storage instance publishes a later generation before commit.
+    let other = create_auth_storage(
+        home.path().to_path_buf(),
+        AuthCredentialsStoreMode::File,
+        AuthKeyringBackendKind::default(),
+    );
+    other.save(&second)?;
+    assert!(storage.compare_and_save(&first, &stale).is_err());
+    assert_eq!(storage.load()?, Some(second));
     Ok(())
 }
 
@@ -100,6 +116,58 @@ async fn file_storage_save_persists_auth_dot_json() -> anyhow::Result<()> {
         .try_read_auth_json(&file)
         .context("failed to read auth file after save")?;
     assert_eq!(auth_dot_json, same_auth_dot_json);
+
+    // An overlapping reader must keep seeing the complete old document.
+    let mut overlapping_reader = File::open(&file)?;
+    let mut replacement = auth_dot_json.clone();
+    replacement.openai_api_key = Some("replacement-with-a-different-length".to_string());
+    storage
+        .save(&replacement)
+        .context("atomically replace auth while the original reader remains open")?;
+    let mut original_contents = String::new();
+    overlapping_reader.read_to_string(&mut original_contents)?;
+    assert_eq!(
+        serde_json::from_str::<AuthDotJson>(&original_contents)?,
+        auth_dot_json
+    );
+    assert_eq!(storage.load()?, Some(replacement));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            std::fs::metadata(&file)?.permissions().mode() & 0o777,
+            0o600
+        );
+
+        let linked_home = tempdir()?;
+        let link = get_auth_file(linked_home.path());
+        std::os::unix::fs::symlink(&file, &link)?;
+        FileAuthStorage::new(linked_home.path().to_path_buf()).save(&auth_dot_json)?;
+        assert!(std::fs::symlink_metadata(link)?.file_type().is_symlink());
+        assert_eq!(storage.load()?, Some(auth_dot_json));
+    }
+    Ok(())
+}
+
+#[test]
+fn file_storage_failed_replacement_cleans_up_temporary_file() -> anyhow::Result<()> {
+    let home = tempdir()?;
+    let auth_path = get_auth_file(home.path());
+    // A directory cannot be replaced by an auth file on any supported platform.
+    std::fs::create_dir(&auth_path)?;
+    let storage = FileAuthStorage::new(home.path().to_path_buf());
+    let auth = serde_json::from_value(json!({"OPENAI_API_KEY": "test-key"}))?;
+    let guard = AuthRefreshGuard::acquire(home.path())?;
+    let before = std::fs::read_dir(home.path())?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<std::collections::BTreeSet<_>>>()?;
+    assert!(storage.save_with_guard(&auth, &guard).is_err());
+    let entries = std::fs::read_dir(home.path())?
+        .map(|entry| entry.map(|entry| entry.file_name()))
+        .collect::<std::io::Result<std::collections::BTreeSet<_>>>()?;
+    assert_eq!(entries, before);
+    assert!(auth_path.is_dir());
     Ok(())
 }
 

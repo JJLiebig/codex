@@ -1,6 +1,5 @@
 pub(crate) mod account_removal;
-pub(super) mod atomic_file;
-mod auto_auth;
+pub(super) mod auto_auth;
 mod file_authority;
 mod telemetry;
 

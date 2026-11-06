@@ -777,7 +777,7 @@ pub struct Tui {
     screen_size: ScreenSizePolicy,
     ambient_pet_image_state: crate::pets::PetImageRenderState,
     pet_picker_preview_image_state: crate::pets::PetImageRenderState,
-    pub(crate) transcript_images: Vec<crate::transcript_image::ImagePlacement>,
+    pub(crate) retained_images: Vec<crate::transcript_image::ImagePlacement>,
     alt_saved_viewport: Option<ratatui::layout::Rect>,
     #[cfg(unix)]
     suspend_context: SuspendContext,
@@ -856,7 +856,7 @@ impl Tui {
             screen_size: ScreenSizePolicy::default(),
             ambient_pet_image_state: crate::pets::PetImageRenderState::default(),
             pet_picker_preview_image_state: crate::pets::PetImageRenderState::default(),
-            transcript_images: Vec::new(),
+            retained_images: Vec::new(),
             alt_saved_viewport: None,
             #[cfg(unix)]
             suspend_context: SuspendContext::new(),
@@ -1050,6 +1050,9 @@ impl Tui {
         // Restore both screens' input modes before giving the terminal to an editor. Repaint the
         // last frame on the alternate screen so separate-window editors leave Codex visible.
         let was_alt_screen = self.is_alt_screen_active();
+        if let Err(err) = self.terminal.clear_frame_images(&mut self.retained_images) {
+            tracing::warn!(%err, "failed to clear images before terminal handoff");
+        }
         let visible_frame = (was_alt_screen && matches!(handoff, TerminalHandoff::KeepScreen))
             .then(|| self.terminal.previous_buffer().clone());
         let restore_result = if let Some(visible_frame) = visible_frame {
@@ -1189,6 +1192,8 @@ impl Tui {
         if !self.alt_screen_enabled {
             return Ok(());
         }
+        self.terminal
+            .clear_frame_images(&mut self.retained_images)?;
         // Entry can change buffers before later input-mode configuration fails.
         self.terminal.invalidate_cursor_state();
         if self.owned_screen {
@@ -1239,6 +1244,8 @@ impl Tui {
         if !self.alt_screen_enabled || !self.is_alt_screen_active() {
             return Ok(());
         }
+        self.terminal
+            .clear_frame_images(&mut self.retained_images)?;
         let result = ALTERNATE_SCREEN.leave(self.terminal.backend_mut());
         if ALTERNATE_SCREEN.is_active() {
             return result;
@@ -1485,7 +1492,7 @@ impl Tui {
                 self.suspend_context.set_cursor_y(inline_area_bottom);
             }
 
-            terminal.draw_with_size(screen_size, &mut self.transcript_images, draw_fn)
+            terminal.draw_with_size(screen_size, &mut self.retained_images, draw_fn)
         })??;
         Ok(())
     }
@@ -1621,7 +1628,7 @@ impl Tui {
                 self.suspend_context.set_cursor_y(inline_area_bottom);
             }
 
-            terminal.draw_with_size(screen_size, &mut self.transcript_images, |frame| {
+            terminal.draw_with_size(screen_size, &mut self.retained_images, |frame| {
                 draw_fn(frame);
             })
         })??;

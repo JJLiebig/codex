@@ -283,6 +283,7 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         | ApiError::Retryable { .. }
         | ApiError::ServerOverloaded { .. }
         | ApiError::PolicyCapacityUnavailable { .. }
+        | ApiError::InvalidAudioInput { .. }
         | ApiError::ContextWindowExceeded => WeeklyWindowPingOutcome::Ambiguous { status: None },
     }
 }
