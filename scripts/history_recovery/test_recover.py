@@ -123,6 +123,52 @@ class RecoveryTests(unittest.TestCase):
                     self.assertEqual(self.apply("canonical")["result"], "noop")
                     db.close()
 
+    def test_unix_target_repairs_all_states_and_preserves_typed_content(self):
+        for state in ("mixed", "attribution-only", "canonical", "healthy"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as folder:
+                self.root = Path(folder)
+                self.path = self.root / "thread_history_1.sqlite"
+                db = self.fixture(state, newline="crlf")
+                before = recovery.fingerprint(
+                    db, future_root=state == "attribution-only"
+                )
+                result = recovery.recover(
+                    self.path,
+                    apply=True,
+                    expected=state,
+                    stopped=True,
+                    backup_dir=self.root / "backup",
+                    target_profile=recovery.UNIX_TARGET_PROFILE,
+                )
+                self.assertEqual(result["normalize"], [])
+                self.assertEqual(
+                    db.execute(
+                        "SELECT checksum FROM _sqlx_migrations ORDER BY version"
+                    ).fetchall(),
+                    [
+                        (bytes.fromhex(entry["lf"]),)
+                        for entry in self.target["canonical"][
+                            : 7 if state == "healthy" else 8
+                        ]
+                    ],
+                )
+                before.pop("_sqlx_migrations")
+                after = recovery.fingerprint(db)
+                after.pop("_sqlx_migrations")
+                self.assertEqual(after, before)
+                self.assertEqual(
+                    recovery.recover(
+                        self.path,
+                        apply=True,
+                        expected=result["class"],
+                        stopped=True,
+                        backup_dir=self.root / "second-backup",
+                        target_profile=recovery.UNIX_TARGET_PROFILE,
+                    )["result"],
+                    "noop",
+                )
+                db.close()
+
     def test_attribution_only_adds_null_root_preserving_nonzero_attribution(self):
         db = self.fixture("attribution-only")
         before = recovery.fingerprint(db, future_root=True)

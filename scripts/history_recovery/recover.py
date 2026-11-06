@@ -16,6 +16,8 @@ import time
 
 MANIFEST_SHA256 = "a5bd50a93666810cd9ec40c72d220f1fef105335f3adbf2448e0a54c569d1dee"
 TARGET_PROFILE = "upstream-alpha6-windows"
+UNIX_TARGET_PROFILE = "fork-0.166.0-unix"
+TARGET_PROFILES = (TARGET_PROFILE, UNIX_TARGET_PROFILE)
 LEDGER_SQL = """CREATE TABLE _sqlx_migrations (
     version BIGINT PRIMARY KEY,
     description TEXT NOT NULL,
@@ -30,7 +32,7 @@ class Refused(Exception):
     pass
 
 
-def manifest():
+def manifest(target_profile=TARGET_PROFILE):
     # Source bytes are pinned LF; the verified binary profile chooses the target hash.
     raw = Path(__file__).with_name("manifest.json").read_bytes()
     if hashlib.sha256(raw).hexdigest() != MANIFEST_SHA256:
@@ -47,6 +49,15 @@ def manifest():
             or hashlib.sha384(sql.replace(b"\n", b"\r\n")).hexdigest() != entry["crlf"]
         ):
             raise Refused("invalid pinned migration bytes")
+    if target_profile == UNIX_TARGET_PROFILE:
+        result["target"] = {
+            "profile": UNIX_TARGET_PROFILE,
+            "checksum_variant": "lf",
+            "executable_version": "0.166.0-fork.6",
+            "executable_sha256": "bfe29321dc599d47a04c885404b62bcd7b2afe7d3a023bdb8677b59ae1189446",
+        }
+    elif target_profile != TARGET_PROFILE:
+        raise Refused("unqualified target profile")
     return result
 
 
@@ -263,13 +274,13 @@ def recover(
     path = path.resolve(strict=True)
     if path.name != "thread_history_1.sqlite" or not path.is_file():
         raise Refused("expected the explicit thread_history_1.sqlite file")
-    target = manifest()
+    target = manifest(target_profile or TARGET_PROFILE)
     if not apply:
         with closing(connect(path, "ro")) as reader:
             reader.execute("BEGIN")
             return inspect(reader, target)
     if (
-        target_profile != TARGET_PROFILE
+        target_profile not in TARGET_PROFILES
         or not stopped
         or expected is None
         or backup_dir is None
@@ -354,7 +365,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("database", type=Path)
     parser.add_argument("--apply", action="store_true")
-    parser.add_argument("--target-profile", choices=[TARGET_PROFILE])
+    parser.add_argument("--target-profile", choices=TARGET_PROFILES)
     parser.add_argument(
         "--expect-class", choices=["healthy", "canonical", "attribution-only", "mixed"]
     )
@@ -380,7 +391,7 @@ def main():
         f"normalize[{len(result['normalize'])}]: "
         + ",".join(map(str, result["normalize"]))
     )
-    print(f"target_profile: {TARGET_PROFILE}")
+    print(f"target_profile: {args.target_profile or TARGET_PROFILE}")
     print(f"tables[{len(result['content'])}]{{name,rows,sha256}}:")
     for name, value in result["content"].items():
         print(f"  {name},{value['rows']},{value['sha256']}")
