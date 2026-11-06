@@ -9,6 +9,12 @@ load("//bazel/rules:runtime_package.bzl", "release_binary")
 codex_rust_crate(
     name = "cli",
     binaries_with_build_commit = ["codex"],
+    compile_data = [
+        "//:scripts/install/install-codex-plus-plus-latest.ps1",
+        "//:scripts/install/install-codex-plus-plus-latest.sh",
+        "//:scripts/install/install-codex-plus-plus.ps1",
+        "//:scripts/install/install-codex-plus-plus.sh",
+    ],
     crate_name = "codex_cli",
     extra_binaries = [
         "//codex-rs/bwrap:bwrap",

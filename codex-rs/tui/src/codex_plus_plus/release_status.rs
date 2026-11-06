@@ -86,7 +86,6 @@ impl UpdateAction {
 #[cfg_attr(test, allow(dead_code))]
 mod probe {
     use super::*;
-    use crate::npm_registry;
     use crate::update_versions::extract_version_from_latest_tag;
     use codex_install_context::codex_plus_plus::LatestVersionSource;
     use codex_install_context::codex_plus_plus::UpdatePlan;
@@ -106,6 +105,25 @@ mod probe {
     #[derive(Deserialize)]
     struct ReleaseInfo {
         tag_name: String,
+        #[serde(default)]
+        assets: Vec<ReleaseAsset>,
+    }
+
+    #[derive(Deserialize)]
+    struct ReleaseAsset {
+        name: String,
+    }
+
+    #[derive(Deserialize)]
+    struct NpmVersion {
+        version: String,
+        dist: Option<NpmDist>,
+    }
+
+    #[derive(Deserialize)]
+    struct NpmDist {
+        tarball: Option<String>,
+        integrity: Option<String>,
     }
 
     #[derive(Deserialize)]
@@ -152,6 +170,14 @@ mod probe {
     }
 
     async fn fetch_latest_version(plan: UpdatePlan, kind: Kind) -> anyhow::Result<String> {
+        if matches!(kind, Kind::Fork)
+            && let Some(url) = plan.fork_npm_version_url()
+        {
+            let LatestVersionSource::GitHub { api_url, .. } = plan.latest_version_source() else {
+                unreachable!("fork npm releases use GitHub fallback");
+            };
+            return fetch_published_version(plan, url, api_url).await;
+        }
         match plan.latest_version_source() {
             LatestVersionSource::Homebrew { api_url } => {
                 Ok(fetch_json::<HomebrewCaskInfo>(api_url).await?.version)
@@ -159,20 +185,71 @@ mod probe {
             LatestVersionSource::GitHub {
                 api_url,
                 tag_prefix,
-                npm_registry_url,
+                npm_registry_url: _,
             } => {
                 let release = fetch_json::<ReleaseInfo>(api_url).await?;
                 let version = extract_version_from_latest_tag(tag_prefix, &release.tag_name)?;
-                if matches!(kind, Kind::Fork)
-                    && let Some(npm_registry_url) = npm_registry_url
-                {
-                    let package =
-                        fetch_json::<npm_registry::NpmPackageInfo>(npm_registry_url).await?;
-                    npm_registry::ensure_version_ready(&package, &version)?;
-                }
                 Ok(version)
             }
         }
+    }
+
+    pub(super) async fn fetch_published_version(
+        plan: UpdatePlan,
+        url: &str,
+        github_url: &str,
+    ) -> anyhow::Result<String> {
+        let npm = fetch_json::<NpmVersion>(url).await.ok().and_then(|info| {
+            let dist = info.dist?;
+            if dist.tarball.as_deref().is_none_or(str::is_empty)
+                || dist.integrity.as_deref().is_none_or(str::is_empty)
+            {
+                return None;
+            }
+            let version = if plan.standalone_release_target().is_some() {
+                info.version
+                    .strip_suffix(&format!("-{}", url.rsplit('/').next()?))?
+                    .to_string()
+            } else {
+                info.version
+            };
+            codex_install_context::codex_plus_plus::is_newer(&version, "0.0.0-fork.0")?;
+            Some(version)
+        });
+        let Some(target) = plan.standalone_release_target() else {
+            return npm.ok_or_else(|| anyhow::anyhow!("npm release unavailable"));
+        };
+        let LatestVersionSource::GitHub { tag_prefix, .. } = plan.latest_version_source() else {
+            unreachable!("standalone releases use GitHub fallback");
+        };
+        let github = fetch_json::<ReleaseInfo>(github_url)
+            .await
+            .ok()
+            .and_then(|release| {
+                let version =
+                    extract_version_from_latest_tag(tag_prefix, &release.tag_name).ok()?;
+                let suffix = if target.contains("windows") {
+                    "zip"
+                } else {
+                    "tar.gz"
+                };
+                let archive = format!("codex-plus-plus-{version}-{target}.{suffix}");
+                [archive.clone(), format!("{archive}.sha256")]
+                    .iter()
+                    .all(|name| release.assets.iter().any(|asset| &asset.name == name))
+                    .then_some(version)
+            });
+        let newest = match (npm, github) {
+            (Some(npm), Some(github)) => {
+                if codex_install_context::codex_plus_plus::is_newer(&github, &npm) == Some(true) {
+                    Some(github)
+                } else {
+                    Some(npm)
+                }
+            }
+            (npm, github) => npm.or(github),
+        };
+        newest.ok_or_else(|| anyhow::anyhow!("published release unavailable"))
     }
 
     async fn fetch_json<T: DeserializeOwned>(url: &str) -> anyhow::Result<T> {

@@ -248,6 +248,10 @@ def assemble_package(args: argparse.Namespace) -> Path:
     )
     prepare_package_dir(package_dir, force=args.force)
     build_package_dir(package_dir, args.package_version, variant, spec, inputs)
+    if "-fork." in args.package_version:
+        from .codex_plus_plus.install import add_installer
+
+        add_installer(package_dir, windows=spec.target == "x86_64-pc-windows-msvc")
     if spec.target == "x86_64-pc-windows-msvc" and "-fork." in args.package_version:
         from .codex_plus_plus.history_upgrade import add_recovery
 
