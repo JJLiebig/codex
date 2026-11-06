@@ -1430,21 +1430,21 @@ fn pnpm_update_available_history_cell_snapshot() {
 fn codex_plus_plus_update_available_history_cell_snapshots() {
     let cell = UpdateAvailableHistoryCell::new(
         "9.9.9".to_string(),
-        Some(UpdateAction::CodexPlusPlusPackageManager(
-            codex_install_context::codex_plus_plus::PackageManager::Pnpm,
+        Some(UpdateAction::CodexPlusPlusStandalone(
+            codex_install_context::StandalonePlatform::Windows,
         )),
     );
     let rendered = render_lines(&cell.display_lines(/*width*/ 110))
         .join("\n")
         .replace(codex_cli_version(), "0.0.0");
     insta::assert_snapshot!(rendered, @r"
-    ╭──────────────────────────────────────────────────────╮
-    │ ✨ Update available! 0.0.0 -> 9.9.9                │
-    │ Run pnpm add -g @jjliebig/codex-plus-plus to update. │
-    │                                                      │
-    │ See full release notes:                              │
-    │ https://github.com/JJLiebig/codex/releases/latest    │
-    ╰──────────────────────────────────────────────────────╯
+    ╭───────────────────────────────────────────────────╮
+    │ ✨ Update available! 0.0.0 -> 9.9.9             │
+    │ Run codex update to update.                       │
+    │                                                   │
+    │ See full release notes:                           │
+    │ https://github.com/JJLiebig/codex/releases/latest │
+    ╰───────────────────────────────────────────────────╯
     ");
     let cell = UpdateAvailableHistoryCell::new("9.9.9".to_string(), None);
     let rendered = render_lines(&cell.display_lines(/*width*/ 110))

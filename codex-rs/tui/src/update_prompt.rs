@@ -202,7 +202,7 @@ impl WidgetRef for &UpdatePromptScreen {
         Clear.render(area, buf);
         let mut column = FlexRenderable::new();
 
-        let update_command = self.update_action.command_str();
+        let update_command = self.update_action.display_command();
         let release_notes_url = self.update_action.release_notes_url();
 
         column.push(/*flex*/ 1, RenderableItem::Borrowed(&""));
