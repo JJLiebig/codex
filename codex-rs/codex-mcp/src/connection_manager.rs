@@ -459,6 +459,12 @@ impl McpConnectionSet {
         {
             let server = server.with_read_only_mcp_tools(config.requires_read_only_mcp_tools);
             let registration = config.mcp_server_catalog.server(&server_name);
+            let server = server.with_standalone_browser_access(
+                &server_name,
+                registration,
+                runtime_context.browser_session_source.as_ref(),
+                |key| std::env::var_os(key).is_some(),
+            );
             let client_mcp_extensions = crate::client_capabilities::server_mcp_extensions(
                 &client_mcp_extensions,
                 &server_name,

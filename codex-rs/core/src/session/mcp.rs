@@ -147,20 +147,28 @@ impl Session {
             .project_selected_environment_mcp_servers(config, &environments, mcp_projection)
             .await
             .config;
-        let runtime_context = self.mcp_runtime_context(&environments, &host_fallback_cwd);
+        let runtime_context =
+            self.mcp_runtime_context(&environments, &host_fallback_cwd, &session_source);
         (mcp_config, runtime_context)
     }
 
     pub(crate) async fn current_mcp_runtime_context(&self) -> McpRuntimeContext {
-        let host_fallback_cwd = self.state.lock().await.session_configuration.cwd().clone();
+        let (host_fallback_cwd, session_source) = {
+            let state = self.state.lock().await;
+            (
+                state.session_configuration.cwd().clone(),
+                state.session_configuration.session_source.clone(),
+            )
+        };
         let environments = self.services.turn_environments.snapshot().await;
-        self.mcp_runtime_context(&environments, &host_fallback_cwd)
+        self.mcp_runtime_context(&environments, &host_fallback_cwd, &session_source)
     }
 
     pub(super) fn mcp_runtime_context(
         &self,
         environments: &TurnEnvironmentSnapshot,
         host_fallback_cwd: &std::path::Path,
+        session_source: &SessionSource,
     ) -> McpRuntimeContext {
         let local_process_cwd = environments
             .local_environment_cwd()
@@ -170,6 +178,7 @@ impl Session {
             self.services.turn_environments.environment_manager(),
             local_process_cwd,
         )
+        .with_browser_session_source(session_source)
         .with_connection_pool(self.services.mcp_manager.connection_pool())
         .with_selected_environments(
             environments.all_selections().into(),

@@ -358,8 +358,11 @@ impl Session {
             }),
         );
         let mcp_config = Arc::new(config);
-        let runtime_context =
-            self.mcp_runtime_context(&desired.environments, &desired.local_process_cwd);
+        let runtime_context = self.mcp_runtime_context(
+            &desired.environments,
+            &desired.local_process_cwd,
+            &desired.session_source,
+        );
         McpRuntimeInput {
             network_policy_metadata: None,
             startup_policy: if matches!(desired.session_source, SessionSource::SubAgent(_)) {

@@ -981,6 +981,7 @@ impl McpRuntime {
 #[derive(Clone)]
 pub struct McpRuntimeContext {
     pub(crate) connection_pool: Option<McpConnectionPool>,
+    pub(crate) browser_session_source: Option<codex_protocol::protocol::SessionSource>,
     environment_manager: Arc<EnvironmentManager>,
     environment_selections: Arc<[TurnEnvironmentSelection]>,
     ready_environments: HashMap<String, Arc<Environment>>,
@@ -1030,6 +1031,7 @@ impl McpRuntimeContext {
         );
         Self {
             connection_pool: None,
+            browser_session_source: None,
             environment_manager,
             environment_selections: Arc::default(),
             ready_environments: HashMap::new(),

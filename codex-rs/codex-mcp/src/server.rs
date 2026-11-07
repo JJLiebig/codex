@@ -1,3 +1,5 @@
+mod codex_plus_plus;
+
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::ffi::OsString;
