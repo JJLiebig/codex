@@ -1854,7 +1854,7 @@ impl BottomPane {
     }
 
     /// Include requests behind a picker or delayed while the user is typing.
-    /// Async questions only block once the agent is no longer running.
+    /// Unanswered async questions block even while the agent keeps running.
     pub(crate) fn program_status_blocked_kind(&self) -> Option<ProgramStatusKind> {
         self.view_stack
             .iter()
@@ -1867,12 +1867,10 @@ impl BottomPane {
                     .map(|delayed| delayed.request.program_status_blocked_kind())
             })
             .or_else(|| {
-                (!self.is_task_running()
-                    && self
-                        .questions
-                        .as_ref()
-                        .is_some_and(|questions| questions.unanswered_count() > 0))
-                .then_some(ProgramStatusKind::Question)
+                self.questions
+                    .as_ref()
+                    .is_some_and(|questions| questions.unanswered_count() > 0)
+                    .then_some(ProgramStatusKind::Question)
             })
     }
 
