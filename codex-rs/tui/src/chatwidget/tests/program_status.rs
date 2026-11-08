@@ -1,5 +1,6 @@
 //! Exercises terminal status across live, interrupted, and replayed turns.
 //! Replayed results and work already underway must never appear as new completions.
+//! Unanswered async questions report blocked even while the turn keeps running.
 
 use super::*;
 use crate::terminal_program_status::ProgramStatus;
@@ -96,6 +97,56 @@ async fn program_status_does_not_treat_replayed_results_as_new_or_hide_follow_up
             ProgramStatus::Idle,
             ProgramStatus::Done,
             ProgramStatus::Working
+        ]
+    );
+}
+
+#[tokio::test]
+async fn unanswered_async_question_blocks_while_turn_runs_until_answered() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.thread_id = Some(ThreadId::new());
+    handle_turn_started(&mut chat, "question-turn");
+    chat.add_async_questions(
+        "question",
+        &[codex_protocol::items::AsyncUserInputQuestion {
+            title: "Which way?".into(),
+            options: None,
+        }],
+    );
+    let mut statuses = vec![chat.desired_program_status()];
+    handle_exec_approval_request(
+        &mut chat,
+        "question-approval",
+        ExecApprovalRequestEvent {
+            kind: Default::default(),
+            call_id: "question-call".to_string(),
+            approval_id: Some("question-call".to_string()),
+            turn_id: "question-turn".to_string(),
+            environment_id: None,
+            command: vec!["echo".to_string(), "hello".to_string()],
+            cwd: AbsolutePathBuf::current_dir().expect("current dir"),
+            reason: Some("need confirmation".to_string()),
+            network_approval_context: None,
+            proposed_execpolicy_amendment: None,
+            proposed_network_policy_amendments: None,
+            additional_permissions: None,
+            available_decisions: None,
+        },
+    );
+    statuses.push(chat.desired_program_status());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE));
+    statuses.push(chat.desired_program_status());
+    chat.handle_key_event(KeyEvent::new(KeyCode::Up, KeyModifiers::ALT));
+    chat.bottom_pane.handle_paste("left".into());
+    chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
+    statuses.push(chat.desired_program_status());
+    assert_eq!(
+        statuses,
+        [
+            ProgramStatus::Blocked(ProgramStatusKind::Question),
+            ProgramStatus::Blocked(ProgramStatusKind::Permission),
+            ProgramStatus::Blocked(ProgramStatusKind::Question),
+            ProgramStatus::Working,
         ]
     );
 }
