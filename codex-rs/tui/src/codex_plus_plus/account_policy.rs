@@ -225,6 +225,7 @@ pub(crate) async fn refresh_settings(app: &mut App) -> bool {
     }
     app.chat_widget
         .sync_codex_plus_plus_settings_config(&app.config);
+    sync_scheduler(app);
     true
 }
 

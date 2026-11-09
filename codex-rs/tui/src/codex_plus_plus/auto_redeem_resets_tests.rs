@@ -407,10 +407,12 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
             /*chatgpt_plan_type*/ None,
         )
         .unwrap();
+        let mut tokens = auth.get_token_data().unwrap();
+        tokens.refresh_token = "test-refresh-token".to_string();
         std::fs::write(
             home.path().join("auth.json"),
             serde_json::to_vec(&serde_json::json!({
-                "tokens": auth.get_token_data().unwrap(),
+                "tokens": tokens,
                 "last_refresh": Utc::now(),
             }))
             .unwrap(),
