@@ -2929,6 +2929,9 @@ impl App {
                 self.chat_widget.reconcile_compact_tool_activity_status();
             }
             AppEvent::OpenCodexPlusPlusSettings => {
+                if !crate::codex_plus_plus::refresh_settings(self).await {
+                    return Ok(AppRunControl::Continue);
+                }
                 let request_id = DcgManager::begin_status_detection();
                 let manager = DcgManager::new(app_server, &self.config);
                 let app_event_tx = self.app_event_tx.clone();

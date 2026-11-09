@@ -305,7 +305,7 @@ pub struct ConfigToml {
     pub automatic_account_selection: Option<AutomaticAccountSelection>,
     /// Whether Codex++ starts unused weekly usage windows automatically.
     pub weekly_usage_window_auto_start: Option<WeeklyUsageWindowAutoStart>,
-    /// Automatic usage-reset redemption thresholds. Omission disables the feature.
+    /// Automatic usage-reset redemption thresholds. Omission enables expiry protection only.
     pub auto_redeem_resets: Option<AutoRedeemResets>,
     /// Whether Codex++ keeps retrying indefinitely while a model is at capacity.
     pub model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
@@ -1129,13 +1129,7 @@ mod tests {
     }
 
     #[test]
-    fn auto_redeem_is_absent_by_default_and_rejects_zero_thresholds() {
-        assert_eq!(ConfigToml::default().auto_redeem_resets, None);
-        let parsed: ConfigToml = toml::from_str(
-            "[auto_redeem_resets]\nbefore_expiry_minutes = 60\nweekly_exhausted_min_wait_hours = 72",
-        )
-        .unwrap();
-        assert_eq!(parsed.auto_redeem_resets, Some(AutoRedeemResets::default()));
+    fn auto_redeem_accepts_independent_triggers_and_rejects_zero_thresholds() {
         for (text, expected) in [
             (
                 "before_expiry_minutes = 15",

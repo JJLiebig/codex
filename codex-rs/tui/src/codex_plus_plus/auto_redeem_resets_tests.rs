@@ -35,7 +35,19 @@ fn project_config_cannot_enable_redemption() {
     );
     let stack =
         ConfigLayerStack::new(vec![project], Default::default(), Default::default()).unwrap();
-    assert_eq!(super::settings(&stack), None);
+    let credits = RateLimitResetCreditsDetails {
+        available_count: 1,
+        credits: vec![credit("reset", None)],
+    };
+    assert_eq!(
+        select_credit(
+            &credits,
+            &usage(100.0, Some(NOW + 73 * 60 * 60), true),
+            super::settings(&stack).unwrap(),
+            NOW,
+        ),
+        None,
+    );
 }
 
 fn credit(id: &str, expires_at: Option<i64>) -> RateLimitResetCreditDetails {
@@ -351,6 +363,149 @@ async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
             }),
         }
     );
+}
+
+#[tokio::test]
+async fn live_settings_are_checked_once_before_spending_and_cached() {
+    for (name, latest, expiring, exhausted, consumes) in [
+        (
+            "disable exhaustion",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60",
+            false,
+            true,
+            0,
+        ),
+        ("disable both", "[auto_redeem_resets]", true, false, 0),
+        (
+            "increase exhaustion wait",
+            "[auto_redeem_resets]\nweekly_exhausted_min_wait_hours=96",
+            false,
+            true,
+            0,
+        ),
+        (
+            "shorten expiry threshold",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=15",
+            true,
+            false,
+            0,
+        ),
+        ("unreadable settings", "[invalid", true, false, 0),
+        ("expiry remains enabled by default", "", true, false, 1),
+        (
+            "explicit exhaustion remains eligible",
+            "[auto_redeem_resets]\nweekly_exhausted_min_wait_hours=72",
+            false,
+            true,
+            1,
+        ),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let config_path = home.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60\nweekly_exhausted_min_wait_hours=72",
+        )
+        .unwrap();
+        let mut config = crate::legacy_core::config::ConfigBuilder::default()
+            .codex_home(home.path().into())
+            .build()
+            .await
+            .unwrap();
+        let server = MockServer::start().await;
+        config.chatgpt_base_url = server.uri();
+        let auth = CodexAuth::from_external_chatgpt_tokens(
+            TEST_ID_TOKEN,
+            "account-123",
+            /*chatgpt_plan_type*/ None,
+        )
+        .unwrap();
+        std::fs::write(
+            home.path().join("auth.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "tokens": auth.get_token_data().unwrap(),
+                "last_refresh": Utc::now(),
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let store = AccountStore::new(home.path().into());
+        let profile = store
+            .import_current(
+                /*label*/ None,
+                AuthCredentialsStoreMode::File,
+                config.auth_keyring_backend_kind(),
+            )
+            .unwrap();
+        let reset_at = Utc::now().timestamp() + 73 * 60 * 60;
+        let used = if exhausted { 100 } else { 50 };
+        Mock::given(method("GET")).and(path("/api/codex/usage"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "plan_type":"pro",
+                "rate_limit_reached_type": exhausted.then(|| serde_json::json!({"type":"rate_limit_reached"})),
+                "rate_limit": {"allowed":!exhausted,"limit_reached":exhausted,
+                    "primary_window":null,
+                    "secondary_window":{"used_percent":used,"limit_window_seconds":604800,"reset_after_seconds":262800,"reset_at":reset_at}}
+            }))).mount(&server).await;
+        let expires_at =
+            expiring.then(|| (Utc::now() + chrono::Duration::minutes(30)).to_rfc3339());
+        let credits = serde_json::json!({
+            "available_count": 1,
+            "credits": [{"id":"credit-1", "reset_type":"codex_rate_limits", "status":"available",
+                "granted_at":"2026-01-01T00:00:00Z", "expires_at":expires_at}],
+        });
+        // Change the shared file while another session is already preparing redemption.
+        Mock::given(method("GET"))
+            .and(path("/api/codex/rate-limit-reset-credits"))
+            .respond_with(move |_: &wiremock::Request| {
+                std::fs::write(&config_path, latest).unwrap();
+                ResponseTemplate::new(200).set_body_json(&credits)
+            })
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/codex/rate-limit-reset-credits/consume"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_raw(r#"{"code":"reset","windows_reset":2}"#, "application/json"),
+            )
+            .expect(consumes)
+            .mount(&server)
+            .await;
+        let mut cached = super::settings(&config.config_layer_stack);
+        let result = process_account(
+            &config,
+            &store,
+            &profile.id,
+            &mut cached,
+            &FreshRedemption::Allowed,
+        )
+        .await;
+        if name == "unreadable settings" {
+            assert!(result.is_err());
+        } else {
+            result.unwrap();
+            assert_eq!(
+                cached,
+                read_settings(&config.config_layer_stack).unwrap(),
+                "{name}"
+            );
+        }
+        server.verify().await;
+        if consumes == 0 {
+            assert_eq!(
+                store
+                    .acquire_reset_mutation_lease(&profile.id)
+                    .unwrap()
+                    .state()
+                    .unwrap()
+                    .phase,
+                None,
+                "{name}"
+            );
+        }
+    }
 }
 
 #[test]

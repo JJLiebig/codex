@@ -20,7 +20,7 @@ impl Default for AutoRedeemResets {
     fn default() -> Self {
         Self {
             before_expiry_minutes: NonZeroU64::new(60),
-            weekly_exhausted_min_wait_hours: NonZeroU64::new(72),
+            weekly_exhausted_min_wait_hours: None,
         }
     }
 }

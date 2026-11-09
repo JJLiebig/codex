@@ -67,9 +67,10 @@ impl WeeklyWindowScheduler {
         let task_statuses = Arc::clone(&statuses);
         let notices = Arc::new(Mutex::new(auto_redeem_resets::CompletionNotices::new()));
         let task = tokio::spawn(run_schedule(
-            move |scan_control| {
+            move |settings, scan_control| {
                 scan(
                     config.clone(),
+                    settings,
                     scan_control,
                     Arc::clone(&task_statuses),
                     Arc::clone(&notices),
@@ -96,9 +97,8 @@ impl WeeklyWindowScheduler {
             weekly,
             auto_redeem,
         };
-        let _ = self
-            .state
-            .send_if_modified(|settings| std::mem::replace(settings, next) != next);
+        // An explicit save also replaces settings reconciled by a previous scan.
+        self.state.send_replace(next);
     }
 
     pub(crate) fn statuses(&self) -> HashMap<AccountId, WeeklyWindowStatus> {
@@ -111,21 +111,24 @@ impl WeeklyWindowScheduler {
 
 async fn run_schedule<F, Fut>(mut scan: F, mut control: watch::Receiver<SchedulerSettings>)
 where
-    F: FnMut(watch::Receiver<SchedulerSettings>) -> Fut,
-    Fut: Future<Output = ()>,
+    F: FnMut(SchedulerSettings, watch::Receiver<SchedulerSettings>) -> Fut,
+    Fut: Future<Output = SchedulerSettings>,
 {
     let mut interval = tokio::time::interval_at(tokio::time::Instant::now(), SCAN_INTERVAL);
     interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    let mut settings = *control.borrow_and_update();
     loop {
         tokio::select! {
-            _ = interval.tick() => scan(control.clone()).await,
-            changed = control.changed() => match changed {
-                Err(_) => return,
-                Ok(()) if control.borrow_and_update().enabled() => {
-                    scan(control.clone()).await;
+            _ = interval.tick() => settings = scan(settings, control.clone()).await,
+            changed = control.changed() => {
+                if changed.is_err() {
+                    return;
+                }
+                settings = *control.borrow_and_update();
+                if settings.enabled() {
+                    settings = scan(settings, control.clone()).await;
                     interval.reset();
                 }
-                Ok(()) => {}
             }
         }
     }
@@ -133,16 +136,16 @@ where
 
 async fn scan(
     config: Config,
+    mut settings: SchedulerSettings,
     mut control: watch::Receiver<SchedulerSettings>,
     status_sink: Arc<Mutex<HashMap<AccountId, WeeklyWindowStatus>>>,
     notices: Arc<Mutex<auto_redeem_resets::CompletionNotices>>,
     app_event_tx: AppEventSender,
-) {
+) -> SchedulerSettings {
     let store = AccountStore::new(config.codex_home.to_path_buf());
     poll_notices(&notices, &store, &app_event_tx);
-    let mut settings = *control.borrow();
     if !settings.enabled() {
-        return;
+        return settings;
     }
     let mut fresh_redemption = auto_redeem_resets::FreshRedemption::Allowed;
     if let Err(outcome) = preflight_native_account_maintenance(&config) {
@@ -152,26 +155,29 @@ async fn scan(
     }
     let _scan_lease = match store.try_acquire_weekly_window_scan() {
         Ok(Some(lease)) => lease,
-        Ok(None) => return,
+        Ok(None) => return settings,
         Err(err) => {
             tracing::warn!(%err, "weekly-window scheduler could not acquire scan lease");
-            return;
+            return settings;
         }
     };
     let accounts = match store.enabled_file_accounts() {
         Ok(accounts) => accounts,
         Err(err) => {
             tracing::warn!(%err, "weekly-window scheduler could not read imported accounts");
-            return;
+            return settings;
         }
     };
     if control.has_changed().unwrap_or(true) {
-        return;
+        return settings;
     }
-    if let Some(auto_redeem) = settings.auto_redeem {
+    if settings.auto_redeem.is_some() {
         for (account_id, _) in &accounts {
             if control.has_changed().unwrap_or(true) {
-                return;
+                return settings;
+            }
+            if settings.auto_redeem.is_none() {
+                break;
             }
             match tokio::select! {
                 result = tokio::time::timeout(
@@ -180,12 +186,12 @@ async fn scan(
                         &config,
                         &store,
                         account_id,
-                        auto_redeem,
+                        &mut settings.auto_redeem,
                         &fresh_redemption,
                     ),
                 ) => result,
                 // Explicit opt-out pauses persisted recovery; re-enabling resumes replay.
-                _ = control.changed() => return,
+                _ = control.changed() => return settings,
             } {
                 Ok(Ok(())) => {}
                 Ok(Err(err)) => {
@@ -199,7 +205,7 @@ async fn scan(
     }
     if !settings.weekly {
         poll_notices(&notices, &store, &app_event_tx);
-        return;
+        return settings;
     }
     let loaded = account_usage::load(&config, &accounts, &store).await;
     let mut statuses = HashMap::new();
@@ -216,7 +222,7 @@ async fn scan(
 
     for (account_id, account_home) in accounts {
         if control.has_changed().unwrap_or(true) {
-            return;
+            return settings;
         }
         if loaded.login_required.contains_key(&account_id) {
             continue;
@@ -316,6 +322,7 @@ async fn scan(
             .unwrap_or_else(std::sync::PoisonError::into_inner) = statuses;
     }
     poll_notices(&notices, &store, &app_event_tx);
+    settings
 }
 
 fn poll_notices(
