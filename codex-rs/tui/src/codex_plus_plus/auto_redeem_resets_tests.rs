@@ -266,108 +266,8 @@ fn automatic_selection_flag_does_not_gate_reset_automation() {
 }
 
 #[tokio::test]
-async fn redemption_flow_consumes_selected_credit_and_finishes_recovery() {
-    let home = tempfile::tempdir().unwrap();
-    let store = AccountStore::new(home.path().to_path_buf());
-    let server = MockServer::start().await;
-    Mock::given(method("GET"))
-        .and(path("/api/codex/usage"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            r#"{"plan_type":"pro","rate_limit":{"allowed":true,"limit_reached":false,"primary_window":null,"secondary_window":{"used_percent":1,"limit_window_seconds":604800,"reset_after_seconds":3600,"reset_at":2000000000}}}"#,
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-    let expires_at = (Utc::now() + chrono::Duration::minutes(30)).to_rfc3339();
-    Mock::given(method("GET"))
-        .and(path("/api/codex/rate-limit-reset-credits"))
-        .respond_with(ResponseTemplate::new(200).set_body_raw(
-            format!(r#"{{"credits":[{{"id":"credit-1","reset_type":"codex_rate_limits","status":"available","granted_at":"2026-01-01T00:00:00Z","expires_at":"{expires_at}"}}],"available_count":1}}"#),
-            "application/json",
-        ))
-        .mount(&server)
-        .await;
-    Mock::given(method("POST"))
-        .and(path("/api/codex/rate-limit-reset-credits/consume"))
-        .and(body_partial_json(
-            serde_json::json!({"credit_id": "credit-1"}),
-        ))
-        .respond_with(
-            ResponseTemplate::new(200)
-                .set_body_raw(r#"{"code":"reset","windows_reset":2}"#, "application/json"),
-        )
-        .mount(&server)
-        .await;
-    let mut config = crate::legacy_core::config::ConfigBuilder::default()
-        .codex_home(home.path().into())
-        .build()
-        .await
-        .unwrap();
-    config.chatgpt_base_url = server.uri();
-    let auth = CodexAuth::from_external_chatgpt_tokens(
-        TEST_ID_TOKEN,
-        "account-123",
-        /*chatgpt_plan_type*/ None,
-    )
-    .unwrap();
-    let id: AccountId = serde_json::from_str(&format!(
-        "\"{}\"",
-        profile_id(&auth.get_token_data().unwrap()).unwrap()
-    ))
-    .unwrap();
-    let account = ResetAccount {
-        config: &config,
-        store: &store,
-        id: &id,
-        home: home.path().to_path_buf(),
-        client: BackendClient::from_auth(
-            &config.chatgpt_base_url,
-            &auth,
-            config.auth_route_config().http_client_factory().clone(),
-        ),
-    };
-
-    let usage = account
-        .client
-        .get_rate_limits_with_reset_credits()
-        .await
-        .unwrap();
-    let credits = account
-        .client
-        .list_rate_limit_reset_credits()
-        .await
-        .unwrap();
-    let credit_id = select_credit(&credits, &usage, settings(), Utc::now().timestamp()).unwrap();
-    let mut lease = store.acquire_reset_mutation_lease(&id).unwrap();
-    let ResetAttemptPhase::Redeeming {
-        credit_id,
-        redeem_request_id,
-    } = lease.load_or_begin(&credit_id).unwrap()
-    else {
-        panic!("expected redemption phase");
-    };
-    account
-        .redeem(&mut lease, &credit_id, &redeem_request_id)
-        .await
-        .unwrap();
-
-    let completed = lease.state().unwrap();
-    assert_eq!(
-        completed,
-        codex_login::ResetState {
-            phase: None,
-            completion: Some(codex_login::ResetCompletion {
-                id: redeem_request_id,
-                completed_at: completed.completion.as_ref().unwrap().completed_at,
-                manual: false,
-            }),
-        }
-    );
-}
-
-#[tokio::test]
 async fn live_settings_are_checked_once_before_spending_and_cached() {
-    for (name, latest, expiring, exhausted, consumes) in [
+    let fresh_cases = [
         (
             "disable exhaustion",
             "[auto_redeem_resets]\nbefore_expiry_minutes=60",
@@ -405,7 +305,78 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
             true,
             1,
         ),
-    ] {
+    ];
+    let replay_cases = [
+        (
+            "pending exhaustion disabled",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60",
+            None,
+            true,
+            0,
+            true,
+            "available",
+        ),
+        (
+            "pending both disabled",
+            "[auto_redeem_resets]",
+            Some(30),
+            false,
+            0,
+            true,
+            "available",
+        ),
+        (
+            "pending credit still eligible",
+            "[auto_redeem_resets]\nweekly_exhausted_min_wait_hours=72",
+            None,
+            true,
+            1,
+            true,
+            "available",
+        ),
+        (
+            "redeemed credit reconciles",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60",
+            None,
+            false,
+            1,
+            true,
+            "redeemed",
+        ),
+        (
+            "missing credit clears receipt",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60",
+            None,
+            false,
+            1,
+            true,
+            "missing",
+        ),
+        (
+            "expired credit clears receipt",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60",
+            Some(-30),
+            false,
+            1,
+            true,
+            "available",
+        ),
+    ];
+    let cases = fresh_cases
+        .into_iter()
+        .map(|(name, latest, expiring, exhausted, consumes)| {
+            (
+                name,
+                latest,
+                expiring.then_some(30),
+                exhausted,
+                consumes,
+                false,
+                "available",
+            )
+        })
+        .chain(replay_cases);
+    for (name, latest, expiry_minutes, exhausted, consumes, pending, status) in cases {
         let home = tempfile::tempdir().unwrap();
         std::fs::write(
             home.path().join("config.toml"),
@@ -453,6 +424,13 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
                 config.auth_keyring_backend_kind(),
             )
             .unwrap();
+        let pending_state = if pending {
+            let mut lease = store.acquire_reset_mutation_lease(&profile.id).unwrap();
+            lease.load_or_begin("credit-1").unwrap();
+            lease.state().unwrap()
+        } else {
+            codex_login::ResetState::default()
+        };
         let reset_at = Utc::now().timestamp() + 73 * 60 * 60;
         let used = if exhausted { 100 } else { 50 };
         Mock::given(method("GET")).and(path("/api/codex/usage"))
@@ -463,13 +441,21 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
                     "primary_window":null,
                     "secondary_window":{"used_percent":used,"limit_window_seconds":604800,"reset_after_seconds":262800,"reset_at":reset_at}}
             }))).mount(&server).await;
-        let expires_at =
-            expiring.then(|| (Utc::now() + chrono::Duration::minutes(30)).to_rfc3339());
-        let credits = serde_json::json!({
-            "available_count": 1,
-            "credits": [{"id":"credit-1", "reset_type":"codex_rate_limits", "status":"available",
-                "granted_at":"2026-01-01T00:00:00Z", "expires_at":expires_at}],
-        });
+        let expires_at = expiry_minutes
+            .map(|minutes| (Utc::now() + chrono::Duration::minutes(minutes)).to_rfc3339());
+        let mut credits = if status == "missing" {
+            Vec::new()
+        } else {
+            vec![serde_json::json!({
+                "id":"credit-1", "reset_type":"codex_rate_limits", "status":status,
+                "granted_at":"2026-01-01T00:00:00Z", "expires_at":expires_at,
+            })]
+        };
+        if pending {
+            credits.push(serde_json::json!({"id":"other-credit", "reset_type":"codex_rate_limits", "status":"available",
+                "granted_at":"2026-01-01T00:00:00Z", "expires_at":(Utc::now() + chrono::Duration::minutes(10)).to_rfc3339()}));
+        }
+        let credits = serde_json::json!({"available_count":credits.len(), "credits":credits});
         // Change the shared file while another session is already preparing redemption.
         Mock::given(method("GET"))
             .and(path("/api/codex/rate-limit-reset-credits"))
@@ -480,11 +466,30 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
             .expect(1)
             .mount(&server)
             .await;
-        Mock::given(method("POST"))
+        let mut consume = Mock::given(method("POST"))
             .and(path("/api/codex/rate-limit-reset-credits/consume"))
+            .and(body_partial_json(
+                serde_json::json!({"credit_id":"credit-1"}),
+            ));
+        if let Some(ResetAttemptPhase::Redeeming {
+            redeem_request_id, ..
+        }) = &pending_state.phase
+        {
+            consume = consume.and(body_partial_json(
+                serde_json::json!({"redeem_request_id":redeem_request_id}),
+            ));
+        }
+        let code = if status == "missing" || expiry_minutes.is_some_and(|minutes| minutes < 0) {
+            "no_credit"
+        } else if status == "redeemed" {
+            "already_redeemed"
+        } else {
+            "reset"
+        };
+        consume
             .respond_with(
                 ResponseTemplate::new(200)
-                    .set_body_raw(r#"{"code":"reset","windows_reset":2}"#, "application/json"),
+                    .set_body_json(serde_json::json!({"code":code,"windows_reset":2})),
             )
             .expect(consumes)
             .mount(&server)
@@ -509,15 +514,40 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
             );
         }
         server.verify().await;
-        if consumes == 0 {
+        let state = store
+            .acquire_reset_mutation_lease(&profile.id)
+            .unwrap()
+            .state()
+            .unwrap();
+        if consumes == 0 || code == "no_credit" {
             assert_eq!(
-                store
-                    .acquire_reset_mutation_lease(&profile.id)
-                    .unwrap()
-                    .state()
-                    .unwrap()
-                    .phase,
-                None,
+                state,
+                if consumes == 0 {
+                    pending_state
+                } else {
+                    codex_login::ResetState::default()
+                },
+                "{name}"
+            );
+        } else {
+            let request = server
+                .received_requests()
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|request| request.url.path().ends_with("/consume"))
+                .unwrap();
+            let request: serde_json::Value = serde_json::from_slice(&request.body).unwrap();
+            assert_eq!(
+                state,
+                codex_login::ResetState {
+                    phase: exhausted.then_some(ResetAttemptPhase::ActivatingWeekly),
+                    completion: Some(codex_login::ResetCompletion {
+                        id: request["redeem_request_id"].as_str().unwrap().to_string(),
+                        completed_at: state.completion.as_ref().unwrap().completed_at,
+                        manual: false,
+                    }),
+                },
                 "{name}"
             );
         }

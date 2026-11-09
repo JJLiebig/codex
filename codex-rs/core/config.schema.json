@@ -7537,7 +7537,7 @@
           "$ref": "#/definitions/AutoRedeemResets"
         }
       ],
-      "description": "Automatic usage-reset redemption thresholds. Omission disables the feature."
+      "description": "Automatic usage-reset redemption thresholds. Omission enables expiry protection only."
     },
     "auto_review": {
       "allOf": [

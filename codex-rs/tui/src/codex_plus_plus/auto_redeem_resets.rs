@@ -115,8 +115,25 @@ pub(super) async fn process_account(
             credit_id: id,
             redeem_request_id: request_id,
         }) => {
+            let usage = account.client.get_rate_limits_with_reset_credits().await?;
+            let mut credits = account.client.list_rate_limit_reset_credits().await?;
+            credits.credits.retain(|credit| credit.id == id);
+            let now = Utc::now().timestamp();
             *settings = read_settings(&config.config_layer_stack)?;
-            if settings.is_none() {
+            let Some(current) = *settings else {
+                return Ok(());
+            };
+            // An ambiguous UUID can still spend an available credit. Terminal credits
+            // keep their existing replay path so the receipt can be reconciled.
+            let may_spend = credits.credits.iter().any(|credit| {
+                credit.status == "available"
+                    && credit
+                        .expires_at
+                        .as_deref()
+                        .and_then(|expiry| DateTime::parse_from_rfc3339(expiry).ok())
+                        .is_none_or(|expiry| expiry.timestamp() > now)
+            });
+            if may_spend && select_credit(&credits, &usage, current, now).is_none() {
                 return Ok(());
             }
             account.redeem(&mut lease, &id, &request_id).await
