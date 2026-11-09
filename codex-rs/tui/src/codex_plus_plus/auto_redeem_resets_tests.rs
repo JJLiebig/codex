@@ -391,7 +391,13 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
             0,
         ),
         ("unreadable settings", "[invalid", true, false, 0),
-        ("expiry remains enabled by default", "", true, false, 1),
+        (
+            "expiry remains eligible",
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60",
+            true,
+            false,
+            1,
+        ),
         (
             "explicit exhaustion remains eligible",
             "[auto_redeem_resets]\nweekly_exhausted_min_wait_hours=72",
@@ -401,7 +407,12 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
         ),
     ] {
         let home = tempfile::tempdir().unwrap();
-        let config_path = home.path().join("config.toml");
+        std::fs::write(
+            home.path().join("config.toml"),
+            "[auto_redeem_resets]\nbefore_expiry_minutes=60\nweekly_exhausted_min_wait_hours=72",
+        )
+        .unwrap();
+        let config_path = home.path().join("work.config.toml");
         std::fs::write(
             &config_path,
             "[auto_redeem_resets]\nbefore_expiry_minutes=60\nweekly_exhausted_min_wait_hours=72",
@@ -409,6 +420,11 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
         .unwrap();
         let mut config = crate::legacy_core::config::ConfigBuilder::default()
             .codex_home(home.path().into())
+            .loader_overrides(codex_config::LoaderOverrides {
+                user_config_path: Some(config_path.clone().try_into().unwrap()),
+                user_config_profile: Some("work".parse().unwrap()),
+                ..codex_config::LoaderOverrides::without_managed_config_for_tests()
+            })
             .build()
             .await
             .unwrap();

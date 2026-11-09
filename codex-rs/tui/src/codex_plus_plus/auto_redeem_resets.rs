@@ -11,7 +11,6 @@ use codex_backend_client::RateLimitsWithResetCredits;
 use codex_config::AutoRedeemResets;
 use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
-use codex_config::merge_toml_values;
 use codex_login::AccountId;
 use codex_login::AccountStore;
 use codex_login::AuthCredentialsStoreMode;
@@ -56,11 +55,17 @@ struct ResetAccount<'a> {
     client: BackendClient,
 }
 pub(crate) fn settings(config: &ConfigLayerStack) -> Option<AutoRedeemResets> {
-    user_settings(config.effective_user_config())
+    // The popup saves a complete trigger selection. A profile table replaces the
+    // inherited selection so omitted triggers, including an empty off table, stay off.
+    let value = config
+        .layers_high_to_low()
+        .filter(|layer| matches!(layer.name, ConfigLayerSource::User { .. }))
+        .find_map(|layer| layer.config.get("auto_redeem_resets").cloned());
+    user_settings(value)
 }
 
-fn user_settings(config: Option<toml::Value>) -> Option<AutoRedeemResets> {
-    let settings = match config.and_then(|config| config.get("auto_redeem_resets").cloned()) {
+fn user_settings(value: Option<toml::Value>) -> Option<AutoRedeemResets> {
+    let settings = match value {
         Some(value) => value.try_into().ok()?,
         None => AutoRedeemResets::default(),
     };
@@ -69,7 +74,7 @@ fn user_settings(config: Option<toml::Value>) -> Option<AutoRedeemResets> {
 }
 
 fn read_settings(config: &ConfigLayerStack) -> Result<Option<AutoRedeemResets>> {
-    let mut user_config = toml::Value::Table(toml::map::Map::new());
+    let mut selection = None;
     for layer in config.layers_low_to_high() {
         let ConfigLayerSource::User { file, .. } = &layer.name else {
             continue;
@@ -79,11 +84,13 @@ fn read_settings(config: &ConfigLayerStack) -> Result<Option<AutoRedeemResets>> 
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
             Err(err) => return Err(err).context("could not read automatic redemption settings"),
         };
-        let value =
+        let value: toml::Value =
             toml::from_str(&contents).context("could not parse automatic redemption settings")?;
-        merge_toml_values(&mut user_config, &value);
+        if let Some(value) = value.get("auto_redeem_resets") {
+            selection = Some(value.clone());
+        }
     }
-    Ok(user_settings(Some(user_config)))
+    Ok(user_settings(selection))
 }
 
 pub(super) async fn process_account(
