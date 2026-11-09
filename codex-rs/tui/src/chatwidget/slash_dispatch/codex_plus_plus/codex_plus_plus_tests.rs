@@ -29,7 +29,7 @@ fn settings_view(
             codex_plus_plus_settings_params(
                 automatic,
                 weekly,
-                /*current_auto_redeem*/ None,
+                Some(AutoRedeemResets::default()),
                 capacity,
                 ToolActivityPresentation::Full,
                 /*current_quiet_updates*/ true,
@@ -152,14 +152,14 @@ fn redemption_toggles_save_independently() {
         (
             2,
             AutoRedeemResets {
+                before_expiry_minutes: None,
                 weekly_exhausted_min_wait_hours: None,
-                ..AutoRedeemResets::default()
             },
         ),
         (
             3,
             AutoRedeemResets {
-                before_expiry_minutes: None,
+                weekly_exhausted_min_wait_hours: std::num::NonZeroU64::new(72),
                 ..AutoRedeemResets::default()
             },
         ),
@@ -227,7 +227,7 @@ fn weekly_setting_saves_full_selection() {
             automatic_account_selection: AutomaticAccountSelection::Enabled,
             weekly_usage_window_auto_start: Some(WeeklyUsageWindowAutoStart::Disabled),
             auto_redeem_resets: Some(AutoRedeemResets {
-                before_expiry_minutes: None,
+                before_expiry_minutes: Some(_),
                 weekly_exhausted_min_wait_hours: None
             }),
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
@@ -258,7 +258,7 @@ fn capacity_setting_saves_indefinite_mode() {
             automatic_account_selection: AutomaticAccountSelection::Enabled,
             weekly_usage_window_auto_start: Some(WeeklyUsageWindowAutoStart::Enabled),
             auto_redeem_resets: Some(AutoRedeemResets {
-                before_expiry_minutes: None,
+                before_expiry_minutes: Some(_),
                 weekly_exhausted_min_wait_hours: None
             }),
             model_capacity_retry_mode: ModelCapacityRetryMode::Indefinite,

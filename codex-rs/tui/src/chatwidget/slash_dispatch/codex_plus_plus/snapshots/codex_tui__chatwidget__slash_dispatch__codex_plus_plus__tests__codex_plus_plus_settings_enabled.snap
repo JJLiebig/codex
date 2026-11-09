@@ -10,7 +10,7 @@ expression: "render_settings(AutomaticAccountSelection::Enabled,\nWeeklyUsageWin
                                                      needed.                        
   2. [*] Start unused weekly windows                 Keep imported accounts ready to
                                                      use.
-  3. [ ] Auto-redeem expiring resets (Experimental)  Within 60m of expiry.
+  3. [*] Auto-redeem expiring resets (Experimental)  Within 60m of expiry.
   4. [ ] Auto-redeem at exhaustion (Experimental)    0% weekly quota; reset ≥72h.
   5. [ ] Keep retrying at capacity                   After 1, 2, 5, and 15 minutes,
                                                      retry every 15 minutes.

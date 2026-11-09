@@ -9,6 +9,7 @@ use codex_backend_client::RateLimitResetCreditDetails;
 use codex_backend_client::RateLimitResetCreditsDetails;
 use codex_backend_client::RateLimitsWithResetCredits;
 use codex_config::AutoRedeemResets;
+use codex_config::ConfigLayerSource;
 use codex_config::ConfigLayerStack;
 use codex_login::AccountId;
 use codex_login::AccountStore;
@@ -54,21 +55,49 @@ struct ResetAccount<'a> {
     client: BackendClient,
 }
 pub(crate) fn settings(config: &ConfigLayerStack) -> Option<AutoRedeemResets> {
-    config
-        .effective_user_config()?
-        .get("auto_redeem_resets")
-        .cloned()
-        .and_then(|value| value.try_into().ok())
-        .filter(|settings: &AutoRedeemResets| {
-            settings.before_expiry_minutes.is_some()
-                || settings.weekly_exhausted_min_wait_hours.is_some()
-        })
+    // The popup saves a complete trigger selection. A profile table replaces the
+    // inherited selection so omitted triggers, including an empty off table, stay off.
+    let value = config
+        .layers_high_to_low()
+        .filter(|layer| matches!(layer.name, ConfigLayerSource::User { .. }))
+        .find_map(|layer| layer.config.get("auto_redeem_resets").cloned());
+    user_settings(value)
 }
+
+fn user_settings(value: Option<toml::Value>) -> Option<AutoRedeemResets> {
+    let settings = match value {
+        Some(value) => value.try_into().ok()?,
+        None => AutoRedeemResets::default(),
+    };
+    (settings.before_expiry_minutes.is_some() || settings.weekly_exhausted_min_wait_hours.is_some())
+        .then_some(settings)
+}
+
+fn read_settings(config: &ConfigLayerStack) -> Result<Option<AutoRedeemResets>> {
+    let mut selection = None;
+    for layer in config.layers_low_to_high() {
+        let ConfigLayerSource::User { file, .. } = &layer.name else {
+            continue;
+        };
+        let contents = match std::fs::read_to_string(file) {
+            Ok(contents) => contents,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(err) => return Err(err).context("could not read automatic redemption settings"),
+        };
+        let value: toml::Value =
+            toml::from_str(&contents).context("could not parse automatic redemption settings")?;
+        if let Some(value) = value.get("auto_redeem_resets") {
+            selection = Some(value.clone());
+        }
+    }
+    Ok(user_settings(selection))
+}
+
 pub(super) async fn process_account(
     config: &Config,
     store: &AccountStore,
     account_id: &AccountId,
-    settings: AutoRedeemResets,
+    settings: &mut Option<AutoRedeemResets>,
     fresh_redemption: &FreshRedemption,
 ) -> Result<()> {
     let Some(mut lease) = store.try_acquire_reset_mutation_lease(account_id)? else {
@@ -85,13 +114,47 @@ pub(super) async fn process_account(
         Some(ResetAttemptPhase::Redeeming {
             credit_id: id,
             redeem_request_id: request_id,
-        }) => account.redeem(&mut lease, &id, &request_id).await,
+        }) => {
+            let usage = account.client.get_rate_limits_with_reset_credits().await?;
+            let mut credits = account.client.list_rate_limit_reset_credits().await?;
+            credits.credits.retain(|credit| credit.id == id);
+            let now = Utc::now().timestamp();
+            *settings = read_settings(&config.config_layer_stack)?;
+            let Some(current) = *settings else {
+                return Ok(());
+            };
+            // An ambiguous UUID can still spend an available credit. Terminal credits
+            // keep their existing replay path so the receipt can be reconciled.
+            let may_spend = credits.credits.iter().any(|credit| {
+                credit.status == "available"
+                    && credit
+                        .expires_at
+                        .as_deref()
+                        .and_then(|expiry| DateTime::parse_from_rfc3339(expiry).ok())
+                        .is_none_or(|expiry| expiry.timestamp() > now)
+            });
+            if may_spend && select_credit(&credits, &usage, current, now).is_none() {
+                return Ok(());
+            }
+            account.redeem(&mut lease, &id, &request_id).await
+        }
         None if !fresh_redemption.allowed() => Ok(()),
         None => {
             let usage = account.client.get_rate_limits_with_reset_credits().await?;
             let credits = account.client.list_rate_limit_reset_credits().await?;
             let now = Utc::now().timestamp();
-            let Some(credit_id) = select_credit(&credits, &usage, settings, now) else {
+            let Some(cached) = *settings else {
+                return Ok(());
+            };
+            if select_credit(&credits, &usage, cached, now).is_none() {
+                return Ok(());
+            }
+            // Reconcile once at the spending boundary, after the network reads.
+            *settings = read_settings(&config.config_layer_stack)?;
+            let Some(current) = *settings else {
+                return Ok(());
+            };
+            let Some(credit_id) = select_credit(&credits, &usage, current, now) else {
                 return Ok(());
             };
             let ResetAttemptPhase::Redeeming {

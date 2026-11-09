@@ -167,7 +167,7 @@ fn codex_plus_plus_settings_params(
                 .or(defaults.before_expiry_minutes),
             weekly_exhausted_min_wait_hours: thresholds
                 .weekly_exhausted_min_wait_hours
-                .or(defaults.weekly_exhausted_min_wait_hours),
+                .or(std::num::NonZeroU64::new(72)),
         },
         capacity_indefinite: Arc::new(AtomicBool::new(current_capacity == CapacityIndefinite)),
         compact_tool_activity: Arc::new(AtomicBool::new(current_tool_activity == ActivityCompact)),

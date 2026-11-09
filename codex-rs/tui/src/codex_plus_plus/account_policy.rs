@@ -43,14 +43,13 @@ pub(crate) async fn persist_settings(
         .then_some(settings)
     });
     if let Some(settings) = requested_auto_redeem {
-        writes.push(match settings {
-            Some(settings) => crate::config_update::replace_config_value(
-                "auto_redeem_resets",
-                serde_json::json!(settings),
-            ),
-            // Off removes the active user-layer table; inherited user settings remain authoritative.
-            None => crate::config_update::clear_config_value("auto_redeem_resets"),
-        });
+        writes.push(crate::config_update::replace_config_value(
+            "auto_redeem_resets",
+            serde_json::json!(settings.unwrap_or(AutoRedeemResets {
+                before_expiry_minutes: None,
+                weekly_exhausted_min_wait_hours: None,
+            })),
+        ));
     }
     if let Some(capacity) = model_capacity_retry_mode {
         writes.push(crate::config_update::replace_config_value(
@@ -218,6 +217,18 @@ pub(crate) async fn persist_settings(
     }
 }
 
+pub(crate) async fn refresh_settings(app: &mut App) -> bool {
+    if let Err(err) = app.refresh_in_memory_config_from_disk().await {
+        app.chat_widget
+            .add_error_message(format!("Unable to load Codex++ settings: {err}"));
+        return false;
+    }
+    app.chat_widget
+        .sync_codex_plus_plus_settings_config(&app.config);
+    sync_scheduler(app);
+    true
+}
+
 fn sync_scheduler(app: &App) {
     if let Some(scheduler) = &app.weekly_window_scheduler {
         scheduler.set_settings(
@@ -242,7 +253,10 @@ fn cache_auto_redeem_settings(config: &mut Config, settings: Option<AutoRedeemRe
             table.insert("auto_redeem_resets".to_string(), settings);
         }
         None => {
-            table.remove("auto_redeem_resets");
+            table.insert(
+                "auto_redeem_resets".to_string(),
+                TomlValue::Table(Default::default()),
+            );
         }
     }
     match config

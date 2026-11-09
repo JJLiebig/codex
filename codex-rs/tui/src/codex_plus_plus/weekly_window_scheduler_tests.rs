@@ -62,7 +62,7 @@ async fn schedule_scans_on_time_and_observes_disable_until_dropped() {
         state,
         statuses: Arc::new(Mutex::new(HashMap::new())),
         _task: tokio::spawn(run_schedule(
-            move |_control| {
+            move |settings, _control| {
                 let scan = task_scans.fetch_add(1, Ordering::Relaxed);
                 let release = Arc::clone(&task_release);
                 let drained = Arc::clone(&task_drained);
@@ -71,6 +71,7 @@ async fn schedule_scans_on_time_and_observes_disable_until_dropped() {
                         release.notified().await;
                         drained.store(true, Ordering::Relaxed);
                     }
+                    settings
                 }
             },
             receiver,
@@ -98,6 +99,37 @@ async fn schedule_scans_on_time_and_observes_disable_until_dropped() {
     tokio::time::advance(SCAN_INTERVAL).await;
     tokio::task::yield_now().await;
     assert_eq!(scans.load(Ordering::Relaxed), 3);
+}
+
+#[tokio::test(start_paused = true)]
+async fn reconciled_settings_survive_ticks_and_an_explicit_save_can_enable_again() {
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let task_observed = Arc::clone(&observed);
+    let initial = SchedulerSettings {
+        weekly: false,
+        auto_redeem: Some(AutoRedeemResets::default()),
+    };
+    let (state, receiver) = watch::channel(initial);
+    let scheduler = WeeklyWindowScheduler {
+        state,
+        statuses: Arc::new(Mutex::new(HashMap::new())),
+        _task: tokio::spawn(run_schedule(
+            move |settings, _| {
+                task_observed.lock().unwrap().push(settings.auto_redeem);
+                async { SchedulerSettings::default() }
+            },
+            receiver,
+        )),
+    };
+    tokio::task::yield_now().await;
+    tokio::time::advance(SCAN_INTERVAL).await;
+    tokio::task::yield_now().await;
+    scheduler.set_settings(/*weekly*/ false, initial.auto_redeem);
+    tokio::task::yield_now().await;
+    assert_eq!(
+        *observed.lock().unwrap(),
+        vec![initial.auto_redeem, None, initial.auto_redeem]
+    );
 }
 
 #[test]
