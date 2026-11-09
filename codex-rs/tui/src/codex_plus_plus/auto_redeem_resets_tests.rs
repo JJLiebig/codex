@@ -409,6 +409,20 @@ async fn live_settings_are_checked_once_before_spending_and_cached() {
         .unwrap();
         let mut tokens = auth.get_token_data().unwrap();
         tokens.refresh_token = "test-refresh-token".to_string();
+        tokens.oauth_provenance = Some(codex_login::token_data::AccountOAuthProvenance {
+            issuer: server.uri(),
+            client_id: "test-client".to_string(),
+        });
+        Mock::given(method("POST"))
+            .and(path("/oauth/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "id_token": TEST_ID_TOKEN,
+                "access_token": TEST_ID_TOKEN,
+                "refresh_token": "refreshed-test-token",
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
         std::fs::write(
             home.path().join("auth.json"),
             serde_json::to_vec(&serde_json::json!({
