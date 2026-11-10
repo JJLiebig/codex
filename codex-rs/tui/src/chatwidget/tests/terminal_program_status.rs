@@ -91,3 +91,52 @@ async fn session_status_detail_uses_only_foreground_activity() {
     -
     ");
 }
+
+#[tokio::test]
+async fn mcp_startup_preserves_program_status_outside_a_turn() {
+    use crate::terminal_program_status::ProgramStatus::Done;
+    use crate::terminal_program_status::ProgramStatus::Error;
+
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.set_mcp_startup_expected_servers(["background".to_string()]);
+
+    for settled_status in [Idle, Done, Error] {
+        chat.status_state.program_status_after_turn = settled_status;
+        let mut states = vec![chat.desired_program_status()];
+        for status in [
+            McpServerStartupState::Starting,
+            McpServerStartupState::Ready,
+        ] {
+            chat.on_mcp_server_status_updated(McpServerStatusUpdatedNotification {
+                thread_id: None,
+                name: "background".to_string(),
+                status,
+                error: None,
+                failure_reason: None,
+            });
+            states.push(chat.desired_program_status());
+        }
+        assert_eq!(states, [settled_status; 3]);
+        assert!(!chat.bottom_pane.is_task_running());
+    }
+}
+
+#[tokio::test]
+async fn mcp_startup_does_not_hide_foreground_work() {
+    let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+    chat.on_mcp_server_status_updated(McpServerStatusUpdatedNotification {
+        thread_id: None,
+        name: "background".to_string(),
+        status: McpServerStartupState::Starting,
+        error: None,
+        failure_reason: None,
+    });
+    assert!(chat.bottom_pane.is_task_running());
+
+    chat.input_queue.user_turn_pending_start = true;
+    let pending = chat.desired_program_status();
+    chat.on_task_started();
+    let running = chat.desired_program_status();
+
+    assert_eq!([pending, running], [Working; 2]);
+}
