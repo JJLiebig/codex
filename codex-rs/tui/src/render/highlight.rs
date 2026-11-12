@@ -71,6 +71,7 @@ static CODEX_HOME: OnceLock<Option<PathBuf>> = OnceLock::new();
 
 #[cfg(test)]
 thread_local! {
+    pub(crate) static TEST_HIGHLIGHT_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static TEST_THEME: std::cell::OnceCell<std::sync::Arc<RwLock<Theme>>> = const { std::cell::OnceCell::new() };
     static TEST_THEME_REVISION: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
@@ -666,6 +667,9 @@ fn highlight_to_line_spans_with_theme(
     lang: &str,
     theme: &Theme,
 ) -> Option<Vec<Vec<Span<'static>>>> {
+    #[cfg(test)]
+    TEST_HIGHLIGHT_CALLS.with(|calls| calls.set(calls.get() + 1));
+
     // Empty input has nothing to highlight; fall back to the plain text path
     // which correctly produces a single empty Line.
     if code.is_empty() {

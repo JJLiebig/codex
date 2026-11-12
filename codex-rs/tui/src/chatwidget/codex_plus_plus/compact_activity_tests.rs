@@ -13,6 +13,56 @@ fn text(lines: Vec<Line<'static>>) -> String {
         .join("\n")
 }
 #[tokio::test]
+async fn compact_patch_summary_skips_highlighting_and_retains_full_details() {
+    use crate::render::highlight::TEST_HIGHLIGHT_CALLS;
+    use pretty_assertions::assert_eq;
+
+    let (mut chat, _sender, mut events, _operations) = make_chatwidget_manual_with_sender().await;
+    chat.config.codex_plus_plus_tool_activity = codex_config::ToolActivityPresentation::Compact;
+    let calls_before = TEST_HIGHLIGHT_CALLS.with(std::cell::Cell::get);
+    let source = "fn retained() {\n    println!(\"complete patch\");\n}\n";
+    chat.transcript.active_cell = Some(Box::new(history_cell::PlainHistoryCell::new(vec![
+        "preceding activity".into(),
+    ])));
+    chat.on_patch_apply_begin(std::collections::HashMap::from([(
+        std::path::PathBuf::from("src/lib.rs"),
+        FileChange::Add {
+            content: source.into(),
+        },
+    )]));
+    let crate::app_event::AppEvent::InsertHistoryCell(prefix) = events.try_recv().unwrap() else {
+        panic!("expected preceding activity");
+    };
+    assert_eq!(text(prefix.display_lines(80)), "preceding activity");
+    let crate::app_event::AppEvent::InsertHistoryCell(patch) = events.try_recv().unwrap() else {
+        panic!("expected patch history");
+    };
+    for width in [20, 80, 200] {
+        assert_eq!(
+            text(patch.display_lines(width)),
+            "• Added src/lib.rs (+3 -0)"
+        );
+        assert_eq!(
+            text(
+                patch
+                    .display_hyperlink_lines(width)
+                    .into_iter()
+                    .map(|line| line.line)
+                    .collect()
+            ),
+            "• Added src/lib.rs (+3 -0)"
+        );
+    }
+    assert_eq!(
+        TEST_HIGHLIGHT_CALLS.with(std::cell::Cell::get),
+        calls_before
+    );
+    assert!(text(patch.transcript_lines(80)).contains("complete patch"));
+    assert!(text(patch.raw_lines()).contains("complete patch"));
+    assert!(TEST_HIGHLIGHT_CALLS.with(std::cell::Cell::get) > calls_before);
+}
+
+#[tokio::test]
 async fn compact_history_policy_keeps_complete_transcript_and_raw_output() {
     let (mut chat, _sender, mut events, _operations) = make_chatwidget_manual_with_sender().await;
     chat.config.codex_plus_plus_tool_activity = codex_config::ToolActivityPresentation::Compact;
