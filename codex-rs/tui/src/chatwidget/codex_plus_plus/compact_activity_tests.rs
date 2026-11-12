@@ -25,11 +25,11 @@ async fn compact_patch_summary_skips_highlighting_and_retains_full_details() {
         "preceding activity".into(),
     ])));
     chat.on_patch_apply_begin(std::collections::HashMap::from([(
-            std::path::PathBuf::from("src/lib.rs"),
-            FileChange::Add {
-                content: source.into(),
-            },
-        )]));
+        std::path::PathBuf::from("src/lib.rs"),
+        FileChange::Add {
+            content: source.into(),
+        },
+    )]));
     let crate::app_event::AppEvent::InsertHistoryCell(prefix) = events.try_recv().unwrap() else {
         panic!("expected preceding activity");
     };
