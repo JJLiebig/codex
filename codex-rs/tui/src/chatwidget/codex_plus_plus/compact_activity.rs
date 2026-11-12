@@ -13,7 +13,7 @@ use ratatui::text::Line;
 #[derive(Debug)]
 enum CompactMainPresentation {
     Hidden,
-    FirstLine,
+    Summary(Vec<HyperlinkLine>),
 }
 
 #[derive(Debug)]
@@ -23,15 +23,12 @@ struct CompactActivityHistoryCell {
 }
 
 impl HistoryCell for CompactActivityHistoryCell {
-    fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
-        match self.main {
+    fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
+        match &self.main {
             CompactMainPresentation::Hidden => Vec::new(),
-            CompactMainPresentation::FirstLine => self
-                .inner
-                .display_lines(width)
-                .into_iter()
-                .take(1)
-                .collect(),
+            CompactMainPresentation::Summary(lines) => {
+                lines.iter().map(|line| line.line.clone()).collect()
+            }
         }
     }
 
@@ -39,15 +36,10 @@ impl HistoryCell for CompactActivityHistoryCell {
         self.inner.raw_lines()
     }
 
-    fn display_hyperlink_lines(&self, width: u16) -> Vec<HyperlinkLine> {
-        match self.main {
+    fn display_hyperlink_lines(&self, _width: u16) -> Vec<HyperlinkLine> {
+        match &self.main {
             CompactMainPresentation::Hidden => Vec::new(),
-            CompactMainPresentation::FirstLine => self
-                .inner
-                .display_hyperlink_lines(width)
-                .into_iter()
-                .take(1)
-                .collect(),
+            CompactMainPresentation::Summary(lines) => lines.clone(),
         }
     }
 
@@ -68,8 +60,10 @@ impl ChatWidget {
         if !self.compact_tool_activity_configured() {
             return cell;
         }
-        let main = if cell.as_any().is::<PatchHistoryCell>() {
-            Some(CompactMainPresentation::FirstLine)
+        let main = if let Some(patch) = cell.as_any().downcast_ref::<PatchHistoryCell>() {
+            Some(CompactMainPresentation::Summary(
+                patch.summary_hyperlink_lines(),
+            ))
         } else if compact_success_is_transcript_only(cell.as_ref())
             || cell
                 .as_any()

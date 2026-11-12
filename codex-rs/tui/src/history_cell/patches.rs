@@ -7,6 +7,9 @@ use crate::terminal_hyperlinks::adaptive_wrap_hyperlink_lines;
 use codex_ansi_escape::ansi_escape;
 use codex_utils_path_uri::LegacyAppPathString;
 
+#[path = "patches/codex_plus_plus/summary.rs"]
+mod summary;
+
 #[cfg(test)]
 #[path = "patches_tests.rs"]
 mod tests;

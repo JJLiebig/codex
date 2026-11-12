@@ -479,6 +479,9 @@ fn render_changes_block(
         header_spans.extend(render_line_count_summary(total_added, total_removed));
     }
     out.push(RtLine::from(header_spans).into());
+    if preview_lines == Some(0) {
+        return out;
+    }
 
     for (idx, r) in rows.into_iter().enumerate() {
         // Insert a blank separator between file chunks (except before the first)
