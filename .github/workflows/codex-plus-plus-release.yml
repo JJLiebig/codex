@@ -3,6 +3,10 @@ name: Codex++ release
 on:
   workflow_dispatch:
     inputs:
+      publish_windows_linux_launcher:
+        description: Publish the pinned fork.2 launcher using ready Windows/Linux and prior macOS
+        type: boolean
+        default: false
       source_run_id:
         description: Failed Codex++ release workflow run to recover
         required: true
@@ -28,6 +32,7 @@ env:
 
 jobs:
   prepare:
+    if: inputs.publish_windows_linux_launcher != true
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -438,3 +443,131 @@ jobs:
             gh api --method DELETE \
               "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
           done
+
+  publish-windows-linux-launcher:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_windows_linux_launcher
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+    concurrency:
+      group: codex-plus-plus-publication
+      queue: max
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: 5f73d5b8d64006f7315f31a849a61b3706e8b340
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: "26.12.1"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      - name: Pin npm
+        run: npm install --global npm@11.18.0
+      - name: Stage the pinned launcher with published platform dependencies
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+        run: |
+          python - <<'PY'
+          import base64
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          from urllib.parse import quote
+          from urllib.request import urlopen
+
+          version = "0.167.1-fork.2"
+          source = "5f73d5b8d64006f7315f31a849a61b3706e8b340"
+          package = "@jjliebig/codex-plus-plus"
+          expected = {
+              f"{package}-linux-x64": f"npm:{package}@{version}-linux-x64",
+              f"{package}-win32-x64": f"npm:{package}@{version}-win32-x64",
+              f"{package}-darwin-arm64": f"npm:{package}@0.167.1-fork.1-darwin-arm64",
+          }
+          assert os.environ["RELEASE_TAG"] == f"codex-plus-plus-v{version}"
+          assert os.environ["SOURCE_RUN_ID"] == "43223899813"
+          assert subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() == source
+          remote = json.loads(subprocess.check_output([
+              "gh", "api", f"repos/JJLiebig/codex/commits/{os.environ['RELEASE_TAG']}"
+          ]))
+          assert remote["sha"] == source
+          subprocess.run([
+              "python", "codex-cli/scripts/build_npm_package.py",
+              "--package", "codex-plus-plus", "--release-version", version,
+              "--staging-dir", "dist/root",
+          ], check=True)
+          manifest_path = Path("dist/root/package.json")
+          manifest = json.loads(manifest_path.read_text())
+          assert manifest["name"] == package and manifest["version"] == version
+          assert manifest["optionalDependencies"] == {
+              alias: f"npm:{package}@{version}-{alias.removeprefix(package + '-')}"
+              for alias in expected
+          }
+          manifest["optionalDependencies"] = expected
+          manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+          registry = {}
+          for alias, dependency in expected.items():
+              spec = dependency.removeprefix("npm:")
+              url = f"https://registry.npmjs.org/{quote(package, safe='')}/{spec.rsplit('@', 1)[1]}"
+              with urlopen(url, timeout=30) as response:
+                  metadata = json.load(response)
+              assert metadata["version"] == spec.rsplit("@", 1)[1]
+              platform, arch = alias.removeprefix(package + "-").rsplit("-", 1)
+              assert metadata["os"] == [platform] and metadata["cpu"] == [arch]
+              registry[alias] = metadata["dist"]["integrity"]
+          Path("dist/npm").mkdir(parents=True)
+          packed = json.loads(subprocess.check_output([
+              "npm", "--workspaces=false", "pack", "./dist/root", "--json", "--pack-destination", "dist/npm"
+          ]))[0]
+          tarball = Path("dist/npm") / packed["filename"]
+          integrity = "sha512-" + base64.b64encode(hashlib.sha512(tarball.read_bytes()).digest()).decode()
+          assert packed["integrity"] == integrity
+          receipt = {"source_sha": source, "version": version, "dependencies": expected,
+                     "platform_integrities": registry, "integrity": integrity}
+          Path("dist/npm/receipt.json").write_text(json.dumps(receipt, indent=2) + "\n")
+          with open(os.environ["GITHUB_ENV"], "a") as stream:
+              stream.write(f"ROOT_TARBALL={tarball}\nROOT_INTEGRITY={integrity}\n")
+          print(json.dumps(receipt, indent=2))
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-plus-plus-fork2-ready-launcher
+          path: dist/npm/*
+          retention-days: 7
+      - name: Verify the staged launcher selects the published Linux fix
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/launcher-smoke"
+          npm install --prefix "$prefix" --ignore-scripts --no-audit --no-fund "$ROOT_TARBALL"
+          actual=$("$prefix/node_modules/.bin/codex" --version)
+          [[ "$actual" == 'codex-cli 0.167.1-fork.2' ]]
+      - name: Publish launcher and verify registry integrity
+        env:
+          VERSION: 0.167.1-fork.2
+        run: |
+          set -euo pipefail
+          spec="@jjliebig/codex-plus-plus@$VERSION"
+          current=$(npm view "$spec" dist.integrity --json 2>/dev/null || true)
+          if [[ "$current" != "\"$ROOT_INTEGRITY\"" ]]; then
+            [[ -z "$current" || "$current" == *'"E404"'* ]] || { echo "Conflicting published launcher"; exit 1; }
+            npm publish "$ROOT_TARBALL" --access public --tag latest --provenance
+          fi
+          for attempt in $(seq 1 60); do
+            current=$(npm view "$spec" dist.integrity --json 2>/dev/null || true)
+            latest=$(npm view @jjliebig/codex-plus-plus dist-tags.latest --json)
+            if [[ "$current" == "\"$ROOT_INTEGRITY\"" && "$latest" == "\"$VERSION\"" ]]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Published launcher was not confirmed in the registry"
+          exit 1
