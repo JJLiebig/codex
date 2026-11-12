@@ -114,23 +114,23 @@ impl UpdatePlan {
         if self.channel != UpdateChannel::CodexPlusPlus {
             return None;
         }
-        match self.target {
-            UpdateTarget::PackageManager { .. } => {
-                Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/latest")
+        if !matches!(
+            self.target,
+            UpdateTarget::PackageManager { .. } | UpdateTarget::Standalone { .. }
+        ) {
+            return None;
+        }
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("linux", "x86_64") => {
+                Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/linux-x64")
             }
-            UpdateTarget::Standalone { .. } => match self.standalone_release_target()? {
-                "x86_64-unknown-linux-musl" => {
-                    Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/linux-x64")
-                }
-                "aarch64-apple-darwin" => {
-                    Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/darwin-arm64")
-                }
-                "x86_64-pc-windows-msvc" => {
-                    Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/win32-x64")
-                }
-                _ => None,
-            },
-            UpdateTarget::Homebrew | UpdateTarget::Manual => None,
+            ("macos", "aarch64") => {
+                Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/darwin-arm64")
+            }
+            ("windows", "x86_64") => {
+                Some("https://registry.npmjs.org/@jjliebig%2fcodex-plus-plus/win32-x64")
+            }
+            _ => None,
         }
     }
 

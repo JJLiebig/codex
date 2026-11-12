@@ -57,11 +57,13 @@ async fn published_probe_tracks_the_installable_channel() {
         (standalone, 3, true, true, "1.2.4-fork.1"),
         (standalone, 5, true, true, "1.2.5-fork.1"),
         (npm, 2, true, true, "1.2.2-fork.1"),
+        (npm, 5, false, false, "1.2.5-fork.1"),
     ] {
-        let mut npm_version = format!("1.2.{patch}-fork.1");
-        if plan == standalone {
-            npm_version.push_str(&format!("-{tag}"));
-        }
+        assert_eq!(
+            plan.fork_npm_version_url(),
+            standalone.fork_npm_version_url()
+        );
+        let npm_version = format!("1.2.{patch}-fork.1-{tag}");
         server.reset().await;
         Mock::given(path(format!("/{tag}"))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "version": npm_version, "dist": {"tarball": "https://example.test/pkg.tgz", "integrity": "sha512-value"}

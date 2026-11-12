@@ -9,6 +9,7 @@ PLATFORM_PACKAGES = {
     "codex-plus-plus-linux-x64": {
         "npm_name": "@jjliebig/codex-plus-plus-linux-x64",
         "npm_tag": "linux-x64",
+        "dependency_tag": "linux-x64",
         "target_triple": "x86_64-unknown-linux-musl",
         "os": "linux",
         "cpu": "x64",
@@ -16,6 +17,7 @@ PLATFORM_PACKAGES = {
     "codex-plus-plus-darwin-arm64": {
         "npm_name": "@jjliebig/codex-plus-plus-darwin-arm64",
         "npm_tag": "darwin-arm64",
+        "dependency_tag": "darwin-arm64",
         "target_triple": "aarch64-apple-darwin",
         "os": "darwin",
         "cpu": "arm64",
@@ -23,6 +25,7 @@ PLATFORM_PACKAGES = {
     "codex-plus-plus-win32-x64": {
         "npm_name": "@jjliebig/codex-plus-plus-win32-x64",
         "npm_tag": "win32-x64",
+        "dependency_tag": "win32-x64",
         "target_triple": "x86_64-pc-windows-msvc",
         "os": "win32",
         "cpu": "x64",

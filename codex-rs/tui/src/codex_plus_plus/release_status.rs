@@ -206,13 +206,10 @@ mod probe {
             {
                 return None;
             }
-            let version = if plan.standalone_release_target().is_some() {
-                info.version
-                    .strip_suffix(&format!("-{}", url.rsplit('/').next()?))?
-                    .to_string()
-            } else {
-                info.version
-            };
+            let version = info
+                .version
+                .strip_suffix(&format!("-{}", url.rsplit('/').next()?))?
+                .to_string();
             codex_install_context::codex_plus_plus::is_newer(&version, "0.0.0-fork.0")?;
             Some(version)
         });

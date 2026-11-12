@@ -329,6 +329,17 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             published = []
 
             def npm_view(spec: str, field: str) -> str | None:
+                if field == "version":
+                    tag = spec.rsplit("@", 1)[-1]
+                    package_version = VERSION + ("" if tag == "latest" else "-" + tag)
+                    return (
+                        package_version
+                        if npm_view(
+                            f"{release.PACKAGE_NAME}@{package_version}",
+                            "dist.integrity",
+                        )
+                        else None
+                    )
                 if field == "name":
                     return release.PACKAGE_NAME
                 self.assertEqual(
@@ -346,6 +357,78 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                 release.publish(VERSION, npm, platform=platform.tag)
             self.assertEqual(published, [(str(tarball), platform.tag)])
 
+    def test_independent_channels_do_not_rewind_on_late_older_builds(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            versions = {}
+            channels = {}
+            publications = []
+
+            def npm_view(spec, field):
+                if field == "name":
+                    return release.PACKAGE_NAME
+                selector = spec.rsplit("@", 1)[-1]
+                if field == "version":
+                    return channels.get(selector)
+                return versions.get(selector)
+
+            def npm_publish(command, *, check):
+                tarball = Path(command[2])
+                version = release.read_manifest(tarball)["version"]
+                tag = command[command.index("--tag") + 1]
+                versions[version] = release.tarball_integrity(tarball)
+                channels[tag] = version
+                publications.append((version, tag))
+
+            def publish(version, platform=None):
+                entries = release.release_entries(
+                    version, directory, platform=platform, root_only=platform is None
+                )
+                for tarball, package_version, _ in entries:
+                    write_tarball(
+                        tarball, {"package/package.json": manifest(package_version)}
+                    )
+                release.publish(
+                    version, directory, platform=platform, root_only=platform is None
+                )
+
+            with (
+                patch.object(release, "npm_view", side_effect=npm_view),
+                patch.object(release.subprocess, "run", side_effect=npm_publish),
+            ):
+                # Launcher and Linux are available while macOS has no build at all.
+                publish("1.2.3-fork.9")
+                publish("1.2.3-fork.9", "linux-x64")
+                self.assertEqual(
+                    channels,
+                    {"latest": "1.2.3-fork.9", "linux-x64": "1.2.3-fork.9-linux-x64"},
+                )
+                publish("1.2.3-fork.10")
+                publish("1.2.3-fork.10", "linux-x64")
+                # An older macOS build still advances its own channel.
+                publish("1.2.3-fork.9", "darwin-arm64")
+                # Previously missing old versions are recoverable without rewinding consumers.
+                publish("1.2.3-fork.8")
+                publish("1.2.3-fork.8", "linux-x64")
+                self.assertEqual(channels["latest"], "1.2.3-fork.10")
+                self.assertEqual(channels["linux-x64"], "1.2.3-fork.10-linux-x64")
+                self.assertEqual(channels["darwin-arm64"], "1.2.3-fork.9-darwin-arm64")
+                self.assertEqual(
+                    publications[-2:],
+                    [
+                        ("1.2.3-fork.8", "historical"),
+                        ("1.2.3-fork.8-linux-x64", "historical"),
+                    ],
+                )
+                # Exact retry is idempotent, but mismatching immutable bytes remain fatal.
+                before = publications.copy()
+                release.publish("1.2.3-fork.8", directory, root_only=True)
+                self.assertEqual(publications, before)
+                versions["1.2.3-fork.8"] = "sha512-conflict"
+                with self.assertRaisesRegex(RuntimeError, "Refusing to skip"):
+                    release.publish("1.2.3-fork.8", directory, root_only=True)
+                self.assertEqual(publications, before)
+
     def test_publish_skips_exact_registry_versions(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             npm_dir = Path(temp)
@@ -360,6 +443,17 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             }
 
             def npm_view(spec: str, field: str) -> str | None:
+                if field == "version":
+                    tag = spec.rsplit("@", 1)[-1]
+                    package_version = VERSION + ("" if tag == "latest" else "-" + tag)
+                    return (
+                        package_version
+                        if npm_view(
+                            f"{release.PACKAGE_NAME}@{package_version}",
+                            "dist.integrity",
+                        )
+                        else None
+                    )
                 if field == "name":
                     return release.PACKAGE_NAME
                 return integrities[spec]
@@ -381,6 +475,17 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             )
 
             def npm_view(spec: str, field: str) -> str | None:
+                if field == "version":
+                    tag = spec.rsplit("@", 1)[-1]
+                    package_version = VERSION + ("" if tag == "latest" else "-" + tag)
+                    return (
+                        package_version
+                        if npm_view(
+                            f"{release.PACKAGE_NAME}@{package_version}",
+                            "dist.integrity",
+                        )
+                        else None
+                    )
                 if field == "name":
                     return release.PACKAGE_NAME
                 return "sha512-conflict" if spec == conflict_spec else None
@@ -435,6 +540,17 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                 ticks += 1
 
             def npm_view(spec: str, field: str) -> str | None:
+                if field == "version":
+                    tag = spec.rsplit("@", 1)[-1]
+                    package_version = VERSION + ("" if tag == "latest" else "-" + tag)
+                    return (
+                        package_version
+                        if npm_view(
+                            f"{release.PACKAGE_NAME}@{package_version}",
+                            "dist.integrity",
+                        )
+                        else None
+                    )
                 if field == "name":
                     self.assertEqual(spec, release.PACKAGE_NAME)
                     return release.PACKAGE_NAME
@@ -476,9 +592,11 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                 write_npm_tarballs(npm_dir)
                 tags = []
 
-                def npm_view(_spec: str, field: str) -> str | None:
+                def npm_view(spec: str, field: str) -> str | None:
                     if field == "name":
                         return release.PACKAGE_NAME
+                    if field == "version":
+                        return None
                     return confirmation if tags else None
 
                 def npm_publish(command: list[str], *, check: bool) -> None:
@@ -505,6 +623,17 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             linux_integrity = release.tarball_integrity(path)
 
             def npm_view(spec: str, field: str) -> str | None:
+                if field == "version":
+                    tag = spec.rsplit("@", 1)[-1]
+                    package_version = VERSION + ("" if tag == "latest" else "-" + tag)
+                    return (
+                        package_version
+                        if npm_view(
+                            f"{release.PACKAGE_NAME}@{package_version}",
+                            "dist.integrity",
+                        )
+                        else None
+                    )
                 if field == "name":
                     return release.PACKAGE_NAME if spec == linux_spec else None
                 return linux_integrity if spec == linux_spec else None

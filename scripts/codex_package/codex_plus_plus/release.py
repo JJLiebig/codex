@@ -6,6 +6,7 @@ import base64
 from dataclasses import dataclass
 import hashlib
 import json
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -144,7 +145,7 @@ def read_manifest(path: Path) -> dict:
 
 
 def release_entries(
-    version: str, npm_dir: Path, *, platform: str | None = None
+    version: str, npm_dir: Path, *, platform: str | None = None, root_only: bool = False
 ) -> list[tuple[Path, str, str]]:
     entries = [
         (
@@ -152,7 +153,7 @@ def release_entries(
             f"{version}-{platform.tag}",
             platform.tag,
         )
-        for platform in selected_platforms(platform)
+        for platform in (() if root_only else selected_platforms(platform))
     ]
     if platform is None:
         entries.append((npm_tarball_path(npm_dir, version, None), version, "latest"))
@@ -160,9 +161,9 @@ def release_entries(
 
 
 def validate_tarballs(
-    version: str, npm_dir: Path, *, platform: str | None = None
+    version: str, npm_dir: Path, *, platform: str | None = None, root_only: bool = False
 ) -> list[tuple[Path, str, str]]:
-    entries = release_entries(version, npm_dir, platform=platform)
+    entries = release_entries(version, npm_dir, platform=platform, root_only=root_only)
     for path, expected_version, _tag in entries:
         if not path.is_file():
             raise RuntimeError(f"Missing npm tarball: {path}")
@@ -211,10 +212,27 @@ def npm_view(spec: str, field: str) -> str | None:
     raise RuntimeError(result.stderr.strip() or f"npm view failed for {spec}")
 
 
+def release_order(version: str, tag: str) -> tuple[int, ...]:
+    suffix = "" if tag == "latest" else f"-{tag}"
+    match = re.fullmatch(
+        r"(\d+)\.(\d+)\.(\d+)-fork\.(\d+)" + re.escape(suffix), version
+    )
+    if match is None:
+        raise RuntimeError(f"Unexpected {tag} version: {version}")
+    return tuple(map(int, match.groups()))
+
+
 def publish(
-    version: str, npm_dir: Path, *, dry_run: bool = False, platform: str | None = None
+    version: str,
+    npm_dir: Path,
+    *,
+    dry_run: bool = False,
+    platform: str | None = None,
+    root_only: bool = False,
 ) -> None:
-    entries = validate_tarballs(version, npm_dir, platform=platform)
+    entries = validate_tarballs(
+        version, npm_dir, platform=platform, root_only=root_only
+    )
     bootstrap_specs = (PACKAGE_NAME, f"{PACKAGE_NAME}@{entries[0][1]}")
     if all(npm_view(spec, "name") is None for spec in bootstrap_specs):
         raise RuntimeError(
@@ -229,7 +247,14 @@ def publish(
         expected = tarball_integrity(path)
         spec = f"{PACKAGE_NAME}@{package_version}"
         current = npm_view(spec, "dist.integrity")
+        channel = npm_view(f"{PACKAGE_NAME}@{tag}", "version")
         if current == expected:
+            if channel is None or release_order(channel, tag) < release_order(
+                package_version, tag
+            ):
+                raise RuntimeError(
+                    f"Registry bytes exist but channel {tag} has not advanced to {package_version}"
+                )
             print(f"Skipping {spec}; registry integrity matches", flush=True)
             continue
         if current is not None:
@@ -237,6 +262,10 @@ def publish(
                 f"Refusing to skip {spec}: registry integrity {current} != {expected}"
             )
         pending.append((path, spec, tag, expected))
+        if channel is not None and release_order(channel, tag) >= release_order(
+            package_version, tag
+        ):
+            pending[-1] = (path, spec, "historical", expected)
 
     # Submit all platform versions before waiting; latest must wait for every platform.
     for batch in (
@@ -276,6 +305,17 @@ def publish(
                 current = npm_view(spec, "dist.integrity")
                 if current == expected:
                     print(f"Confirmed {spec}; registry integrity matches", flush=True)
+                    consumer_tag = next(
+                        tag
+                        for _, package_version, tag in entries
+                        if spec == f"{PACKAGE_NAME}@{package_version}"
+                    )
+                    channel = npm_view(f"{PACKAGE_NAME}@{consumer_tag}", "version")
+                    package_version = spec.split("@")[-1]
+                    if channel is None or release_order(
+                        channel, consumer_tag
+                    ) < release_order(package_version, consumer_tag):
+                        continue
                     del awaiting[spec]
                 elif current is not None:
                     raise RuntimeError(
@@ -311,7 +351,9 @@ def parse_args() -> argparse.Namespace:
         )
     publish_parser = subparsers.add_parser("publish")
     publish_parser.add_argument("--version", required=True)
-    publish_parser.add_argument("--platform", choices=[p.tag for p in PLATFORMS])
+    selection = publish_parser.add_mutually_exclusive_group()
+    selection.add_argument("--platform", choices=[p.tag for p in PLATFORMS])
+    selection.add_argument("--root-only", action="store_true")
     publish_parser.add_argument("--npm-dir", type=Path, required=True)
     publish_parser.add_argument("--dry-run", action="store_true")
     return parser.parse_args()
@@ -327,7 +369,11 @@ def main() -> int:
         verify(args.version, args.archives_dir, args.npm_dir, platform=args.platform)
     else:
         publish(
-            args.version, args.npm_dir, dry_run=args.dry_run, platform=args.platform
+            args.version,
+            args.npm_dir,
+            dry_run=args.dry_run,
+            platform=args.platform,
+            root_only=args.root_only,
         )
     return 0
 

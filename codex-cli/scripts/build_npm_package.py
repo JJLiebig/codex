@@ -345,7 +345,7 @@ def stage_sources(staging_dir: Path, version: str, package: str) -> None:
         package_json["optionalDependencies"] = {
             platform_config["npm_name"]: (
                 f"npm:{root_package['npm_name']}@"
-                f"{compute_platform_package_version(version, platform_config['npm_tag'])}"
+                f"{platform_config.get('dependency_tag') or compute_platform_package_version(version, platform_config['npm_tag'])}"
             )
             for platform_config in platform_packages.values()
         }

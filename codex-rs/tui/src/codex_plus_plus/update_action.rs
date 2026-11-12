@@ -23,6 +23,18 @@ pub(super) fn standalone_action(platform: StandalonePlatform, dir: &Path) -> Opt
 }
 
 impl UpdateAction {
+    /// Refresh npm metadata when Vite+ installs into its fresh global prefix.
+    pub fn update_environment(self) -> &'static [(&'static str, &'static str)] {
+        if matches!(
+            self,
+            Self::CodexPlusPlusPackageManager(planner::PackageManager::VitePlus)
+        ) {
+            &[("npm_config_prefer_online", "true")]
+        } else {
+            &[]
+        }
+    }
+
     /// Command shown to users. Codex++ installer commands stay internal to `codex update`.
     pub fn display_command(self) -> String {
         match self {
@@ -43,8 +55,18 @@ impl UpdateAction {
 
 pub(super) fn package_manager_command_args(manager: planner::PackageManager) -> CommandArgs {
     match manager {
-        planner::PackageManager::Npm => ("npm", &["install", "-g", "@jjliebig/codex-plus-plus"]),
-        planner::PackageManager::Bun => ("bun", &["install", "-g", "@jjliebig/codex-plus-plus"]),
+        planner::PackageManager::Npm => (
+            "npm",
+            &[
+                "install",
+                "-g",
+                "@jjliebig/codex-plus-plus",
+                "--prefer-online",
+            ],
+        ),
+        planner::PackageManager::Bun => {
+            ("bun", &["update", "-g", "@jjliebig/codex-plus-plus@latest"])
+        }
         planner::PackageManager::VitePlus => {
             ("vp", &["install", "-g", "@jjliebig/codex-plus-plus"])
         }

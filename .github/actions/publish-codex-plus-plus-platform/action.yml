@@ -1,6 +1,7 @@
 name: Publish Codex++ platform
 description: Stage and retain one verified platform tarball before publishing it.
 inputs:
+  source_run_id: {required: true, description: Validated artifact source run}
   version: {required: true, description: Release version}
   target: {required: true, description: Native target triple}
   platform: {required: true, description: npm platform tag}
@@ -20,6 +21,8 @@ runs:
       run: npm install --global npm@11.18.0
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       with:
+        github-token: ${{ github.token }}
+        run-id: ${{ inputs.source_run_id }}
         name: codex-plus-plus-native-${{ inputs.target }}
         path: dist/archives
     - name: Resolve retained platform tarball
@@ -27,15 +30,18 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        SOURCE_RUN_ID: ${{ inputs.source_run_id }}
         ARTIFACT_NAME: codex-plus-plus-npm-platform-${{ inputs.platform }}
       run: |
         set -euo pipefail
-        retained="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+        retained="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
           --jq ".artifacts[] | select(.name == \"${ARTIFACT_NAME}\" and .expired == false) | .id")"
         if [[ -n "$retained" ]]; then echo "found=true" >> "$GITHUB_OUTPUT"; else echo "found=false" >> "$GITHUB_OUTPUT"; fi
     - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
       if: steps.retained.outputs.found == 'true'
       with:
+        github-token: ${{ github.token }}
+        run-id: ${{ inputs.source_run_id }}
         name: codex-plus-plus-npm-platform-${{ inputs.platform }}
         path: dist/npm
     - name: Stage platform payload
