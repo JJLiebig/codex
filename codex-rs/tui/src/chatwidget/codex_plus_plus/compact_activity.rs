@@ -53,6 +53,17 @@ impl HistoryCell for CompactActivityHistoryCell {
 }
 
 impl ChatWidget {
+    pub(in crate::chatwidget) fn prepare_compact_patch_history(
+        &self,
+        cell: Box<dyn HistoryCell>,
+    ) -> Box<dyn HistoryCell> {
+        if cell.as_any().is::<PatchHistoryCell>() {
+            self.compact_history_cell(cell)
+        } else {
+            cell
+        }
+    }
+
     pub(in crate::chatwidget) fn compact_history_cell(
         &self,
         cell: Box<dyn HistoryCell>,

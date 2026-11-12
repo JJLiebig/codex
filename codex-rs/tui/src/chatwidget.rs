@@ -1266,6 +1266,7 @@ impl ChatWidget {
         let Err(cell) = self.absorb_activity_detail(cell) else {
             return;
         };
+        let cell = self.prepare_compact_patch_history(cell);
         if let Some(active) = self.take_history_insertion_prefix(cell.as_ref()) {
             let active = self.compact_history_cell(active);
             self.app_event_tx.send(AppEvent::InsertHistoryCell(active));
