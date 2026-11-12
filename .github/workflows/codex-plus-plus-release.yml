@@ -147,9 +147,9 @@ jobs:
       group: codex-plus-plus-npm-win32-x64
       queue: max
       cancel-in-progress: false
-    needs: [prepare, build-windows, publish-npm]
+    needs: [prepare, build-windows]
     if: >-
-      always() && needs.prepare.result == 'success' && needs.publish-npm.result == 'success' &&
+      always() && needs.prepare.result == 'success' &&
       (needs.prepare.outputs.recovery == 'true' || needs.build-windows.result == 'success')
     runs-on: ubuntu-24.04
     permissions:
@@ -160,7 +160,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.release_tag }}
       - uses: ./.github/actions/publish-codex-plus-plus-platform
         with:
           source_run_id: ${{ needs.prepare.outputs.source_run_id }}
@@ -199,9 +198,9 @@ jobs:
       group: codex-plus-plus-npm-darwin-arm64
       queue: max
       cancel-in-progress: false
-    needs: [prepare, build-macos, publish-npm]
+    needs: [prepare, build-macos]
     if: >-
-      always() && needs.prepare.result == 'success' && needs.publish-npm.result == 'success' &&
+      always() && needs.prepare.result == 'success' &&
       (needs.prepare.outputs.recovery == 'true' || needs.build-macos.result == 'success')
     runs-on: ubuntu-24.04
     permissions:
@@ -212,7 +211,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.release_tag }}
       - uses: ./.github/actions/publish-codex-plus-plus-platform
         with:
           source_run_id: ${{ needs.prepare.outputs.source_run_id }}
@@ -251,9 +249,9 @@ jobs:
       group: codex-plus-plus-npm-linux-x64
       queue: max
       cancel-in-progress: false
-    needs: [prepare, build-linux, publish-npm]
+    needs: [prepare, build-linux]
     if: >-
-      always() && needs.prepare.result == 'success' && needs.publish-npm.result == 'success' &&
+      always() && needs.prepare.result == 'success' &&
       (needs.prepare.outputs.recovery == 'true' || needs.build-linux.result == 'success')
     runs-on: ubuntu-24.04
     permissions:
@@ -264,7 +262,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.release_tag }}
       - uses: ./.github/actions/publish-codex-plus-plus-platform
         with:
           source_run_id: ${{ needs.prepare.outputs.source_run_id }}
@@ -331,7 +328,6 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.release_tag }}
 
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
@@ -412,6 +408,21 @@ jobs:
           path: dist/npm
           run-id: ${{ needs.prepare.outputs.source_run_id }}
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          github-token: ${{ github.token }}
+          pattern: codex-plus-plus-npm-platform-*
+          path: dist/npm
+          merge-multiple: true
+          run-id: ${{ needs.prepare.outputs.source_run_id }}
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.prepare.outputs.recovery == 'true'
+        with:
+          pattern: codex-plus-plus-npm-platform-*
+          path: dist/npm
+          merge-multiple: true
+
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -420,6 +431,8 @@ jobs:
           SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
           set -euo pipefail
+          python scripts/codex_package/codex_plus_plus/release.py verify \
+            --version "$VERSION" --archives-dir dist/archives --npm-dir dist/npm
           python scripts/codex_package/codex_plus_plus/github_release.py \
             --version "$VERSION" --source-sha "$SOURCE_SHA" \
             --archives-dir dist/archives --npm-dir dist/npm
