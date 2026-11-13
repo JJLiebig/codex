@@ -71,10 +71,6 @@ impl WebSearchCell {
         !self.completed
     }
 
-    pub(crate) fn is_completed(&self) -> bool {
-        self.completed
-    }
-
     pub(crate) fn update(&mut self, action: WebSearchAction, query: String) {
         self.action = Some(action);
         self.query = query;

@@ -216,38 +216,6 @@ impl InputQueue {
         }
     }
 
-    #[expect(
-        clippy::await_holding_invalid_type,
-        reason = "active turn checks and turn state updates must remain atomic"
-    )]
-    pub(crate) async fn deliver_mailbox_communication_to_current_turn(
-        &self,
-        active_turn: &Mutex<Option<ActiveTurn>>,
-        communication: InterAgentCommunication,
-        expected_turn_id: Option<&str>,
-    ) -> bool {
-        let active = active_turn.lock().await;
-        let Some(active_turn) = active.as_ref().filter(|turn| {
-            turn.task.as_ref().is_some_and(|task| {
-                expected_turn_id.is_none_or(|id| {
-                    task.turn_context.sub_id == id && !task.cancellation_token.is_cancelled()
-                })
-            })
-        }) else {
-            return false;
-        };
-        let mut turn_state = active_turn.turn_state.lock().await;
-        if !turn_state.accepts_mailbox_delivery_for_current_turn() {
-            return false;
-        }
-        turn_state
-            .pending_input
-            .items
-            .push(TurnInput::InterAgentCommunication(communication.into()));
-        self.activity_tx.send_replace(InputQueueActivity::Mailbox);
-        true
-    }
-
     pub(crate) async fn enqueue_mailbox_communication(
         &self,
         communication: crate::PendingAgentMessage,

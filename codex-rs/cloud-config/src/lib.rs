@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 //! Cloud-hosted configuration data for Codex.
 //!
 //! This crate owns transport, caching, and refresh behavior for cloud-delivered

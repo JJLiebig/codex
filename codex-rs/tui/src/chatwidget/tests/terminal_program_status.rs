@@ -92,7 +92,6 @@ async fn mcp_startup_preserves_program_status_outside_a_turn() {
     use crate::terminal_program_status::ProgramStatus::Error;
 
     let (mut chat, _rx, _op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
-    chat.set_mcp_startup_expected_servers(["background".to_string()]);
 
     for settled_status in [Idle, Done, Error] {
         chat.status_state.program_status_after_turn = settled_status;

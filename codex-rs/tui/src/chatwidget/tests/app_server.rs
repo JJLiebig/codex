@@ -1521,7 +1521,6 @@ async fn live_app_server_collab_wait_items_render_history() {
         Some("Ada".to_string()),
         Some("reviewer".to_string()),
     );
-    chat.set_mcp_startup_expected_servers(["slow".to_string()]);
     let mcp_starting = McpServerStatusUpdatedNotification {
         thread_id: Some("thread-1".to_string()),
         name: "slow".to_string(),

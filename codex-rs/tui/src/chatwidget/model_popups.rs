@@ -11,9 +11,6 @@ pub(super) const MODEL_OPTIONS_VIEW_ID: &str = "model-options";
 pub(super) const MODEL_LOADING_VIEW_ID: &str = "model-loading";
 pub(super) const MODEL_SELECTION_VIEW_ID: &str = "model-selection";
 pub(super) const ALL_MODELS_SELECTION_VIEW_ID: &str = "all-models-selection";
-pub(super) const MODEL_REASONING_VIEW_ID: &str = "model-reasoning";
-pub(super) const ADVANCED_REASONING_VIEW_ID: &str = "advanced-reasoning";
-pub(super) const PLAN_REASONING_SCOPE_VIEW_ID: &str = "plan-reasoning-scope";
 
 impl ChatWidget {
     /// Open a popup to choose a quick auto model. Selecting "All models"
@@ -488,7 +485,6 @@ impl ChatWidget {
         self.bottom_pane.show_selection_view(SelectionViewParams {
             view_id: Some(MODEL_OPTIONS_VIEW_ID),
             title: Some(PLAN_MODE_REASONING_SCOPE_TITLE.to_string()),
-            view_id: Some(PLAN_REASONING_SCOPE_VIEW_ID),
             subtitle: Some(subtitle),
             items: vec![
                 SelectionItem {
@@ -687,7 +683,6 @@ impl ChatWidget {
             header: Box::new(header),
             items,
             initial_selected_idx,
-            view_id: Some(MODEL_REASONING_VIEW_ID),
             ..SelectionViewParams::picker()
         });
     }
@@ -755,7 +750,6 @@ impl ChatWidget {
             view_id: Some(MODEL_OPTIONS_VIEW_ID),
             header: Box::new(header),
             items,
-            view_id: Some(ADVANCED_REASONING_VIEW_ID),
             ..SelectionViewParams::picker()
         });
     }

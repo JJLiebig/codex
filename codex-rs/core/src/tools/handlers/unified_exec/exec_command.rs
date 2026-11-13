@@ -193,7 +193,7 @@ impl ExecCommandHandler {
         )
         .await;
         let prepared = parsed.prepare(self.lifetime)?;
-        let environment = prepared.turn_environment.environment.as_ref();
+        let environment = prepared.turn_environment.environment().as_ref();
         let resolved_shell = resolved_exec_command_shell(environment, || {
             Some((
                 prepared.resolved.shell.shell.shell_type,
@@ -424,7 +424,7 @@ impl CoreToolRuntime for ExecCommandHandler {
             .map(Arc::new)
             .unwrap_or_else(|| invocation.session.user_shell());
         let resolved_shell = reviewed_exec_command_shell(
-            turn_environment.environment.as_ref(),
+            turn_environment.environment().as_ref(),
             &args,
             shell,
             turn_environment.config().allow_login_shell,

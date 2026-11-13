@@ -117,6 +117,47 @@ async fn compact_live_tool_reuses_status_row_without_changing_height() {
     assert!(!contains_text(&active, "printf second"));
     assert!(!contains_text(&active, "streamed output"));
 
+    let render_backdrop = |widget: &ChatWidget| {
+        let renderable = widget.bottom_pane_renderable(Default::default());
+        let area = Rect::new(
+            /*x*/ 0,
+            /*y*/ 0,
+            /*width*/ 80,
+            renderable.desired_height(/*width*/ 80),
+        );
+        let mut buffer = Buffer::empty(area);
+        renderable.render(area, &mut buffer);
+        buffer
+    };
+    let before_dialog = render_backdrop(&widget);
+    widget.bottom_pane.show_selection_view(SelectionViewParams {
+        presentation: crate::bottom_pane::ViewPresentation::Centered,
+        view_id: Some("compact-status-dialog"),
+        title: Some("Choose an action".into()),
+        ..Default::default()
+    });
+    let backdrop = render_backdrop(&widget);
+    assert!(backdrop.area.height < before_dialog.area.height);
+    assert!(contains_text(&backdrop, "Running"));
+    let backdrop_text = backdrop
+        .content
+        .chunks(usize::from(backdrop.area.width))
+        .map(|row| {
+            row.iter()
+                .map(ratatui::buffer::Cell::symbol)
+                .collect::<String>()
+                .trim_end()
+                .to_owned()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    insta::assert_snapshot!("compact_status_dialog_backdrop", backdrop_text.trim());
+    assert!(
+        widget
+            .bottom_pane
+            .dismiss_active_view_if_id("compact-status-dialog")
+    );
+
     let command = widget
         .transcript
         .active_cell

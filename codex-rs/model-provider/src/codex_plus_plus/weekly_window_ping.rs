@@ -267,6 +267,9 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         | ApiError::RateLimit(_)
         | ApiError::InvalidPrompt { .. }
         | ApiError::InvalidRequest { .. }
+        | ApiError::AccessProgramNotEnabled { .. }
+        | ApiError::InferenceHookDenied { .. }
+        | ApiError::ContentPolicyViolation { .. }
         | ApiError::CyberPolicy { .. }
         | ApiError::BioPolicy { .. }
         | ApiError::MisalignmentPolicyViolation { .. } => {
