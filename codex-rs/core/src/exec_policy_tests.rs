@@ -1443,7 +1443,7 @@ async fn granular_dangerous_command_approval_does_not_authorize_escalation(
         SandboxPermissions::RequireEscalated,
     ] {
         let requirement = ExecPolicyManager::default()
-            .create_exec_approval_requirement_for_command_platform(
+            .create_exec_approval_requirement_with_guardian(
                 ExecApprovalRequest {
                     command: &command,
                     approval_policy: AskForApproval::Granular(GranularApprovalConfig {
@@ -1461,6 +1461,7 @@ async fn granular_dangerous_command_approval_does_not_authorize_escalation(
                     allow_prefix_rules: AllowPrefixRules::Honor,
                 },
                 platform,
+                /*exact_pre_tool_use_approval*/ false,
             )
             .await;
         let expected = if sandbox_permissions == SandboxPermissions::UseDefault

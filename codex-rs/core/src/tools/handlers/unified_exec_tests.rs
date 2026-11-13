@@ -555,6 +555,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            native_call: None,
             environments,
         }),
         Some(crate::tools::registry::PreToolUsePayload {
@@ -617,6 +618,7 @@ async fn exec_command_pre_tool_use_payload_resolves_local_shell_identity() -> an
                 tool_name: codex_tools::ToolName::plain("exec_command"),
                 source: ToolCallSource::Direct,
                 payload,
+                native_call: None,
                 environments,
             })
             .expect("local shell should resolve before PreToolUse");

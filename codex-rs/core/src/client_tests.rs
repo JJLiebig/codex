@@ -1180,7 +1180,7 @@ async fn background_http_preserves_foreground_routing_and_websocket_cache() -> a
     let mut stream = super::ResponsesHttpExecutor::new(&client)
         .stream_responses_http(
             &turn_state,
-            client.auth_owner_generation(),
+            client.auth_owner(),
             /*event_sender*/ None,
             &Prompt::default(),
             &test_model_info(),
@@ -1195,11 +1195,13 @@ async fn background_http_preserves_foreground_routing_and_websocket_cache() -> a
     while let Some(event) = stream.next().await {
         event?;
     }
-    let stale_owner = client.auth_owner_generation().expect("native auth owner") + 1;
+    let other_owner =
+        AuthManager::from_auth_for_testing(CodexAuth::create_dummy_chatgpt_auth_for_testing())
+            .auth_owner();
     let stale = super::ResponsesHttpExecutor::new(&client)
         .stream_responses_http(
             &turn_state,
-            Some(stale_owner),
+            Some(other_owner),
             /*event_sender*/ None,
             &Prompt::default(),
             &test_model_info(),
@@ -1554,10 +1556,10 @@ async fn responses_websocket_enabled_ignores_inactive_imported_accounts() -> any
     let mut provider = ModelProviderInfo::create_openai_provider(/*base_url*/ None);
     provider.supports_websockets = true;
     let client = ModelClient::new(
-        Some(auth_manager),
+        create_model_provider(provider, Some(auth_manager)),
         AgentIdentityAuthPolicy::JwtOnly,
         ThreadId::new(),
-        provider,
+        uuid_v7_item_id_generator_for_test(),
         SessionSource::Cli,
         "test_originator".to_string(),
         /*model_verbosity*/ None,

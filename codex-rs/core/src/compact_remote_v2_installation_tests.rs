@@ -151,13 +151,14 @@ async fn prepared_prefix_rejection_respects_caller_intent(
     };
     let world_state = WorldState::default();
     let mut analytics = CompactionAnalyticsDetails::default();
+    let mut attempted_accounts = HashSet::new();
     let mut compaction = Box::pin(run_compaction(
         &sess,
         &step,
         &step,
         /*client_session*/ None,
         &world_state,
-        &mut HashSet::new(),
+        &mut attempted_accounts,
         CompactionTurnMetadata::new(
             CompactionTrigger::Auto,
             CompactionReason::ContextLimit,
