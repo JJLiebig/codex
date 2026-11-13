@@ -611,6 +611,8 @@ async fn resolved_product_obeys_login_and_workspace_restrictions() {
             AuthConfig {
                 codex_home: temp_dir.path().to_path_buf(),
                 auth_credentials_store_mode: AuthCredentialsStoreMode::Ephemeral,
+                automatic_account_selection:
+                    codex_config::types::AutomaticAccountSelection::Enabled,
                 keyring_backend_kind: Default::default(),
                 forced_login_method: Some(login_method),
                 chatgpt_base_url: None,

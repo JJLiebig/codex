@@ -1,0 +1,20 @@
+---
+source: tui/src/chatwidget/codex_plus_plus/compact_activity_tests.rs
+expression: "format!(\"live:\\n{live}\\ngrouped:\\n{grouped}\\ndetailed:\\n{detailed}\")"
+---
+live:
+▸ Calling workspace.inspect
+grouped:
+▾ 3 tool calls · Called workspace.inspect
+      Ran 'printf one'
+      Calling workspace.inspect
+      Called workspace.inspect
+detailed:
+$ 'printf one'
+one
+✓ • 5ms
+
+• Calling workspace.inspect({"path":"README.md"})
+
+• Called workspace.inspect({"path":"README.md"})
+  └ full result

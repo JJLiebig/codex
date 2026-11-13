@@ -1,0 +1,10 @@
+---
+source: tui/src/chatwidget/rendering_tests.rs
+expression: backdrop_text.trim()
+---
+• Running 'printf first (0s • esc to interrupt)
+
+
+› Ask Codex to do anything
+
+  GPT-5.6-Sol default · /tmp/project
