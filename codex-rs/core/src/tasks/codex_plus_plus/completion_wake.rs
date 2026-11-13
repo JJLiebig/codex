@@ -53,7 +53,10 @@ pub(crate) async fn run_turn_loop(
         };
         if turn_state.stopped {
             settle_stopped_turn(&sess, &ctx, &mut turn_state, &cancellation_token).await?;
-            return Ok(last_agent_message);
+            return Ok(Some(super::super::regular::RegularTaskOutput {
+                last_agent_message,
+                mcp_startup_requirements: std::mem::take(&mut turn_state.mcp_startup_requirements),
+            }));
         }
         // Terminal errors are already reported. Let task completion preserve pending
         // input instead of restarting the failed turn for that same input.
@@ -61,7 +64,10 @@ pub(crate) async fn run_turn_loop(
             if !cancellation_token.is_cancelled() {
                 sess.services.unified_exec_manager.completion_wake.clear();
             }
-            return Ok(last_agent_message);
+            return Ok(Some(super::super::regular::RegularTaskOutput {
+                last_agent_message,
+                mcp_startup_requirements: std::mem::take(&mut turn_state.mcp_startup_requirements),
+            }));
         }
         if turn_state.completion_claim.is_some() {
             if !cancellation_token.is_cancelled()
@@ -70,7 +76,10 @@ pub(crate) async fn run_turn_loop(
                 sess.services.unified_exec_manager.completion_wake.clear();
                 return Err(error);
             }
-            return Ok(last_agent_message);
+            return Ok(Some(super::super::regular::RegularTaskOutput {
+                last_agent_message,
+                mcp_startup_requirements: std::mem::take(&mut turn_state.mcp_startup_requirements),
+            }));
         }
         turn_state.completion_claim = sess
             .services
@@ -79,7 +88,10 @@ pub(crate) async fn run_turn_loop(
             .wait_for_input(&sess, &ctx, &cancellation_token)
             .await;
         if !sess.input_queue.has_pending_input(&sess.active_turn).await {
-            return Ok(last_agent_message);
+            return Ok(Some(super::super::regular::RegularTaskOutput {
+                last_agent_message,
+                mcp_startup_requirements: std::mem::take(&mut turn_state.mcp_startup_requirements),
+            }));
         }
         next_input = Vec::new();
     }

@@ -3,13 +3,14 @@ use super::*;
 impl BottomPane {
     pub(crate) fn as_renderable_with_status_override<'a>(
         &'a self,
-        options: ComposerRenderOptions<'a>,
+        mut options: ComposerRenderOptions<'a>,
         status_override: Option<String>,
     ) -> RenderableItem<'a> {
         if status_override.is_none() {
             return self.backdrop_with_options(options);
         }
         let views = if self.centered_dialog().is_some() {
+            options.is_dialog_backdrop = true;
             &self.view_stack[..self.view_stack.len() - 1]
         } else {
             &self.view_stack

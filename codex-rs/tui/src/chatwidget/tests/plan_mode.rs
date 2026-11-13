@@ -139,16 +139,10 @@ async fn plan_implementation_popup_clear_context_emits_clear_submit_event() {
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
 
     let event = rx.try_recv().expect("expected AppEvent");
-    let AppEvent::ClearUiAndSubmitUserMessage { text } = event else {
-        panic!("expected ClearUiAndSubmitUserMessage, got {event:?}");
+    let AppEvent::ImplementPlanInFreshSession { plan } = event else {
+        panic!("expected ImplementPlanInFreshSession, got {event:?}");
     };
-    assert_eq!(
-        text,
-        "A previous agent produced the plan below to accomplish the user's task. \
-        Implement the plan in a fresh context. Treat the plan as the source of \
-        user intent, re-read files as needed, and carry the work through \
-        implementation and verification.\n\n- Step 1\n- Step 2\n"
-    );
+    assert_eq!(plan, plan_markdown);
 }
 
 #[tokio::test]
@@ -806,6 +800,7 @@ async fn plan_implementation_popup_skips_replayed_turn_complete() {
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![ThreadItem::untimed(
                 AppServerThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "msg-plan".to_string(),
                     text: "Plan details".to_string(),
                     phase: Some(MessagePhase::FinalAnswer),
@@ -849,6 +844,7 @@ async fn plan_implementation_popup_shows_once_when_replay_precedes_live_turn_com
             items_view: codex_app_server_protocol::TurnItemsView::Full,
             items: vec![ThreadItem::untimed(
                 AppServerThreadItemPayload::AgentMessage {
+                    moderation: None,
                     id: "msg-plan-replay".to_string(),
                     text: "Plan details".to_string(),
                     phase: Some(MessagePhase::FinalAnswer),
@@ -1521,7 +1517,7 @@ async fn plan_slash_command_with_hidden_shell_paste_queued_before_session_submit
 
     chat.handle_key_event(KeyEvent::from(KeyCode::Enter));
     chat.queue_user_message(UserMessage::from("queued follow-up"));
-    chat.finish_mcp_startup(Vec::new(), Vec::new());
+    chat.finish_mcp_startup();
     assert_eq!(
         chat.queued_user_message_texts(),
         vec![format!("/plan {payload}"), "queued follow-up".to_string()]
@@ -1547,7 +1543,7 @@ async fn rejected_initial_image_does_not_submit_later_queued_prompt() {
     initial_message.remote_image_urls = vec!["https://example.com/image.png".to_string()];
     chat.initial_user_message = Some(initial_message);
     chat.queue_user_message(UserMessage::from("queued follow-up"));
-    chat.finish_mcp_startup(Vec::new(), Vec::new());
+    chat.finish_mcp_startup();
 
     let mut session = plan_test_session(ThreadId::new());
     session.model = current_model;

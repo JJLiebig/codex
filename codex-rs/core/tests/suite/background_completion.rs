@@ -162,7 +162,7 @@ print(json.dumps({"continue": False, "stopReason": "stop completion continuation
                 "matcher": "compact", "hooks": [{"type": "command", "command": format!("python3 {}", script.display())}]
             }]}}).to_string()).unwrap();
         }).with_model_info_override("gpt-5.5", |model| {
-            model.input_modalities.push(codex_protocol::openai_models::InputModality::Audio);
+            model.input_modalities.retain(|modality| *modality != codex_protocol::openai_models::InputModality::Audio);
         }).with_config(|config| {
             core_test_support::hooks::trust_discovered_hooks(config);
             config.features.disable(Feature::InstantInterrupt).unwrap();
@@ -406,7 +406,7 @@ print(json.dumps({"continue": False, "stopReason": "stop completion continuation
         assert!(
             completed.error.as_ref().is_some_and(|error| error
                 .message
-                .contains("Uploaded audio file inputs are not enabled")),
+                .contains("The selected model does not support uploaded audio")),
             "settlement must report unsupported audio"
         );
         assert_eq!(

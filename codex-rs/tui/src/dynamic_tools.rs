@@ -351,6 +351,8 @@ async fn execute_inner(
                 request(&handle, |request_id| ClientRequest::ThreadList {
                     request_id,
                     params: ThreadListParams {
+                        include_attached_threads: false,
+                        current_account_only: true,
                         excluded_thread_ids: None,
                         attached_to_thread_id: None,
                         originators: None,
@@ -896,6 +898,7 @@ async fn execute_inner(
                                                 cursor: None,
                                                 limit: Some(20),
                                                 sort_direction: Some(SortDirection::Desc),
+                                                defer_output: None,
                                             },
                                         }
                                     }),
@@ -913,6 +916,7 @@ async fn execute_inner(
                                             .cloned()
                                             .map(|item| ThreadItemEntry {
                                                 turn_id: turn.id.clone(),
+                                                output_deferred: false,
                                                 started_at_ms: item.started_at_ms,
                                                 completed_at_ms: item.completed_at_ms,
                                                 item,
@@ -1287,7 +1291,8 @@ async fn background_turn_program(
             params: ModelListParams {
                 cursor: None,
                 limit: None,
-                include_hidden: Some(true)
+                include_hidden: Some(true),
+                model_provider: None,
             },
         }),
     );

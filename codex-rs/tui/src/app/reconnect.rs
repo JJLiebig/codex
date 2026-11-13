@@ -43,6 +43,9 @@ pub(super) async fn reconnect(
     task_tools: ThreadToolTransport,
     presentation: ReconnectPresentation,
 ) -> Result<Reconnected> {
+    if matches!(target, AppServerTarget::Cloud) {
+        color_eyre::eyre::bail!("Reopen Codex to reconnect the cloud backend.");
+    }
     let mode = target.thread_params_mode();
     if matches!(target, AppServerTarget::Embedded) {
         color_eyre::eyre::bail!("in-process sessions have no connection to restore");
@@ -230,6 +233,10 @@ impl App {
                 owner.reset_realtime_conversation();
             }
             self.retire_background_voice();
+            self.saved_openings.abandon();
+            if let Some(pane) = self.sidebars.get_mut(&self.sidebar_parent()) {
+                pane.opening = None;
+            }
             self.reconnect.offline = true;
             self.account_email_request_id = None;
             // Cached blank sessions are usable only while this connection owns a subscription.
@@ -375,6 +382,7 @@ impl App {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             state.connection_notice = None;
+            state.restart_history_search();
             if state.creating_worktree {
                 state.creating_worktree = false;
                 self.pending_managed_worktree_creation = false;
@@ -409,6 +417,7 @@ impl App {
         }
         self.model_catalog = Arc::new(
             ModelCatalog::new(bootstrap.available_models)
+                .for_backend(app_server.backend_id(), &mut self.provider_writes)
                 .with_collaboration_modes(bootstrap.collaboration_modes),
         );
         self.pending_app_server_requests.clear();

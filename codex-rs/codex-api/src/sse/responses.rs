@@ -679,7 +679,14 @@ async fn process_sse_with_treatment(
                 let error = error.into_api_error();
                 if matches!(
                     error,
-                    ApiError::FlexUnavailable | ApiError::ResponseIncomplete(_)
+                    ApiError::FlexUnavailable
+                        | ApiError::ContextWindowExceeded
+                        | ApiError::InvalidRequest { .. }
+                        | ApiError::SessionBudgetExceeded
+                        | ApiError::InferenceHookDenied { .. }
+                        | ApiError::AccessProgramNotEnabled { .. }
+                        | ApiError::ContentPolicyViolation { .. }
+                        | ApiError::ResponseIncomplete(_)
                 ) {
                     let _ = tx_event.send(Err(error)).await;
                     return;

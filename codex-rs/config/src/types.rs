@@ -754,6 +754,7 @@ pub enum NotificationMethod {
     #[default]
     Auto,
     Osc9,
+    Osc777,
     Bel,
 }
 
@@ -762,6 +763,7 @@ impl fmt::Display for NotificationMethod {
         match self {
             NotificationMethod::Auto => write!(f, "auto"),
             NotificationMethod::Osc9 => write!(f, "osc9"),
+            NotificationMethod::Osc777 => write!(f, "osc777"),
             NotificationMethod::Bel => write!(f, "bel"),
         }
     }
@@ -882,6 +884,11 @@ impl QuickDial {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Default, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct Tui {
+    /// Preferred hosts for new conversations, indexed by project and local user identity.
+    /// Read from the user configuration only; values are never endpoints or credentials.
+    #[serde(default)]
+    pub default_hosts: BTreeMap<String, BTreeMap<String, String>>,
+
     #[serde(default, flatten)]
     pub notification_settings: TuiNotificationSettings,
 
@@ -940,6 +947,15 @@ pub struct Tui {
     /// Defaults to `true`; alternate-screen restrictions take precedence.
     #[serde(default = "default_true")]
     pub fullscreen_transcript: bool,
+
+    /// Summarize tool calls and collapse completed turns in the full-screen transcript. Defaults to `false`.
+    #[serde(default)]
+    pub collapse_turn_details: bool,
+
+    /// Preferred docked sidebar width as a percentage of the terminal. Defaults to one third.
+    #[serde(default)]
+    #[schemars(range(min = 1, max = 99))]
+    pub sidebar_width_percent: Option<u8>,
 
     /// Mouse wheel speed multiplier for transcript scrolling, based on one row per event.
     /// Defaults to `1.0`. Positive fractional values slow scrolling; values above `1.0` speed it up.

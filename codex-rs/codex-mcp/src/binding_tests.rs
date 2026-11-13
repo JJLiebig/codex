@@ -7,12 +7,14 @@ use std::sync::atomic::Ordering;
 use codex_config::AppToolApproval;
 use codex_config::Constrained;
 use codex_config::types::ApprovalsReviewer;
+use codex_exec_server::FileSystemSandboxContext;
 use codex_protocol::mcp::McpServerInfo;
 use codex_protocol::models::PermissionProfile;
 use codex_protocol::protocol::AskForApproval;
 use codex_rmcp_client::InProcessTransportFactory;
 use codex_rmcp_client::RmcpClient;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathUri;
 use futures::FutureExt;
 use pretty_assertions::assert_eq;
 use rmcp::model::JsonObject;
@@ -21,7 +23,9 @@ use tokio::io::DuplexStream;
 use tokio::sync::Notify;
 
 use super::McpBinding;
+use super::McpPermissionSource;
 use super::PreparedMcpCall;
+use crate::McpServerPermissions;
 use crate::binding_clients::McpBindingClients;
 use crate::client_tool_catalog::ClientToolCatalog;
 use crate::connection_manager::McpConnectionSet;
@@ -103,21 +107,35 @@ async fn test_step(
         client_supports_network_policy_meta_capability: false,
         codex_apps_tools_cache_context: None,
     });
-    let clients = Arc::new(McpBindingClients::new(HashMap::from([(
-        SERVER_NAME.to_string(),
-        Arc::clone(&managed_client),
-    )])));
+    let clients = Arc::new(McpBindingClients::new(
+        HashMap::from([(SERVER_NAME.to_string(), Arc::clone(&managed_client))]),
+        Vec::new(),
+    ));
     let connections = Arc::new(McpConnectionSet::empty(/*prefix_mcp_tool_names*/ true));
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
-    if label == "old" {
+    config.host_cwd = config.host_cwd.join(label);
+    config.environment_cwds.insert(
+        codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID.to_string(),
+        codex_utils_path_uri::PathUri::from_abs_path(&config.host_cwd.join("executor")),
+    );
+    let server_permissions = if label == "old" {
         config.approval_policy = Constrained::allow_any(AskForApproval::Never);
         config.permission_profile = PermissionProfile::Disabled;
+        let mut sandbox = FileSystemSandboxContext::from_permission_profile(
+            PermissionProfile::read_only(),
+            PathUri::from_abs_path(&config.host_cwd.join("executor")),
+        );
+        sandbox.user_home_dir = Some(PathUri::from_abs_path(&config.host_cwd.join("home")));
+        sandbox.temporary_directories =
+            Some(vec![PathUri::from_abs_path(&config.host_cwd.join("tmp"))]);
+        McpServerPermissions::Environment(Arc::new(sandbox))
     } else {
         config.approvals_reviewer = ApprovalsReviewer::AutoReview;
-    }
+        McpServerPermissions::Thread
+    };
     config
-        .server_permission_profiles
-        .insert(SERVER_NAME.to_string(), config.permission_profile.clone());
+        .server_permissions
+        .insert(SERVER_NAME.to_string(), server_permissions);
     config
         .environment_use_mxc
         .insert(format!("{label}-environment"), label == "new");
@@ -141,7 +159,7 @@ async fn test_step(
         Some(format!("{label}-plugin")),
         label == "old",
     )
-    .expect("test call should retain its thread-owned permission profile");
+    .expect("test call should have a permission source");
     let calls = HashMap::from([((SERVER_NAME.to_string(), TOOL_NAME.to_string()), prepared)]);
 
     TestStep {
@@ -226,6 +244,26 @@ async fn prepared_call_keeps_captured_connection_and_authority_after_refresh() -
     );
     assert!(Arc::ptr_eq(&old_call.client.client, &old.client));
     assert!(!Arc::ptr_eq(&old.client, &new.client));
+    let McpPermissionSource::Environment { sandbox, .. } = old_call.permission_source() else {
+        anyhow::bail!("expected the old call to keep its environment permissions");
+    };
+    let old_root = AbsolutePathBuf::current_dir()?.join("old");
+    assert_eq!(
+        (
+            &sandbox.cwd,
+            &sandbox.user_home_dir,
+            &sandbox.temporary_directories
+        ),
+        (
+            &PathUri::from_abs_path(&old_root.join("executor")),
+            &Some(PathUri::from_abs_path(&old_root.join("home"))),
+            &Some(vec![PathUri::from_abs_path(&old_root.join("tmp"))]),
+        ),
+    );
+    let McpPermissionSource::Thread { host_cwd, .. } = new_call.permission_source() else {
+        anyhow::bail!("expected thread permissions");
+    };
+    assert_eq!(host_cwd, &AbsolutePathBuf::current_dir()?.join("new"));
     assert_eq!(
         (
             old_call.config().approval_policy.value(),
@@ -235,7 +273,7 @@ async fn prepared_call_keeps_captured_connection_and_authority_after_refresh() -
         ),
         (
             AskForApproval::Never,
-            &PermissionProfile::Disabled,
+            &PermissionProfile::read_only(),
             ApprovalsReviewer::User,
             Some(&false),
         )
@@ -318,6 +356,7 @@ async fn prepared_call_is_rejected_after_catalog_refresh() {
     step.tool_catalog
         .refresh(
             || async { Ok((step.step.tools().to_vec(), None, ())) },
+            || Some(()),
             |_, _, ()| {},
         )
         .await
@@ -352,6 +391,7 @@ async fn stale_prepared_call_does_not_run_preparation() {
     step.tool_catalog
         .refresh(
             || async { Ok((step.step.tools().to_vec(), None, ())) },
+            || Some(()),
             |_, _, ()| {},
         )
         .await
@@ -397,14 +437,23 @@ async fn preparation_holds_catalog_authority_until_it_finishes() {
     });
 
     preparation_started.notified().await;
+    let validation_reached = AtomicBool::new(false);
     let refresh = step.tool_catalog.refresh(
         || async { Ok((step.step.tools().to_vec(), None, ())) },
+        || {
+            validation_reached.store(true, Ordering::SeqCst);
+            Some(())
+        },
         |_, _, ()| {},
     );
     tokio::pin!(refresh);
     assert!(
         futures::poll!(&mut refresh).is_pending(),
         "catalog replacement must wait for irreversible call preparation"
+    );
+    assert!(
+        !validation_reached.load(Ordering::SeqCst),
+        "publication validation must not hold its guard while calls drain"
     );
     finish_preparation.notify_one();
     call.await
@@ -413,6 +462,7 @@ async fn preparation_holds_catalog_authority_until_it_finishes() {
     refresh
         .await
         .expect("catalog refresh should finish after preparation");
+    assert!(validation_reached.load(Ordering::SeqCst));
 }
 
 #[tokio::test]

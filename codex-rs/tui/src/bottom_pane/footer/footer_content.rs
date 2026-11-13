@@ -1,30 +1,48 @@
-//! The composer measures the natural width before allocating the left column, then renders
-//! the selected content in the allotted rectangle.
+//! Native and extension status content measured and painted inside the status rectangle.
 
+use crate::line_truncation::line_width;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::text::Line;
-use ratatui::widgets::Widget;
+use std::sync::Arc;
 
-use crate::line_truncation::truncate_line_with_ellipsis_if_overflow;
+use crate::render::highlight::with_syntax_theme;
 use crate::terminal_hyperlinks::HyperlinkLine;
-use crate::ui_tree::UiNode;
+use crate::terminal_hyperlinks::TerminalHyperlink;
+use crate::ui_tree::PreparedUiTree;
+use crate::ui_tree::UiTree;
 
-/// Owned content for the footer's negotiated left-hand area.
+/// Owned status content displayed below the composer.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum FooterContent {
     Line(Line<'static>),
     HyperlinkLine(HyperlinkLine),
-    Extension { content: UiNode },
+    Extension { content: Arc<PreparedUiTree> },
+}
+
+impl From<UiTree> for FooterContent {
+    fn from(tree: UiTree) -> Self {
+        Self::Extension {
+            content: Arc::new(tree.prepare()),
+        }
+    }
 }
 
 impl FooterContent {
-    /// Natural display width, before the footer allocates space for the right indicator.
+    pub(crate) fn native_parts(&self) -> Option<(&Line<'static>, &[TerminalHyperlink])> {
+        match self {
+            Self::Line(line) => Some((line, &[])),
+            Self::HyperlinkLine(line) => Some((&line.line, &line.hyperlinks)),
+            Self::Extension { .. } => None,
+        }
+    }
+
+    /// Natural display width in terminal cells.
     pub(crate) fn width(&self) -> u16 {
         let width = match self {
-            Self::Line(line) => line.width(),
+            Self::Line(line) => line_width(line),
             Self::HyperlinkLine(line) => line.width(),
-            Self::Extension { content } => content.render_line(u16::MAX).width(),
+            Self::Extension { content } => return content.measure_natural().width,
         };
         u16::try_from(width).unwrap_or(u16::MAX)
     }
@@ -32,30 +50,32 @@ impl FooterContent {
     /// Paint only inside the final area supplied by the parent.
     pub(crate) fn render(self, area: Rect, buf: &mut Buffer) {
         match self {
-            Self::Line(line) => Widget::render(line, area, buf),
-            Self::Extension { content } => content.render_line(area.width).render_fitted(area, buf),
-            Self::HyperlinkLine(mut line) => {
+            Self::Extension { content } => {
+                with_syntax_theme(|theme| content.render(area, theme, buf));
+            }
+            native => {
+                let line = native.into_hyperlink_line();
                 let area = Rect {
                     height: area.height.min(1),
                     ..area
                 };
                 let width = usize::from(area.width);
                 if line.width() > width {
-                    line.line = truncate_line_with_ellipsis_if_overflow(line.line, width);
-                    // The ellipsis is never part of the link.
-                    line.clip_hyperlinks_to_width(line.width().saturating_sub(1));
+                    line.render_with_ellipsis(area, buf);
+                } else {
+                    line.render_fitted(area, buf);
                 }
-                line.render_fitted(area, buf);
             }
         }
     }
 
-    /// Keep link destinations when handing the status line to the effort transition.
     pub(crate) fn into_hyperlink_line(self) -> HyperlinkLine {
         match self {
             Self::Line(line) => line.into(),
             Self::HyperlinkLine(line) => line,
-            Self::Extension { content } => content.render_line(u16::MAX),
+            Self::Extension { content } => {
+                with_syntax_theme(|theme| content.render_line(u16::MAX, theme))
+            }
         }
     }
 }

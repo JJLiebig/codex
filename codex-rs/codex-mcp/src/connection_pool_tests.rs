@@ -1,6 +1,7 @@
 //! Tests for shared MCP connection ownership and protocol negotiation.
 
 use super::*;
+use crate::McpServerPermissions;
 use crate::binding_clients::McpBindingClients;
 use crate::connection_manager::tests::create_ready_async_managed_client;
 use crate::connection_manager::tests::create_test_tool;
@@ -491,8 +492,8 @@ async fn shared_startup_survives_first_chat_cancellation_and_rejects_released_bi
         .unwrap();
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
     config
-        .server_permission_profiles
-        .insert("test_server".to_string(), config.permission_profile.clone());
+        .server_permissions
+        .insert("test_server".to_string(), McpServerPermissions::Thread);
     let prepared = crate::binding::PreparedMcpCall::new(
         Arc::new(crate::connection_manager::McpConnectionSet::empty(
             /*prefix_mcp_tool_names*/ true,
@@ -513,10 +514,10 @@ async fn shared_startup_survives_first_chat_cancellation_and_rejects_released_bi
         /*selected_plugin_server*/ false,
     )
     .unwrap();
-    let bindings = McpBindingClients::new(HashMap::from([(
-        "test_server".to_string(),
-        Arc::new(client.clone()),
-    )]));
+    let bindings = McpBindingClients::new(
+        HashMap::from([("test_server".to_string(), Arc::new(client.clone()))]),
+        Vec::new(),
+    );
     server.block_listing.store(true, Ordering::Release);
     let waiting = async {
         tokio::join!(
@@ -766,6 +767,7 @@ async fn new_chat_relists_tools_without_invalidating_or_waiting_for_existing_cal
             Duration::from_secs(1),
             second.tool_catalog.refresh(
                 || async { Ok((vec![create_test_tool("test_server", "refreshed")], None, ())) },
+                || Some(()),
                 |_, _, ()| {},
             ),
         )

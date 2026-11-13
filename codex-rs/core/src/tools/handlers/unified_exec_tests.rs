@@ -379,6 +379,7 @@ async fn exec_command_rejects_login_when_selected_environment_disallows_it() {
 #[tokio::test]
 #[cfg(not(windows))]
 async fn exec_command_reuses_foreign_windows_grant() {
+    use crate::environment_selection::EnvironmentAttachment;
     use crate::session::tests::make_session_and_context_with_auth_and_config_and_rx;
     use codex_features::Feature;
     use codex_protocol::models::AdditionalPermissionProfile;
@@ -408,6 +409,13 @@ async fn exec_command_reuses_foreign_windows_grant() {
         )),
         ..Default::default()
     };
+    let (attachment, _guard, _) = EnvironmentAttachment::new(
+        codex_exec_server::REMOTE_ENVIRONMENT_ID,
+        Arc::new(
+            Environment::create_for_tests(Some("ws://127.0.0.1:1/remote-exec-server".to_string()))
+                .expect("remote environment"),
+        ),
+    );
     {
         let turn = Arc::get_mut(&mut turn).expect("turn should be uniquely owned");
         let TurnEnvironmentState::Ready(environment) = turn
@@ -422,10 +430,7 @@ async fn exec_command_reuses_foreign_windows_grant() {
         environment.selection.cwd = cwd.clone();
         environment.selection.workspace_roots = vec![cwd.clone()];
         environment.config_mut().workspace_roots = vec![cwd];
-        environment.environment = Arc::new(
-            Environment::create_for_tests(Some("ws://127.0.0.1:1/remote-exec-server".to_string()))
-                .expect("remote environment"),
-        );
+        environment.attachment = attachment;
     }
 
     let step_context = StepContext::for_test(Arc::clone(&turn));
@@ -550,6 +555,7 @@ async fn exec_command_pre_tool_use_payload_resolves_remote_target() -> anyhow::R
             tool_name: codex_tools::ToolName::plain("exec_command"),
             source: crate::tools::context::ToolCallSource::Direct,
             payload,
+            native_call: None,
             environments,
         }),
         Some(crate::tools::registry::PreToolUsePayload {
@@ -612,6 +618,7 @@ async fn exec_command_pre_tool_use_payload_resolves_local_shell_identity() -> an
                 tool_name: codex_tools::ToolName::plain("exec_command"),
                 source: ToolCallSource::Direct,
                 payload,
+                native_call: None,
                 environments,
             })
             .expect("local shell should resolve before PreToolUse");

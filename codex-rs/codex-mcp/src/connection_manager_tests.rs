@@ -2,6 +2,7 @@ use super::*;
 #[path = "connection_manager/network_policy_tests.rs"]
 mod network_policy_tests;
 use crate::McpBinding;
+use crate::McpServerPermissions;
 use crate::client_tool_catalog::ClientToolCatalog;
 use crate::elicitation::ElicitationLifecycle;
 use crate::elicitation::ElicitationRequestManager;
@@ -180,13 +181,7 @@ impl McpConnectionSet {
     }
 
     fn shares_test_connection_with(&self, other: &Self, name: &str) -> bool {
-        let Some(left) = self.servers.get(name) else {
-            return false;
-        };
-        let Some(right) = other.servers.get(name) else {
-            return false;
-        };
-        Arc::ptr_eq(&left.connection, &right.connection)
+        self.shares_server_connection(other, name)
     }
 }
 
@@ -235,10 +230,10 @@ fn store_current_tools(cache_context: &ConnectorRuntimeContext<ToolInfo>, tools:
 
 async fn capture_binding(manager: &Arc<McpConnectionSet>) -> McpBinding {
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
-    config.server_permission_profiles = manager
+    config.server_permissions = manager
         .servers
         .keys()
-        .map(|name| (name.clone(), PermissionProfile::default()))
+        .map(|name| (name.clone(), McpServerPermissions::Thread))
         .collect();
     manager
         .capture_binding_with_metadata(
@@ -308,6 +303,14 @@ impl ServerHandler for RefreshTestTransportFactory {
                 .enable_resources()
                 .build(),
         )
+    }
+
+    async fn call_tool(
+        &self,
+        _request: rmcp::model::CallToolRequestParams,
+        _context: RequestContext<RoleServer>,
+    ) -> Result<rmcp::model::CallToolResponse, McpError> {
+        Ok(rmcp::model::CallToolResult::success(Vec::new()).into())
     }
 
     async fn list_resource_templates(
@@ -552,8 +555,8 @@ async fn prepared_call_timeout_includes_trusted_access_lookup() {
     ));
     config.mcp_server_catalog = catalog.build();
     config
-        .server_permission_profiles
-        .insert("docs".to_string(), PermissionProfile::default());
+        .server_permissions
+        .insert("docs".to_string(), McpServerPermissions::Thread);
     manager.tool_plugin_context = Arc::new(crate::tool_plugin_context(&config));
     let auth = CodexAuth::create_dummy_chatgpt_auth_for_testing();
     manager.trusted_access = Some(TrustedAccessContext::new(
@@ -1194,13 +1197,12 @@ async fn assert_elicitation_declined_with_reviewer_calls(
 async fn assert_requested_user_input_is_declined(
     approval_policy: AskForApproval,
     permission_profile: PermissionProfile,
-    router: ElicitationRequestRouter,
 ) {
     let manager = ElicitationRequestManager::new(
         test_elicitation_config("server", approval_policy, permission_profile),
         /*reviewer*/ None,
         /*lifecycle*/ None,
-        router,
+        full_access_form_input_enabled_router(),
     );
     let (tx_event, rx_event) = async_channel::bounded(1);
     let sender = manager.make_sender(
@@ -1235,18 +1237,6 @@ async fn assert_requested_user_input_is_declined(
         },
     );
     assert!(rx_event.try_recv().is_err());
-}
-
-#[tokio::test]
-async fn disabled_permissions_do_not_surface_user_input_when_auto_denied() {
-    let router = full_access_form_input_enabled_router();
-    router.set_auto_deny(/*auto_deny*/ true);
-    assert_requested_user_input_is_declined(
-        AskForApproval::Never,
-        PermissionProfile::Disabled,
-        router,
-    )
-    .await;
 }
 
 #[tokio::test]
@@ -1390,12 +1380,8 @@ async fn disabled_permissions_decline_requested_user_input_with_approval_metadat
 
 #[tokio::test]
 async fn restricted_never_policy_does_not_surface_requested_user_input() {
-    assert_requested_user_input_is_declined(
-        AskForApproval::Never,
-        PermissionProfile::default(),
-        full_access_form_input_enabled_router(),
-    )
-    .await;
+    assert_requested_user_input_is_declined(AskForApproval::Never, PermissionProfile::default())
+        .await;
 }
 
 #[tokio::test]
@@ -1409,7 +1395,6 @@ async fn granular_policy_does_not_surface_requested_user_input() {
             mcp_elicitations: false,
         }),
         PermissionProfile::Disabled,
-        full_access_form_input_enabled_router(),
     )
     .await;
 }
@@ -2145,6 +2130,7 @@ async fn shared_apps_snapshot_requires_writable_discovery_and_a_shared_cache() -
             McpPublicationGate::already_published(),
             McpRuntimeInput {
                 network_policy_metadata: None,
+                runtime_auth: None,
                 startup_policy: McpStartupPolicy::Eager,
                 config: Arc::new(config),
                 plugins_available: false,
@@ -2225,6 +2211,7 @@ async fn hosted_apps_protocol_mode_is_independent_of_generic_mode() -> anyhow::R
             McpPublicationGate::already_published(),
             McpRuntimeInput {
                 network_policy_metadata: None,
+                runtime_auth: None,
                 startup_policy: McpStartupPolicy::Eager,
                 config: Arc::new(config),
                 plugins_available: false,
@@ -2336,7 +2323,10 @@ async fn resource_template_listings_skip_only_hosted_apps() -> anyhow::Result<()
             expected
         );
         let all = binding.list_all_resource_templates(|_| true).await;
-        assert_eq!(all.get(name), (!expected.is_empty()).then_some(&expected));
+        assert_eq!(
+            all.by_server.get(name),
+            (!expected.is_empty()).then_some(&expected)
+        );
     }
     Ok(())
 }
@@ -2396,6 +2386,7 @@ async fn codex_apps_extension_does_not_share_host_owned_tools_cache() -> anyhow:
             McpPublicationGate::already_published(),
             McpRuntimeInput {
                 network_policy_metadata: None,
+                runtime_auth: None,
                 startup_policy: McpStartupPolicy::Eager,
                 config: Arc::new(config),
                 plugins_available: false,
@@ -2702,21 +2693,21 @@ async fn hard_refresh_keeps_client_catalog_local_when_shared_cache_loses_race() 
     );
 
     let mut config = crate::mcp::tests::test_mcp_config(codex_home.path().to_path_buf());
-    config.server_permission_profiles.insert(
+    config.server_permissions.insert(
         CODEX_APPS_MCP_SERVER_NAME.to_string(),
-        PermissionProfile::default(),
+        McpServerPermissions::Thread,
     );
     let manager_a_for_refresh = Arc::clone(&manager_a);
     let config_for_refresh = config.clone();
     let refresh_a = tokio::spawn(async move {
         manager_a_for_refresh
-            .refresh_codex_apps_client_catalog(&config_for_refresh)
+            .refresh_codex_apps_client_catalog(&config_for_refresh, || Some(()))
             .await
     });
     list_started.notified().await;
     manager_b.refresh_codex_apps_tools_for_discovery().await?;
     release_list.notify_one();
-    let snapshot_a = refresh_a.await??;
+    let snapshot_a = refresh_a.await??.expect("Apps catalog was published");
     assert_eq!(
         snapshot_a
             .tools
@@ -2746,7 +2737,10 @@ async fn hard_refresh_keeps_client_catalog_local_when_shared_cache_loses_race() 
         .tool_filter
         .disabled
         .insert("b_only".to_string());
-    let snapshot_b = manager_b.refresh_codex_apps_client_catalog(&config).await?;
+    let snapshot_b = manager_b
+        .refresh_codex_apps_client_catalog(&config, || Some(()))
+        .await?
+        .expect("Apps catalog was published");
     assert_eq!(
         (
             snapshot_b
@@ -2837,6 +2831,9 @@ async fn tool_catalog_cache_sanitizes_tools_and_tracks_environment_generation() 
 
     let older = first_context.begin_fetch();
     let newer = first_context.begin_fetch();
+    let mut discovery = first_context.clone();
+    discovery.before_stdio_discovery = true;
+    discovery.record_modern_stdio_discovery(&discovery.begin_fetch());
     first_context.publish_if_newest(
         newer,
         &[create_test_tool("docs", "new")],
@@ -2850,6 +2847,10 @@ async fn tool_catalog_cache_sanitizes_tools_and_tracks_environment_generation() 
     assert_eq!(
         first_context.current_tools().expect("cached tools")[0].callable_name,
         "new"
+    );
+    assert!(
+        !discovery.has_tools(),
+        "older legacy fetches cannot undo modern discovery"
     );
 
     tokio::time::advance(Duration::from_secs(30 * 60 + 1)).await;
@@ -3286,8 +3287,8 @@ async fn capture_binding_waits_for_optional_startup_when_shared_grace_is_disable
     let mut config = crate::mcp::tests::test_mcp_config(std::env::temp_dir());
     config.optional_mcp_startup_grace = Duration::ZERO;
     config
-        .server_permission_profiles
-        .insert("optional".to_string(), PermissionProfile::default());
+        .server_permissions
+        .insert("optional".to_string(), McpServerPermissions::Thread);
     let manager = Arc::new(manager);
     let mut capture = tokio::spawn(async move {
         manager
@@ -4499,7 +4500,7 @@ async fn later_tool_list_retries_after_failed_reconnect_and_keeps_cached_tools()
                 &failed_binding.tools()[0],
             )
             .await
-            .is_none()
+            .is_err()
     );
     assert_eq!(attempts.load(Ordering::SeqCst), 1);
 
@@ -4642,7 +4643,7 @@ async fn tool_lists_do_not_block_and_share_codex_apps_startup_reconnect() {
         manager
             .prepare_call_for_tool(Arc::clone(pending_step.config()), &pending_step.tools()[0])
             .await
-            .is_some()
+            .is_ok()
     );
     let tools = manager.list_all_tools().await;
     assert_eq!(
@@ -4964,6 +4965,7 @@ async fn executor_owned_chatgpt_mcp_accepts_only_safe_explicit_authorization() -
                 &resolved_environment,
                 &runtime_context,
                 /*runtime_auth_provider*/ None,
+                /*runtime_auth_mode*/ None,
                 Some(&hosted_auth),
                 /*codex_apps_cache_identity*/ None,
                 ElicitationCapability::default(),
@@ -5011,6 +5013,7 @@ async fn executor_owned_chatgpt_mcp_accepts_only_safe_explicit_authorization() -
             McpPublicationGate::already_published(),
             McpRuntimeInput {
                 network_policy_metadata: None,
+                runtime_auth: None,
                 startup_policy: McpStartupPolicy::Eager,
                 config: Arc::new(runtime_config.clone()),
                 plugins_available: false,
@@ -5132,6 +5135,7 @@ async fn no_local_runtime_fails_local_stdio_but_keeps_local_http_server() {
         McpPublicationGate::already_published(),
         McpRuntimeInput {
             network_policy_metadata: None,
+            runtime_auth: None,
             startup_policy: McpStartupPolicy::Eager,
             config: Arc::new(crate::mcp::tests::test_mcp_config(
                 codex_home.path().to_path_buf(),
@@ -5512,6 +5516,7 @@ pub(crate) fn reusable_server_identity(
         &resolved_environment,
         runtime_context,
         /*runtime_auth_provider*/ None,
+        /*runtime_auth_mode*/ None,
         /*auth*/ None,
         /*codex_apps_cache_identity*/ None,
         ElicitationCapability::default(),
@@ -5594,6 +5599,7 @@ async fn reconcile_reusable_server_with_mcp_config(
         McpPublicationGate::already_published(),
         McpRuntimeInput {
             network_policy_metadata: None,
+            runtime_auth: None,
             startup_policy: McpStartupPolicy::Eager,
             config: Arc::new(mcp_config),
             plugins_available: false,
@@ -5740,6 +5746,7 @@ async fn apps_catalog_broadcast_restores_equivalent_calls() -> anyhow::Result<()
     catalog
         .refresh(
             || async { Ok((snapshot.tools.to_vec(), None, ())) },
+            || Some(()),
             |tools, _, ()| store_current_tools(&context, tools.to_vec()),
         )
         .await?;
@@ -5798,6 +5805,7 @@ async fn apps_catalog_broadcast_survives_an_older_local_refresh() -> anyhow::Res
     catalog
         .refresh(
             || async { Ok((Vec::new(), None, older_ticket)) },
+            || Some(()),
             |tools, _, ticket| {
                 context
                     .publish_runtime_if_newest_accepted(
@@ -5856,7 +5864,11 @@ async fn refreshed_catalog_follows_reused_client_without_mutating_old_bindings()
     let startup_tools = vec![create_test_tool(CODEX_APPS_MCP_SERVER_NAME, "startup")];
     client
         .tool_catalog
-        .refresh(|| async { Ok((startup_tools, None, ())) }, |_, _, ()| {})
+        .refresh(
+            || async { Ok((startup_tools, None, ())) },
+            || Some(()),
+            |_, _, ()| {},
+        )
         .await?;
     let old_binding = capture_binding(&previous).await;
     let old_tools = serde_json::to_value(old_binding.tools())?;
@@ -6121,11 +6133,11 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
         .expect("refresh must use the reconciled timeout");
     assert_eq!(failed.tools(), old_step.tools());
     assert_eq!(
-        failed.list_all_resources(|_| true).await,
+        failed.list_all_resources(|_| true).await.by_server,
         HashMap::from([("docs".to_string(), vec![])])
     );
     assert_eq!(
-        failed.list_all_resource_templates(|_| true).await,
+        failed.list_all_resource_templates(|_| true).await.by_server,
         HashMap::from([("docs".to_string(), vec![])])
     );
     let retry_started = tokio::time::Instant::now();
@@ -6155,7 +6167,7 @@ async fn reconciliation_reuses_connection_without_relisting_regular_tools() -> a
         reconciled
             .prepare_call_for_tool(Arc::clone(old_step.config()), &old_step.tools()[0],)
             .await
-            .is_none()
+            .is_err()
     );
     let refreshed = previous.test_client("docs").client().await?;
     assert_eq!(
@@ -6334,6 +6346,7 @@ fn connection_identity_tracks_only_oauth_credentials_when_oauth_is_active() {
                 &Ok(None),
                 &runtime_context,
                 /*runtime_auth_provider*/ None,
+                /*runtime_auth_mode*/ None,
                 /*auth*/ None,
                 /*codex_apps_cache_identity*/ None,
                 ElicitationCapability::default(),
@@ -6416,6 +6429,7 @@ fn connection_identity_uses_effective_authorization_headers() {
                 &Ok(None),
                 &runtime_context,
                 /*runtime_auth_provider*/ None,
+                /*runtime_auth_mode*/ None,
                 /*auth*/ None,
                 /*codex_apps_cache_identity*/ None,
                 ElicitationCapability::default(),
@@ -6566,6 +6580,7 @@ async fn reconciliation_replaces_connection_when_protocol_mode_changes() {
         McpPublicationGate::already_published(),
         McpRuntimeInput {
             network_policy_metadata: None,
+            runtime_auth: None,
             startup_policy: McpStartupPolicy::Eager,
             config: Arc::new(mcp_config),
             plugins_available: false,
@@ -6630,6 +6645,7 @@ async fn reconciliation_reuses_legacy_stdio_server_when_modern_protocol_is_enabl
         McpPublicationGate::already_published(),
         McpRuntimeInput {
             network_policy_metadata: None,
+            runtime_auth: None,
             startup_policy: McpStartupPolicy::Eager,
             config: Arc::new(mcp_config),
             plugins_available: false,
@@ -6911,6 +6927,7 @@ async fn reconciliation_reconnects_when_host_plugin_root_changes() {
         &resolved_environment,
         &runtime_context,
         /*runtime_auth_provider*/ None,
+        /*runtime_auth_mode*/ None,
         /*auth*/ None,
         /*codex_apps_cache_identity*/ None,
         ElicitationCapability::default(),
@@ -6991,7 +7008,8 @@ async fn connection_identity_distinguishes_accounts_with_the_same_token() -> any
             McpOAuthRefreshMode::Legacy,
             &Ok(None),
             &runtime_context,
-            Some(&provider),
+            Some(&crate::auth::McpAuthProvider::Credentials(provider)),
+            /*runtime_auth_mode*/ None,
             Some(auth),
             /*codex_apps_cache_identity*/ None,
             ElicitationCapability::default(),
@@ -7045,7 +7063,8 @@ async fn connection_identity_distinguishes_agent_account_runtime_and_task() -> a
             McpOAuthRefreshMode::Legacy,
             &Ok(None),
             &runtime_context,
-            Some(&provider),
+            Some(&crate::auth::McpAuthProvider::Credentials(provider)),
+            /*runtime_auth_mode*/ None,
             Some(auth),
             /*codex_apps_cache_identity*/ None,
             ElicitationCapability::default(),

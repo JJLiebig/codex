@@ -17,16 +17,22 @@ pub struct ResponseDebugContext {
 }
 
 pub fn extract_response_debug_context(transport: &TransportError) -> ResponseDebugContext {
+    match transport {
+        TransportError::Http {
+            headers: Some(headers),
+            ..
+        } => extract_response_debug_context_from_headers(headers),
+        _ => ResponseDebugContext::default(),
+    }
+}
+
+pub fn extract_response_debug_context_from_headers(
+    headers: &http::HeaderMap,
+) -> ResponseDebugContext {
     let mut context = ResponseDebugContext::default();
-
-    let TransportError::Http { headers, .. } = transport else {
-        return context;
-    };
-
     let extract_header = |name: &str| {
         headers
-            .as_ref()
-            .and_then(|headers| headers.get(name))
+            .get(name)
             .and_then(|value| value.to_str().ok())
             .map(str::to_string)
     };
@@ -83,14 +89,18 @@ pub fn telemetry_api_error_message(error: &ApiError) -> String {
         ApiError::QuotaExceeded => "quota exceeded".to_string(),
         ApiError::UsageNotIncluded => "usage not included".to_string(),
         ApiError::UsageLimitReached { .. } => "usage limit reached".to_string(),
+        ApiError::SessionBudgetExceeded => "session budget exceeded".to_string(),
         ApiError::Retryable { .. } => "retryable error".to_string(),
         ApiError::RateLimitExceeded { .. } => "rate limit exceeded".to_string(),
         ApiError::RateLimit(_) => "rate limit".to_string(),
         ApiError::ModelNotFound { .. } => "model not found".to_string(),
+        ApiError::AccessProgramNotEnabled { .. } => "access program not enabled".to_string(),
+        ApiError::ContentPolicyViolation { .. } => "content policy violation".to_string(),
         ApiError::InvalidRequest { .. }
         | ApiError::InvalidAudioInput { .. }
         | ApiError::InvalidPrompt { .. } => "invalid request".to_string(),
         ApiError::CyberPolicy { .. } => "cyber policy".to_string(),
+        ApiError::InferenceHookDenied { .. } => "inference hook denied".to_string(),
         ApiError::BioPolicy { .. } => "bio policy".to_string(),
         ApiError::MisalignmentPolicyViolation { .. } => "misalignment policy violation".to_string(),
         ApiError::ServerOverloaded { .. } => "server overloaded".to_string(),

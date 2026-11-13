@@ -50,6 +50,7 @@ pub(crate) fn review(
             action: request.action.as_ref().ok(),
             thread_id: session.thread_id,
             thread_store: &session.services.thread_extension_data,
+            turn_store: &turn.extension_data,
             category: request.category,
             approval_policy: context.approval_policy,
             approvals_reviewer: context.approvals_reviewer,

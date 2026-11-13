@@ -1,12 +1,19 @@
+use crate::McpRefreshReason;
 use std::sync::Arc;
 
 use codex_async_utils::OrCancelExt;
 use codex_extension_api::TurnStartPhase;
+use codex_protocol::protocol::InternalSessionSource;
+use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SubAgentSource;
+use futures::future::BoxFuture;
 use tokio_util::sync::CancellationToken;
 
+use crate::client::ModelClientSession;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::startup_prewarm::SessionStartupPrewarmResolution;
+use crate::session::turn::McpStartupRequirements;
 use crate::session::turn::TurnRunState;
 use crate::session::turn::run_hooks_and_record_inputs;
 use crate::session::turn_context::TurnContext;
@@ -18,6 +25,12 @@ use tracing::trace_span;
 use super::SessionTask;
 use super::SessionTaskResult;
 use super::codex_plus_plus::completion_wake;
+
+/// The last answer and the MCP requirements needed if a steer reopens sampling.
+pub(crate) struct RegularTaskOutput {
+    pub(super) last_agent_message: Option<String>,
+    pub(super) mcp_startup_requirements: McpStartupRequirements,
+}
 
 #[derive(Default)]
 pub(crate) struct RegularTask {
@@ -56,7 +69,11 @@ impl SessionTask for RegularTask {
             .config
             .features
             .enabled(codex_features::Feature::CriticalPathTiming)
-            && !ctx.session_source.is_non_root_agent()
+            && !matches!(
+                ctx.session_source,
+                SessionSource::Internal(InternalSessionSource::MemoryConsolidation)
+                    | SessionSource::SubAgent(SubAgentSource::MemoryConsolidation)
+            )
         {
             ctx.turn_timing_state.enable_critical_path();
         }
@@ -75,17 +92,25 @@ impl SessionTask for RegularTask {
                         == TurnStartPhase::RegularTaskStart
                         && contributor.requires_mcp_runtime(&sess.services.thread_extension_data)
                 });
-            let preparation = sess
-                .emit_turn_start_lifecycle(
+            let preparation = async {
+                sess.emit_turn_start_lifecycle(
                     &ctx,
                     /*token_usage_at_turn_start*/ None,
                     TurnStartPhase::RegularTaskStart,
                 )
-                .or_cancel(&cancellation_token)
                 .await;
+                if prepares_mcp {
+                    // Resource discovery can overlap the fetch. Wait before reprojection.
+                    sess.wait_for_apps_tool_refresh().await;
+                }
+            }
+            .or_cancel(&cancellation_token)
+            .await;
             // Even cancelled discovery may have cleared the previous account's catalog.
             if prepares_mcp {
-                sess.request_mcp_runtime_reprojection();
+                sess.request_mcp_runtime_reprojection(
+                    McpRefreshReason::TurnStartContributorPreparedMcp,
+                );
             }
             if preparation.is_err() {
                 return SessionStartupPrewarmResolution::Cancelled;
@@ -116,5 +141,27 @@ impl SessionTask for RegularTask {
         let mut turn_state = TurnRunState::from_prewarmed_client_session(prewarmed_client_session);
         turn_state.completion_claim = self.completion_claim;
         completion_wake::run_turn_loop(sess, ctx, next_input, cancellation_token, turn_state).await
+    }
+}
+
+impl RegularTask {
+    /// Runs model requests retaining explicit MCP requirements across steers.
+    pub(super) fn run_turns(
+        sess: Arc<Session>,
+        ctx: Arc<TurnContext>,
+        input: Vec<TurnInput>,
+        mcp_startup_requirements: McpStartupRequirements,
+        prewarmed_client_session: Option<ModelClientSession>,
+        cancellation_token: CancellationToken,
+    ) -> BoxFuture<'static, SessionTaskResult> {
+        let mut turn_state = TurnRunState::from_prewarmed_client_session(prewarmed_client_session);
+        turn_state.mcp_startup_requirements = mcp_startup_requirements;
+        Box::pin(completion_wake::run_turn_loop(
+            sess,
+            ctx,
+            input,
+            cancellation_token,
+            turn_state,
+        ))
     }
 }

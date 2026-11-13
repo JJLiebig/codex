@@ -21,13 +21,14 @@ pub(super) async fn consume(
         .unwrap_or(request_timeout);
     let deadline = Instant::now() + request_timeout;
     let auth_manager = Arc::clone(&processor.auth_manager);
-    let auth_task = tokio::spawn(async move { auth_manager.auth().await });
-    let Some(auth) = tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), auth_task)
-        .await
-        .map_err(|_| timeout_error())?
-        .map_err(|err| {
-            internal_error(format!("failed to join rate limit reset auth task: {err}"))
-        })?
+    let auth_task = tokio::spawn(async move { auth_manager.auth_with_http_client_factory().await });
+    let Some((auth, http_client_factory)) =
+        tokio::time::timeout_at(tokio::time::Instant::from_std(deadline), auth_task)
+            .await
+            .map_err(|_| timeout_error())?
+            .map_err(|err| {
+                internal_error(format!("failed to join rate limit reset auth task: {err}"))
+            })?
     else {
         return Err(invalid_request(
             "codex account authentication required for rate limit reset credits",
@@ -38,11 +39,12 @@ pub(super) async fn consume(
             "chatgpt authentication required for rate limit reset credits",
         ));
     }
-    let client = BackendClient::from_auth(
-        processor.config.chatgpt_base_url.clone(),
-        &auth,
-        processor.config.http_client_factory(),
-    );
+    let client = tokio::time::timeout_at(
+        tokio::time::Instant::from_std(deadline),
+        processor.backend_client(&auth, http_client_factory),
+    )
+    .await
+    .map_err(|_| timeout_error())??;
     let store = AccountStore::new(processor.config.codex_home.to_path_buf());
     let lease = store
         .acquire_reset_mutation_lease_for_auth(&auth, deadline)

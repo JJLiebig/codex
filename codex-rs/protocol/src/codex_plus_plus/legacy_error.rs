@@ -11,6 +11,8 @@ impl<'de> Deserialize<'de> for ErrorEvent {
             message: String,
             codex_error_info: Option<CodexErrorInfo>,
             inference_attribution: Option<serde::de::IgnoredAny>,
+            #[serde(default)]
+            rejected_audio_file_ids: Vec<String>,
         }
         let value = HistoricalError::deserialize(deserializer)?;
         let codex_error_info = if value.inference_attribution.is_some()
@@ -27,6 +29,7 @@ impl<'de> Deserialize<'de> for ErrorEvent {
             message: value.message,
             codex_error_info,
             misalignment: None,
+            rejected_audio_file_ids: value.rejected_audio_file_ids,
         })
     }
 }

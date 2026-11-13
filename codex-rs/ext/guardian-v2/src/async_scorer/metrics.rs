@@ -51,14 +51,18 @@ pub(super) fn sampler_failure_reason(error: &LunaSamplerError) -> &'static str {
             ApiError::QuotaExceeded => "quota_exceeded",
             ApiError::UsageLimitReached { .. } => "usage_limit_reached",
             ApiError::UsageNotIncluded => "usage_not_included",
+            ApiError::SessionBudgetExceeded => "session_budget_exceeded",
             ApiError::Retryable { .. } => "retryable_api_error",
             ApiError::RateLimitExceeded { .. } | ApiError::RateLimit(_) => "rate_limit",
             ApiError::ModelNotFound { .. } => "model_not_found",
             ApiError::InvalidRequest { .. }
             | ApiError::InvalidAudioInput { .. }
             | ApiError::InvalidPrompt { .. } => "invalid_request",
+            ApiError::AccessProgramNotEnabled { .. } => "access_program_not_enabled",
+            ApiError::ContentPolicyViolation { .. } => "content_policy_violation",
             ApiError::CyberPolicy { .. }
             | ApiError::BioPolicy { .. }
+            | ApiError::InferenceHookDenied { .. }
             | ApiError::MisalignmentPolicyViolation { .. } => "policy_error",
             ApiError::ServerOverloaded { .. } => "server_overloaded",
             ApiError::PolicyCapacityUnavailable { .. } => "policy_capacity_unavailable",
