@@ -14,7 +14,7 @@ pub(super) async fn reserve(
     Vec<TurnInput>,
 )> {
     let mut active_turn = session.active_turn.lock().await;
-    if active_turn.is_some() {
+    if active_turn.is_some() || session.outcome_handoffs_closed() {
         return None;
     }
     let needs_new_turn = session.input_queue.has_trigger_turn_mailbox_items().await;

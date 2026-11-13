@@ -12,7 +12,7 @@ use pretty_assertions::assert_eq;
 
 #[tokio::test]
 async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> Result<()> {
-    let mut app = make_test_app().await;
+    let mut app = make_test_app_with_chat().await;
     let app_server = crate::start_embedded_app_server_for_picker(&app.config).await?;
     app.chat_widget.update_account_state(
         /*status_account_display*/ None,
@@ -100,7 +100,7 @@ async fn selected_usage_is_cached_and_account_changes_discard_old_results() -> R
         request_id,
         Ok(AgentsOverviewThreadRefresh {
             cleared_unread: Vec::new(),
-            threads: HashMap::from([(selected, Some((threads[0].clone(), false)))]),
+            threads: HashMap::from([(selected, Some((threads[0].clone(), false, None)))]),
             last_messages: HashMap::new(),
             recent_seed_complete: true,
             discovery: None,

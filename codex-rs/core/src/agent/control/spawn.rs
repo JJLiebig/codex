@@ -5,6 +5,7 @@ use super::spawn_telemetry::SpawnMeasurements;
 use super::spawn_telemetry::record_spawn_success;
 use super::*;
 use crate::agent::child_config::build_agent_resume_config;
+use crate::agent::helper_daybreak;
 use crate::agent::history::load_agent_model_context;
 use crate::agent::history::prepare_forked_history;
 use crate::agent::role::apply_role_to_config;
@@ -264,7 +265,7 @@ impl LocalAgentControl {
         if owner_thread_id.is_none()
             && let Ok(thread) = state.get_thread(thread_id).await
         {
-            return self.runtime.pin_v2_residency(&state, &thread).await;
+            return self.runtime.pin_v2_residency(&thread).await;
         }
         if self
             .runtime
@@ -275,9 +276,21 @@ impl LocalAgentControl {
             return Err(CodexErr::ThreadNotFound(thread_id));
         }
         let evicted_environments = self.runtime.registry.evicted_environments(thread_id);
+        if owner_thread_id.is_none()
+            && let Some(evicted) = &evicted_environments
+        {
+            // Preserve the worker's permissions while keeping the current wake configuration.
+            config.permissions = evicted.config.permissions.clone();
+            config.approvals_reviewer = evicted.config.approvals_reviewer;
+            config.requested_approvals_reviewer = evicted.config.requested_approvals_reviewer;
+        }
         let mut environment_selections = evicted_environments
             .as_ref()
             .map(|environments| environments.selections.clone());
+        let independent_service_tier = evicted_environments
+            .as_ref()
+            .filter(|evicted| evicted.has_independent_service_tier)
+            .map(|evicted| evicted.config.service_tier.clone());
         let evicted_environments = evicted_environments.map(|environments| environments.bindings);
 
         let stored_thread = state
@@ -321,7 +334,7 @@ impl LocalAgentControl {
             }
             if let Ok(thread) = state.get_thread(thread_id).await {
                 self.validate_loaded_v2_child(&thread, parent_thread_id)?;
-                return self.runtime.pin_v2_residency(&state, &thread).await;
+                return self.runtime.pin_v2_residency(&thread).await;
             }
         }
         let parent = if let Some(parent) = parent {
@@ -376,7 +389,7 @@ impl LocalAgentControl {
                     CodexErr::InvalidRequest(format!("permission_profile is invalid: {err}"))
                 })?;
         }
-        config.service_tier = self.root_service_tier();
+        config.service_tier = independent_service_tier.unwrap_or_else(|| self.root_service_tier());
         if let Some(model) = stored_model {
             config.model = Some(model);
         }
@@ -458,7 +471,7 @@ impl LocalAgentControl {
                     if child_config.permission_profile == owner_config.permission_profile {
                         continue;
                     }
-                    if owner_environment.environment.is_remote() {
+                    if owner_environment.environment().is_remote() {
                         return Err(invalid_environment(
                             "permissions changed on a remote executor",
                         ));
@@ -582,9 +595,7 @@ impl LocalAgentControl {
                 // Finish registration even if the sender is cancelled while acquiring its pin.
                 tokio::spawn(async move {
                     let _membership = membership;
-                    let residency_pin = runtime
-                        .pin_v2_residency(&state, &reloaded_thread.thread)
-                        .await?;
+                    let residency_pin = runtime.pin_v2_residency(&reloaded_thread.thread).await?;
                     runtime.registry.clear_evicted_environments(thread_id);
                     residency_slot.commit(reloaded_thread.thread_id);
                     // Register before listeners can forward events from the resumed thread.
@@ -609,7 +620,7 @@ impl LocalAgentControl {
                     }
                     self.runtime.registry.clear_evicted_environments(thread_id);
                     drop(residency_slot);
-                    return self.runtime.pin_v2_residency(&state, &thread).await;
+                    return self.runtime.pin_v2_residency(&thread).await;
                 }
                 Err(err)
             }
@@ -735,6 +746,54 @@ impl LocalAgentControl {
             disabled_plugin_ids,
             ..StartThreadOptions::new(config.clone())
         };
+        if let Some(parent_id) = session_source
+            .as_ref()
+            .and_then(SessionSource::parent_thread_id)
+            && let Ok(parent) = state.get_thread(parent_id).await
+            && config.features.enabled(Feature::DaybreakProgramPropagation)
+            && let Some(enrollment) = parent
+                .thread_extension_data()
+                .get::<helper_daybreak::Enrollment>()
+            && parent
+                .session
+                .get_config()
+                .await
+                .features
+                .enabled(Feature::DaybreakProgramPropagation)
+        {
+            start_options
+                .thread_extension_init
+                .insert(helper_daybreak::Enrollment::NativeHelper);
+            let spawn_owner = helper_daybreak::eligible_owner(&parent.session);
+            if let Some(turn_id) = options.parent_turn_id.as_deref()
+                && let Some(turn) = parent.session.turn_context_for_sub_id(turn_id).await
+                && let Some(intent) = helper_daybreak::spawning_intent(
+                    &parent.session,
+                    &turn,
+                    &enrollment,
+                    spawn_owner.as_ref(),
+                )
+                .await
+            {
+                if let Err(error) = &intent.choice {
+                    // Only a usable, successful read can become a child's inherited default.
+                    if options.cyber_access_program.is_none()
+                        && config.model_provider_id == codex_model_provider_info::OPENAI_PROVIDER_ID
+                        && config
+                            .model_provider
+                            .supports_cyber_access_programs(&config.model_provider_id)
+                        && codex_model_provider::provider_uses_first_party_auth_path(
+                            &config.model_provider,
+                        )
+                    {
+                        return Err(CodexErr::InvalidRequest(error.clone())
+                            .with_agent_context(AgentErrorContext::ChildStartup));
+                    }
+                } else {
+                    start_options.thread_extension_init.insert(intent);
+                }
+            }
+        }
         let fork_context = match (session_source, options.fork_mode.as_ref()) {
             (Some(session_source), Some(_)) => {
                 let fork_context_started_at = Instant::now();

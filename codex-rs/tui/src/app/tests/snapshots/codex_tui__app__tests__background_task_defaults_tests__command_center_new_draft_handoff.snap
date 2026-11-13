@@ -4,10 +4,10 @@ expression: "snapshots.join(\"\\n\\n\")"
 ---
 owned=false
 startup:
+     /tmp/project
 
 
 › draft during startup
-
 
 attached:
 
@@ -19,11 +19,12 @@ attached:
 owned=true
 startup:
 
+
+
 › draft during startup
 
-
-
 attached:
+
 
 › draft during startup
 

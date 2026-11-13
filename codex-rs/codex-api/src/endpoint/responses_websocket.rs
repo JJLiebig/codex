@@ -18,6 +18,7 @@ use crate::safety_buffering::treatment_from_headers;
 use crate::sse::ResponsesStreamEvent;
 use crate::sse::process_responses_event;
 use crate::telemetry::WebsocketTelemetry;
+use bytes::Bytes;
 use codex_client::TransportError;
 use codex_http_client::HttpClientFactory;
 use codex_http_client::RetryAfter;
@@ -44,6 +45,9 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::handshake::client::Response;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
+use tokio_tungstenite::tungstenite::protocol::frame::Fragment;
+use tokio_tungstenite::tungstenite::protocol::frame::Frame;
+use tokio_tungstenite::tungstenite::protocol::frame::coding::Data;
 use tracing::Instrument;
 use tracing::Span;
 use tracing::debug;
@@ -69,6 +73,36 @@ enum WsCommand {
     },
 }
 
+/// Send large Responses turns as one text message with backpressure between frames.
+async fn send_message(
+    socket: &mut (impl futures::Sink<Message, Error = WsError> + Unpin),
+    message: Message,
+) -> Result<(), WsError> {
+    const FRAGMENT_SIZE: usize = 1024 * 1024;
+
+    let Message::Text(text) = message else {
+        return socket.send(message).await;
+    };
+    if text.len() <= FRAGMENT_SIZE {
+        return socket.send(Message::Text(text)).await;
+    }
+
+    let mut data = Bytes::from(text);
+    let mut opcode = Data::Text;
+    while !data.is_empty() {
+        let payload = data.split_to(data.len().min(FRAGMENT_SIZE));
+        let fragment = if data.is_empty() {
+            Fragment::Final
+        } else {
+            Fragment::More
+        };
+        let frame = Frame::message_fragment(payload, opcode, fragment);
+        socket.send(Message::Frame(frame)).await?;
+        opcode = Data::Continue;
+    }
+    Ok(())
+}
+
 impl WsStream {
     fn new(inner: WebSocketConnection) -> Self {
         let routing_affinity = inner.routing_affinity().cloned();
@@ -85,7 +119,7 @@ impl WsStream {
                         };
                         match command {
                             WsCommand::Send { message, tx_result } => {
-                                let result = inner.send(message).await;
+                                let result = send_message(&mut inner, message).await;
                                 let should_break = result.is_err();
                                 let _ = tx_result.send(result);
                                 if should_break {
@@ -768,6 +802,18 @@ struct InterruptAcknowledgement {
     response_id: String,
 }
 
+fn is_websocket_receive_failure(
+    response: &Result<Option<Result<Message, WsError>>, ApiError>,
+) -> bool {
+    match response {
+        Ok(Some(Ok(message))) => match message {
+            Message::Text(_) | Message::Ping(_) | Message::Pong(_) => false,
+            Message::Binary(_) | Message::Close(_) | Message::Frame(_) => true,
+        },
+        Ok(Some(Err(_))) | Ok(None) | Err(_) => true,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn run_websocket_response_stream(
     ws_stream: &mut WsStream,
@@ -827,8 +873,11 @@ async fn run_websocket_response_stream(
                 continue;
             }
         };
-        if let Some(t) = telemetry.as_ref() {
-            t.on_ws_event(&response, poll_start.elapsed());
+        let poll_duration = poll_start.elapsed();
+        if let Some(telemetry) = &telemetry
+            && is_websocket_receive_failure(&response)
+        {
+            telemetry.on_ws_receive_failure(poll_duration);
         }
         let message = match response {
             Ok(Some(Ok(msg))) => msg,
@@ -847,14 +896,21 @@ async fn run_websocket_response_stream(
 
         match message {
             Message::Text(text) => {
-                if let Some(wrapped_error) = parse_wrapped_websocket_error_event(&text)
+                let event = serde_json::from_str::<ResponsesStreamEvent>(&text);
+                let kind = event.as_ref().ok().map(ResponsesStreamEvent::kind);
+                if let Some(t) = telemetry.as_ref() {
+                    t.on_ws_text_event(&text, kind, poll_duration);
+                }
+                // A wrapped error can still be valid when an unrelated stream field is malformed.
+                if matches!(kind, Some("error") | None)
+                    && let Some(wrapped_error) = parse_wrapped_websocket_error_event(&text)
                     && let Some(error) =
                         map_wrapped_websocket_error_event(wrapped_error, text.to_string())
                 {
                     return Err(error);
                 }
 
-                let event = match serde_json::from_str::<ResponsesStreamEvent>(&text) {
+                let event = match event {
                     Ok(event) => event,
                     Err(err) => {
                         debug!("failed to parse websocket event: {err}, data: {text}");
@@ -1117,6 +1173,9 @@ mod tests {
             include: vec!["reasoning.encrypted_content".to_string()],
             service_tier: Some("priority".to_string()),
             prompt_cache_key: Some("cache-key".to_string()),
+            prompt_cache_options: Some(crate::PromptCacheOptions {
+                ttl: codex_protocol::turn_input::PromptCacheTtl::TwelveHours,
+            }),
             text: None,
             access_programs: Some(
                 codex_protocol::turn_input::CyberAccessProgram::DaybreakBlue.into(),
@@ -1146,6 +1205,38 @@ mod tests {
             serde_json::from_str::<Value>(&request_text).expect("parse websocket request");
 
         assert_eq!(wire_payload, expected_payload);
+    }
+
+    #[tokio::test]
+    async fn large_turn_is_one_text_message_in_bounded_frames() {
+        const MIB: usize = 1024 * 1024;
+        let (tx, mut frames) = futures::channel::mpsc::unbounded();
+        let mut socket = tx.sink_map_err(|_| WsError::ConnectionClosed);
+
+        let at_limit = Message::text("a".repeat(MIB));
+        send_message(&mut socket, at_limit.clone()).await.unwrap();
+        assert_eq!(frames.next().await, Some(at_limit));
+
+        let mut text = "a".repeat(MIB - 1);
+        text.push('🌱');
+        text.push_str(&"b".repeat(MIB));
+        send_message(&mut socket, Message::text(text.clone()))
+            .await
+            .unwrap();
+        drop(socket);
+        for (i, expected) in text.as_bytes().chunks(MIB).enumerate() {
+            let Some(Message::Frame(frame)) = frames.next().await else {
+                panic!("expected a data frame");
+            };
+            let opcode = if i == 0 { Data::Text } else { Data::Continue };
+            assert_eq!(
+                frame.header().opcode,
+                tokio_tungstenite::tungstenite::protocol::frame::coding::OpCode::Data(opcode)
+            );
+            assert_eq!(frame.header().is_final, (i + 1) * MIB >= text.len());
+            assert_eq!(frame.payload(), expected);
+        }
+        assert!(frames.next().await.is_none());
     }
 
     #[test]
@@ -1299,6 +1390,32 @@ mod tests {
         let body = body.expect("expected body");
         assert!(body.contains("invalid_request_error"));
         assert!(body.contains("Model does not support image inputs"));
+    }
+
+    #[test]
+    fn wrapped_context_length_error_respects_http_status() {
+        for status in [400, 503] {
+            let payload = json!({
+                "type": "error",
+                "status": status,
+                "error": {"code": "context_length_exceeded"}
+            })
+            .to_string();
+            let event = parse_wrapped_websocket_error_event(&payload).unwrap();
+            let error = map_wrapped_websocket_error_event(event, payload).unwrap();
+            let error = crate::api_bridge::map_api_error(error);
+            assert_eq!(
+                matches!(
+                    error.details(),
+                    codex_protocol::error::CodexErrorDetails::ContextWindowExceeded
+                ),
+                status == 400
+            );
+            assert_eq!(
+                error.retry_delay(/*retry_count*/ 1).is_some(),
+                status == 503
+            );
+        }
     }
 
     #[test]

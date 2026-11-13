@@ -220,4 +220,68 @@ async fn compact_history_policy_keeps_complete_transcript_and_raw_output() {
         1 +new
     "###);
     assert!(text(exec.raw_lines()).contains("one"));
+
+    use crate::history_cell::HistoryRenderMode;
+    use crate::transcript_view::TranscriptView;
+    use crossterm::event::KeyCode;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
+    use std::sync::Arc;
+
+    let render = |view: &mut TranscriptView,
+                  cells: &[Arc<dyn HistoryCell>],
+                  active: Option<&dyn HistoryCell>| {
+        let area = Rect::new(
+            /*x*/ 0, /*y*/ 0, /*width*/ 80, /*height*/ 20,
+        );
+        let mut buffer = Buffer::empty(area);
+        view.render_parked(
+            area,
+            &mut buffer,
+            cells,
+            active,
+            &[],
+            /*collapse_turn_details*/ true,
+        );
+        (area.top()..area.bottom())
+            .map(|row| {
+                (area.left()..area.right())
+                    .map(|column| buffer[(column, row)].symbol())
+                    .collect::<String>()
+                    .trim_end()
+                    .to_owned()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_owned()
+    };
+    let mut view = TranscriptView::default();
+    let live = render(&mut view, &[], Some(parallel.as_ref()));
+    assert!(live.contains("Calling workspace.inspect"), "{live}");
+    view.handle_key(KeyCode::F(4).into(), &[]);
+    view.handle_key(KeyCode::Enter.into(), &[]);
+    let expanded_live = render(&mut view, &[], Some(parallel.as_ref()));
+    assert!(expanded_live.contains("▾ Calling workspace.inspect"));
+    view.handle_key(KeyCode::Esc.into(), &[]);
+    view.jump_to_latest();
+
+    // The expanded live call keeps its disclosure when it joins committed history.
+    let cells: Vec<Arc<dyn HistoryCell>> =
+        vec![Arc::from(exec), Arc::from(parallel), Arc::from(mcp)];
+    let grouped = render(&mut view, &cells, /*active*/ None);
+    assert!(grouped.contains("▾ 3 tool calls"), "{grouped}");
+    assert!(grouped.contains("Ran") && grouped.contains("printf one"));
+    assert!(
+        grouped.contains("Calling workspace.inspect")
+            && grouped.contains("Called workspace.inspect")
+    );
+    assert!(!grouped.contains("full result"));
+    view.set_presentation(/*detailed*/ true, HistoryRenderMode::Rich);
+    let detailed = render(&mut view, &cells, /*active*/ None);
+    assert!(detailed.contains("full result"), "{detailed}");
+    insta::assert_snapshot!(
+        "compact_tool_group_disclosure",
+        format!("live:\n{live}\ngrouped:\n{grouped}\ndetailed:\n{detailed}")
+    );
 }

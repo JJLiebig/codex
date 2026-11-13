@@ -16,9 +16,14 @@ use super::TurnContextItem;
 use super::WorldStateItem;
 use crate::RetainedContextEvent;
 use crate::RetainedUserMessage;
+use codex_protocol::ContextWindowId;
 use codex_protocol::ResponseItemId;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::InternalChatMessageMetadataPassthrough;
+use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::permissions::RawFileSystemSandboxPolicy;
+use codex_protocol::protocol::SandboxPolicy;
+use codex_utils_absolute_path::AbsolutePathBuf;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -49,9 +54,10 @@ pub(super) enum RolloutItemWire<'a> {
         payload: InterAgentCommunicationMetadataPayload,
     },
     Compacted {
-        payload: Cow<'a, CompactedItem>,
+        payload: Cow<'a, Box<CompactedItem>>,
     },
     TurnContext {
+        #[serde(serialize_with = "serialize_turn_context")]
         payload: Cow<'a, TurnContextItem>,
     },
     TokenUsageRecord {
@@ -72,6 +78,60 @@ pub(super) enum RolloutItemWire<'a> {
     RealtimeItem {
         payload: Cow<'a, RealtimeItem>,
     },
+}
+
+fn serialize_turn_context<S>(context: &TurnContextItem, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    // Keep older rollout readers usable during deployment and rollback. Runtime
+    // contexts stay profile-only; compatibility fields exist only on the wire.
+    #[derive(Serialize)]
+    struct Wire<'a> {
+        #[serde(flatten)]
+        context: &'a TurnContextItem,
+        sandbox_policy: SandboxPolicy,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        file_system_sandbox_policy: Option<RawFileSystemSandboxPolicy>,
+    }
+
+    let cwd = context.cwd.as_path();
+    let (file_system, network) = context.permission_profile.to_runtime_permissions();
+    let sandbox_policy = context
+        .permission_profile
+        .to_legacy_sandbox_policy(cwd)
+        .unwrap_or_else(|_| {
+            let tmpdir_writable = std::env::var_os("TMPDIR")
+                .filter(|path| !path.is_empty())
+                .and_then(|path| AbsolutePathBuf::from_absolute_path(path).ok())
+                .is_some_and(|path| file_system.can_write_local_path_with_cwd(path.as_path(), cwd));
+            let slash_tmp = std::path::Path::new("/tmp");
+            let slash_tmp_writable = slash_tmp.is_absolute()
+                && slash_tmp.is_dir()
+                && file_system.can_write_local_path_with_cwd(slash_tmp, cwd);
+            SandboxPolicy::WorkspaceWrite {
+                writable_roots: file_system
+                    .get_writable_roots_with_cwd(cwd)
+                    .into_iter()
+                    .map(|root| root.root)
+                    .filter(|root| root != &context.cwd)
+                    .collect(),
+                network_access: network.is_enabled(),
+                exclude_tmpdir_env_var: !tmpdir_writable,
+                exclude_slash_tmp: !slash_tmp_writable,
+            }
+        });
+    let legacy_file_system =
+        FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd);
+    let file_system_sandbox_policy = (file_system != legacy_file_system)
+        .then(|| file_system.try_into().ok())
+        .flatten();
+    Wire {
+        context,
+        sandbox_policy,
+        file_system_sandbox_policy,
+    }
+    .serialize(serializer)
 }
 
 #[derive(Serialize, Deserialize, JsonSchema)]
@@ -239,9 +299,7 @@ impl From<RolloutItemWire<'_>> for RolloutItem {
                     trigger_turn: payload.trigger_turn,
                 }
             }
-            RolloutItemWire::Compacted { payload } => {
-                Self::Compacted(Box::new(payload.into_owned()))
-            }
+            RolloutItemWire::Compacted { payload } => Self::Compacted(payload.into_owned()),
             RolloutItemWire::TurnContext { payload } => Self::TurnContext(payload.into_owned()),
             RolloutItemWire::TokenUsageRecord { payload } => {
                 Self::TokenUsageRecord(payload.into_owned())
@@ -280,11 +338,11 @@ pub(super) struct CompactedItemWire<'a> {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     window_number: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    first_window_id: Option<Cow<'a, str>>,
+    first_window_id: Option<Cow<'a, ContextWindowId>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    previous_window_id: Option<Cow<'a, str>>,
+    previous_window_id: Option<Cow<'a, ContextWindowId>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[schemars(with = "Option<String>")]
+    #[schemars(with = "Option<ContextWindowId>")]
     window_id: Option<WindowIdWire<'a>>,
     #[serde(default)]
     compaction_response_id: Option<Cow<'a, str>>,
@@ -323,11 +381,11 @@ impl<'a> From<&'a CompactedItem> for CompactedItemWire<'a> {
             retained_context: item.retained_context.as_ref().map(Cow::Borrowed),
             mcp_resource_origins: item.mcp_resource_origins.as_ref().map(Cow::Borrowed),
             window_number: item.window_number,
-            first_window_id: item.first_window_id.as_deref().map(Cow::Borrowed),
-            previous_window_id: item.previous_window_id.as_deref().map(Cow::Borrowed),
+            first_window_id: item.first_window_id.as_ref().map(Cow::Borrowed),
+            previous_window_id: item.previous_window_id.as_ref().map(Cow::Borrowed),
             window_id: item
                 .window_id
-                .as_deref()
+                .as_ref()
                 .map(|window_id| WindowIdWire::Id(Cow::Borrowed(window_id))),
             compaction_response_id: item.compaction_response_id.as_deref().map(Cow::Borrowed),
             latest_token_usage_record: item.latest_token_usage_record.as_ref().map(Cow::Borrowed),
@@ -406,6 +464,6 @@ impl TryFrom<CompactedItemWire<'_>> for CompactedItem {
 #[derive(Serialize, Deserialize)]
 #[serde(untagged)]
 enum WindowIdWire<'a> {
-    Id(Cow<'a, str>),
+    Id(Cow<'a, ContextWindowId>),
     LegacyWindowNumber(u64),
 }

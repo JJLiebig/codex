@@ -70,9 +70,6 @@ codex-sandboxing = { workspace = true }
 codex-skills = { workspace = true }
 codex-skills-extension = { workspace = true }
 codex-state = { workspace = true }
-codex-agent-message-board-extension = { workspace = true }
-codex-message-board = { workspace = true }
-codex-agent-message-board-client = { workspace = true }
 codex-terminal-detection = { workspace = true }
 codex-thread-store = { workspace = true }
 codex-tools = { workspace = true }
@@ -126,7 +123,6 @@ tokio = { workspace = true, features = [
     "signal",
 ] }
 tokio-util = { workspace = true, features = ["rt"] }
-tokio-tungstenite = { workspace = true }
 toml = { workspace = true }
 toml_edit = { workspace = true }
 tonic = { workspace = true }
@@ -146,18 +142,23 @@ openssl-sys = { workspace = true, features = ["vendored"] }
 openssl-sys = { workspace = true, features = ["vendored"] }
 
 [dev-dependencies]
+codex-backend-client = { workspace = true }
+codex-message-board = { workspace = true }
+codex-agent-message-board-host = { workspace = true }
 assert_cmd = { workspace = true }
 assert_matches = { workspace = true }
 codex-exec-server-test-support = { workspace = true }
 codex-image-generation-extension = { workspace = true }
 codex-home = { workspace = true }
 codex-mcp-extension = { workspace = true }
+codex-message-board-mcp = { workspace = true }
 codex-otel = { workspace = true }
 codex-protocol-test-support = { workspace = true }
 codex-test-binary-support = { workspace = true }
 codex-uds = { workspace = true }
 codex-utils-cargo-bin = { workspace = true }
 codex-utils-redacted-string = { workspace = true }
+codex-utils-rustls-provider = { workspace = true }
 codex-web-search-extension = { workspace = true }
 codex-windows-sandbox-test-support = { workspace = true }
 core_test_support = { workspace = true }
@@ -168,8 +169,6 @@ opentelemetry = { workspace = true }
 predicates = { workspace = true }
 pretty_assertions = { workspace = true }
 rcgen = { workspace = true }
-rustls = { workspace = true }
-rustls-pki-types = { workspace = true }
 test-case = "3.3.1"
 opentelemetry_sdk = { workspace = true, features = [
     "experimental_metrics_custom_reader",
@@ -179,6 +178,7 @@ serial_test = { workspace = true }
 tempfile = { workspace = true }
 test-log = { workspace = true }
 tokio-rustls = { workspace = true }
+tokio-tungstenite = { workspace = true }
 tracing-opentelemetry = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-test = { workspace = true, features = ["no-env-filter"] }

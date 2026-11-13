@@ -1,11 +1,17 @@
 pub use binding::McpBinding;
+pub use binding::McpPermissionSource;
 pub use binding::PreparedMcpCall;
+pub use binding::SEARCH_CONNECTOR;
+pub use binding::SearchDiscovery;
+pub use binding::is_model_search_tool;
+pub use binding_clients::McpResourceListing;
 pub use client_capabilities::client_mcp_extensions;
 pub use client_tool_catalog::CodexAppsToolSnapshot;
 pub use codex_rmcp_client::McpProtocolMode;
 pub use connection_manager::NetworkPolicyMetadata;
 pub use connection_manager::NetworkPolicyMetadataProvider;
 pub use connection_manager::tool_is_model_visible;
+pub use connection_pool::LEASE_META_KEY as MCP_CONNECTION_LEASE_META_KEY;
 pub use connection_pool::McpConnectionPool;
 pub use elicitation::ElicitationLifecycle;
 pub use elicitation::ElicitationReviewRequest;
@@ -60,6 +66,7 @@ pub use catalog::ResolvedMcpServer;
 pub use mcp::CODEX_APPS_MCP_SERVER_NAME;
 pub use mcp::DEFAULT_OPTIONAL_MCP_STARTUP_GRACE;
 pub use mcp::McpConfig;
+pub use mcp::McpServerPermissions;
 pub use mcp::ToolPluginContext;
 pub use server::EffectiveMcpServer;
 
@@ -112,6 +119,7 @@ pub use mcp::McpPermissionPromptAutoApproveContext;
 pub use mcp::mcp_permission_prompt_is_auto_approved;
 pub use mcp::qualified_mcp_tool_name_prefix;
 
+mod auth;
 mod auth_changes;
 pub(crate) mod auth_elicitation;
 mod binding;

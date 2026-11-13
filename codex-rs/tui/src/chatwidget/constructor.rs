@@ -76,7 +76,11 @@ impl ChatWidget {
             &header_model,
             &model_catalog.try_list_models().unwrap_or_default(),
         );
-        let runtime_keymap = RuntimeKeymap::from_config(&local_settings.tui.keymap).ok();
+        let runtime_keymap = RuntimeKeymap::for_session(
+            &local_settings.tui.keymap,
+            local_settings.workspace_enabled(&config),
+        )
+        .ok();
         let default_keymap = RuntimeKeymap::defaults();
         let copy_last_response_binding = runtime_keymap
             .as_ref()
@@ -134,6 +138,7 @@ impl ChatWidget {
             has_codex_backend_auth,
             model_catalog,
             model_popup_request_id: None,
+            cloud_picker_selection: None,
             permission_popup_pending: false,
             permission_popup_request_id: None,
             permission_discovery: None,
@@ -208,12 +213,9 @@ impl ChatWidget {
             safety_buffering: SafetyBufferingState::default(),
             task_complete_pending: false,
             unified_exec_processes: Vec::new(),
+            pending_terminal_restore: None,
             mcp_startup_status: None,
-            mcp_startup_expected_servers: None,
-            mcp_startup_ignore_updates_until_next_start: false,
-            mcp_startup_allow_terminal_only_next_round: false,
-            mcp_startup_pending_next_round: HashMap::new(),
-            mcp_startup_pending_next_round_saw_starting: false,
+            mcp_startup_last_diagnostics: HashMap::new(),
             connectors: ConnectorsState::default(),
             ide_context: IdeContextState::default(),
             plugins_cache: PluginsCacheState::default(),
@@ -266,6 +268,7 @@ impl ChatWidget {
             suppress_initial_user_message_submit: false,
             pending_notification: None,
             quit_shortcut_expires_at: None,
+            new_backend_label: None,
             quick_dial_menu: false,
             quick_dial_menu_key_guard: None,
             quit_shortcut_key: None,

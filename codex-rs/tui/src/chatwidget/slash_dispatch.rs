@@ -115,8 +115,17 @@ impl ChatWidget {
         self.request_redraw();
         self.app_event_tx.send(AppEvent::StartSide {
             parent_thread_id,
+            mode: if user_message.is_some() {
+                crate::app_event::SideStartMode::New
+            } else {
+                crate::app_event::SideStartMode::Reuse
+            },
             user_message,
         });
+    }
+
+    pub(crate) fn sidebar_chooser_available(&self) -> bool {
+        !self.review.is_review_mode && !self.is_external_writer_view()
     }
 
     fn request_empty_side_conversation(&mut self, cmd: SlashCommand) {
@@ -141,6 +150,12 @@ impl ChatWidget {
         cmd: SlashCommand,
         source: SlashCommandDispatchSource,
     ) -> bool {
+        if source == SlashCommandDispatchSource::Live && cmd.requires_dispatch_validation() {
+            return self.is_user_turn_pending_or_running()
+                || (cmd == SlashCommand::Review
+                    && self.input_queue.has_queued_follow_up_messages());
+        }
+
         (!cmd.available_during_task()
             && (self.turn_lifecycle.agent_turn_running
                 || self.review.is_review_mode
@@ -151,13 +166,9 @@ impl ChatWidget {
                 && (self.input_queue.user_turn_pending_start
                     || self.turn_lifecycle.agent_turn_running))
             || (cmd == SlashCommand::Export && self.input_queue.suppress_queue_autosend)
-            || (cmd == SlashCommand::Review
-                && source == SlashCommandDispatchSource::Live
-                && (self.is_user_turn_pending_or_running()
-                    || self.input_queue.has_queued_follow_up_messages()))
     }
 
-    pub(super) fn dispatch_command(&mut self, cmd: SlashCommand) {
+    pub(crate) fn dispatch_command(&mut self, cmd: SlashCommand) {
         self.dispatch_command_from_source(cmd, SlashCommandDispatchSource::Live);
     }
 
@@ -187,6 +198,12 @@ impl ChatWidget {
             }
             self.request_redraw();
             return;
+        }
+
+        if source == SlashCommandDispatchSource::Live && cmd.requires_dispatch_validation() {
+            self.bottom_pane
+                .set_composer_text(String::new(), Vec::new(), Vec::new());
+            self.bottom_pane.drain_pending_submission_state();
         }
 
         match cmd {
@@ -224,17 +241,7 @@ impl ChatWidget {
                 });
             }
             SlashCommand::Feedback => {
-                if !self.config.feedback_enabled {
-                    let params = crate::bottom_pane::feedback_disabled_params();
-                    self.bottom_pane.show_selection_view(params);
-                    self.request_redraw();
-                    return;
-                }
-                // Step 1: pick a category (UI built in feedback_view)
-                let params =
-                    crate::bottom_pane::feedback_selection_params(self.app_event_tx.clone());
-                self.bottom_pane.show_selection_view(params);
-                self.request_redraw();
+                self.app_event_tx.send(AppEvent::OpenFeedback);
             }
             SlashCommand::New => {
                 self.show_session_checkout_picker(ManagedWorktreeMode::New, /*name*/ None);
@@ -276,7 +283,8 @@ impl ChatWidget {
                 self.bottom_pane.show_selection_view(SelectionViewParams {
                     title: Some("Delete this session?".to_string()),
                     subtitle: Some(
-                        "Cannot be undone. Subagent threads will also be deleted.".to_string(),
+                        "Also deletes subagents and saved side chats. Cannot be undone."
+                            .to_string(),
                     ),
                     footer_hint: Some(standard_popup_hint_line()),
                     items: vec![
@@ -356,11 +364,6 @@ impl ChatWidget {
                     .send(AppEvent::GenerateRecap { thread_id });
             }
             SlashCommand::Review => {
-                if source == SlashCommandDispatchSource::Live {
-                    self.bottom_pane
-                        .set_composer_text(String::new(), Vec::new(), Vec::new());
-                    self.bottom_pane.drain_pending_submission_state();
-                }
                 self.open_review_popup();
                 if self.mcp_startup_status.is_some() {
                     self.defer_input_until_settings_applied();
@@ -897,8 +900,10 @@ impl ChatWidget {
             SlashCommand::Keymap => match trimmed.to_ascii_lowercase().as_str() {
                 "" => self.open_keymap_picker(),
                 "debug" => {
-                    match crate::keymap::RuntimeKeymap::from_config(&self.local_settings.tui.keymap)
-                    {
+                    match crate::keymap::RuntimeKeymap::for_session(
+                        &self.local_settings.tui.keymap,
+                        self.local_settings.workspace_enabled(self.config_ref()),
+                    ) {
                         Ok(runtime_keymap) => self.open_keymap_debug(&runtime_keymap),
                         Err(err) => {
                             self.add_error_message(format!(
@@ -1410,7 +1415,9 @@ impl ChatWidget {
             "'/{}' is unavailable in side conversations. {SIDE_SLASH_COMMAND_UNAVAILABLE_HINT}",
             cmd.command()
         ));
-        self.bottom_pane.drain_pending_submission_state();
+        if !cmd.requires_dispatch_validation() {
+            self.bottom_pane.drain_pending_submission_state();
+        }
         false
     }
 

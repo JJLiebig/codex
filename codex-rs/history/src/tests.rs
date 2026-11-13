@@ -1,7 +1,14 @@
 use anyhow::Result;
+use codex_protocol::ContextWindowId;
 use codex_protocol::models::AudioReference;
 use codex_protocol::models::ConfigurationReasoning;
+use codex_protocol::models::PermissionProfile;
 use codex_protocol::openai_models::ReasoningEffort;
+use codex_protocol::permissions::FileSystemAccessMode;
+use codex_protocol::permissions::FileSystemPath;
+use codex_protocol::permissions::FileSystemSandboxEntry;
+use codex_protocol::permissions::FileSystemSandboxPolicy;
+use codex_protocol::permissions::NetworkSandboxPolicy;
 use codex_protocol::protocol::ThreadSettingsSnapshot;
 use pretty_assertions::assert_eq;
 use serde_json::json;
@@ -326,6 +333,7 @@ fn delivered_assistant_rollout_survives_an_earlier_read_and_rewrite() -> Result<
                 phase: None,
             },
             RetainedInputSource::Local(metadata.user_input_order),
+            &codex_protocol_test_support::uuid_v7_item_id_generator_for_test(),
         );
         let rewritten_checkpoint =
             serde_json::from_value(serde_json::to_value(earlier_checkpoint)?)?;
@@ -358,6 +366,8 @@ fn response_item_envelope_stores_metadata_beside_rollout_payload() -> Result<()>
         item: RolloutItem::ResponseItem(ResponseItemEnvelope {
             item: response_item.clone(),
             metadata: Some(CodexHarnessMetadata {
+                history_sequence: Some(9),
+                sampled_through_sequence: Some(7),
                 client_authored: true,
                 history_truncation_token_limit: Some(20_000),
                 inherited_user_message: true,
@@ -375,6 +385,8 @@ fn response_item_envelope_stores_metadata_beside_rollout_payload() -> Result<()>
             "type": "response_item",
             "payload": response_item,
             "metadata": {
+                "history_sequence": 9,
+                "sampled_through_sequence": 7,
                 "client_authored": true,
                 "fallback_token_limit_override": 20_000,
                 "inherited_user_message": true,
@@ -390,6 +402,8 @@ fn response_item_envelope_stores_metadata_beside_rollout_payload() -> Result<()>
     assert_eq!(
         envelope.metadata,
         Some(CodexHarnessMetadata {
+            history_sequence: Some(9),
+            sampled_through_sequence: Some(7),
             client_authored: true,
             history_truncation_token_limit: Some(20_000),
             inherited_user_message: true,
@@ -585,6 +599,7 @@ fn compacted_replacement_history_stores_metadata_in_an_aligned_sidecar() -> Resu
 #[test]
 fn compacted_resume_metadata_presence_round_trips_empty_values() -> Result<()> {
     let resume_metadata = CompactionResumeMetadata {
+        rejected_audio_file_ids: Default::default(),
         dynamic_tools: None,
         multi_agent_version: None,
         last_started_turn_id: None,
@@ -697,6 +712,7 @@ fn compacted_metadata_remains_compatible_with_legacy_response_item_readers() -> 
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: Some(CompactionResumeMetadata {
+            rejected_audio_file_ids: Default::default(),
             dynamic_tools: None,
             multi_agent_version: Some(MultiAgentVersion::V2),
             last_started_turn_id: Some("turn-1".to_string()),
@@ -796,6 +812,25 @@ fn uploaded_audio_round_trips_in_canonical_message_content() -> Result<()> {
 /// Preserves the established tagged payload representation for every rollout variant.
 fn rollout_item_variants_preserve_existing_payload_shapes() -> Result<()> {
     let cwd = std::env::current_dir()?;
+    let foreign_file_system = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::Path {
+            path: if cfg!(windows) {
+                "file:///workspace/foreign"
+            } else {
+                "file:///C:/workspace/foreign"
+            }
+            .parse()?,
+        },
+        access: FileSystemAccessMode::Write,
+        missing_path_behavior: None,
+    }]);
+    let denied_file_system = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
+        path: FileSystemPath::GlobPattern {
+            pattern: "**/private/**".to_string(),
+        },
+        access: FileSystemAccessMode::Deny,
+        missing_path_behavior: None,
+    }]);
     let fixtures = [
         json!({
             "type": "session_meta",
@@ -836,8 +871,40 @@ fn rollout_item_variants_preserve_existing_payload_shapes() -> Result<()> {
                 "cwd": cwd,
                 "approval_policy": "never",
                 "sandbox_policy": { "type": "danger-full-access" },
+                "permission_profile": PermissionProfile::Disabled,
                 "model": "gpt-5",
                 "summary": "auto",
+            },
+        }),
+        json!({
+            "type": "turn_context",
+            "payload": {
+                "turn_id": "interrupted-turn",
+                "cwd": cwd,
+                "approval_policy": "never",
+                "sandbox_policy": {
+                    "type": "workspace-write",
+                    "network_access": false,
+                    "exclude_tmpdir_env_var": true, "exclude_slash_tmp": true,
+                },
+                "permission_profile": PermissionProfile::from_runtime_permissions(
+                    &foreign_file_system,
+                    NetworkSandboxPolicy::Restricted,
+                ),
+                "file_system_sandbox_policy": codex_protocol::permissions::RawFileSystemSandboxPolicy::try_from(foreign_file_system).expect("serializable foreign root"),
+                "model": "gpt-5",
+                "summary": "auto",
+            },
+        }),
+        json!({
+            "type": "turn_context",
+            "payload": {
+                "cwd": cwd, "approval_policy": "never", "model": "gpt-5",
+                "sandbox_policy": { "type": "read-only" },
+                "permission_profile": PermissionProfile::from_runtime_permissions(
+                    &denied_file_system, NetworkSandboxPolicy::Restricted,
+                ),
+                "file_system_sandbox_policy": codex_protocol::permissions::RawFileSystemSandboxPolicy::try_from(denied_file_system).expect("serializable deny rule"),
             },
         }),
         json!({
@@ -981,9 +1048,9 @@ fn compacted_item_serializes_window_number_and_id() -> Result<()> {
         guardian_history: None,
         mcp_resource_origins: None,
         window_number: Some(3),
-        first_window_id: Some("019b3f6e-0000-7000-8000-000000000001".to_string()),
-        previous_window_id: Some("019b3f6e-0000-7000-8000-000000000002".to_string()),
-        window_id: Some("019b3f6e-7a10-7cc3-8b6e-1d09e2f7a001".to_string()),
+        first_window_id: ContextWindowId::parse("019b3f6e-0000-7000-8000-000000000001"),
+        previous_window_id: ContextWindowId::parse("019b3f6e-0000-7000-8000-000000000002"),
+        window_id: ContextWindowId::parse("019b3f6e-7a10-7cc3-8b6e-1d09e2f7a001"),
         compaction_response_id: None,
         latest_token_usage_record: None,
         resume_metadata: None,

@@ -378,6 +378,7 @@ impl McpConnectionSet {
             client_mcp_extensions,
             auth,
             auth_manager,
+            runtime_auth,
             elicitation_reviewer,
             elicitation_lifecycle,
         } = input;
@@ -406,10 +407,9 @@ impl McpConnectionSet {
             .collect::<Vec<_>>();
         required_servers.sort();
         let mut reused_ready = Vec::new();
-        let mut join_set = JoinSet::new();
-        // Explicit reconnects have no previous set and must replace their clients eagerly.
-        let allow_deferred_startup =
-            startup_policy == McpStartupPolicy::LazyWhenCached && previous.is_some();
+        let mut eager_starts = Vec::new();
+        let mut eager_workers = Vec::new();
+        let mut deferred_workers = Vec::new();
         // Retained EMA clients keep callbacks attached to this manager even when
         // an explicit reconnect replaces the ordinary clients.
         let elicitation_previous = previous
@@ -552,6 +552,17 @@ impl McpConnectionSet {
                 && should_share_codex_apps_tools_cache(&server_name, uses_env_bearer_token);
             let shares_codex_apps_tools_cache =
                 eligible_for_apps_cache && codex_apps_tools_cache.shares_snapshot();
+            let openai_runtime = runtime_auth.as_ref().filter(|_| {
+                !uses_env_bearer_token
+                    && configured_config.is_local_environment()
+                    && matches!(configured_config.auth, codex_config::McpServerAuth::ChatGpt)
+                    && auth.is_some_and(codex_login::CodexAuth::uses_codex_backend)
+                    && matches!(&configured_config.transport,
+                        McpServerTransportConfig::StreamableHttp { url, .. }
+                            if codex_http_client::classify_openai_api_url(url)
+                                != codex_http_client::OpenAiDestination::Other)
+            });
+            let runtime_auth_mode = openai_runtime.map(|(_, mode)| *mode);
             let codex_apps_tools_cache_context = shares_codex_apps_tools_cache.then(|| {
                 // Only equivalent discovery inputs may share executable Apps tools.
                 let mut transport = configured_config.transport.clone();
@@ -567,6 +578,7 @@ impl McpConnectionSet {
                 let mut scope = serde_json::json!([
                     transport,
                     &configured_config.auth,
+                    runtime_auth_mode,
                     protocol_mode.preferred_protocol_version().as_str(),
                     catalog_item_limit,
                     &client_elicitation_capability,
@@ -596,7 +608,14 @@ impl McpConnectionSet {
                 if server_name == CODEX_APPS_MCP_SERVER_NAME && uses_env_bearer_token {
                     None
                 } else {
-                    chatgpt_auth_provider_for_server(&server, chatgpt_auth_provider)
+                    chatgpt_auth_provider_for_server(&server, chatgpt_auth_provider).map(
+                        |provider| match (openai_runtime, auth) {
+                            (Some(runtime), Some(auth)) => {
+                                crate::auth::McpAuthProvider::runtime(runtime.clone(), auth.clone())
+                            }
+                            _ => crate::auth::McpAuthProvider::Credentials(provider),
+                        },
+                    )
                 };
             let discover_local_stdio = config.discover_local_stdio
                 && server.can_discover_local_stdio(&server_name, runtime_auth_provider.as_ref());
@@ -630,6 +649,7 @@ impl McpConnectionSet {
                 &resolved_environment,
                 &runtime_context,
                 runtime_auth_provider.as_ref(),
+                runtime_auth_mode,
                 auth,
                 eligible_for_apps_cache
                     .then(|| (codex_home.clone(), codex_apps_tools_cache_key.clone())),
@@ -666,9 +686,18 @@ impl McpConnectionSet {
                     Some((&connection_identity, cache_mode, server.is_agent_plugin())),
                 )?;
                 context.track_tool_list_changes = config.mcp_tool_list_changed;
+                context.before_stdio_discovery =
+                    expected_protocol_mode == Some(McpProtocolMode::DiscoverLocalStdio);
                 Some(context)
             });
-            let defer_startup = allow_deferred_startup
+            let allow_deferred_startup = match startup_policy {
+                McpStartupPolicy::Eager => false,
+                McpStartupPolicy::DeferCachedStdio => configured_config.can_defer_stdio_startup(),
+                McpStartupPolicy::DeferCachedServers => true,
+            };
+            // Explicit reconnects have no previous set and must replace their clients eagerly.
+            let defer_startup = previous.is_some()
+                && allow_deferred_startup
                 && !tool_plugin_context.is_selected_plugin_mcp_server(&server_name)
                 && tool_catalog_cache_context
                     .as_ref()
@@ -680,14 +709,6 @@ impl McpConnectionSet {
                         })
                     })
                     .is_some();
-            // A subagent using legacy tool definitions must launch with the same handshake.
-            let expected_protocol_mode = if defer_startup
-                && expected_protocol_mode == Some(McpProtocolMode::DiscoverLocalStdio)
-            {
-                Some(McpProtocolMode::Legacy)
-            } else {
-                expected_protocol_mode
-            };
             let protocol_mode = expected_protocol_mode.unwrap_or(protocol_mode);
             let connection_pool = runtime_context.connection_pool.as_ref().filter(|_| {
                 // Sharing a signed-in helper requires tracking account changes.
@@ -741,13 +762,8 @@ impl McpConnectionSet {
                         );
                         if pending {
                             let client = connection.client.clone();
-                            let publication_gate = publication_gate.clone();
-                            join_set.spawn(async move {
-                                if !publication_gate.wait().await {
-                                    return (server_name, Err(StartupOutcomeError::Cancelled));
-                                }
-                                (server_name, client.client().await)
-                            });
+                            eager_workers
+                                .push(async move { (server_name, client.client().await) }.boxed());
                         } else {
                             reused_ready.push(server_name);
                         }
@@ -821,6 +837,7 @@ impl McpConnectionSet {
                         },
                     );
                     if let Some(error) = unchanged_auth_failure {
+                        eager_starts.push(server_name.clone());
                         let reason = connection_identity
                             .oauth_credentials()
                             .ok()
@@ -837,13 +854,9 @@ impl McpConnectionSet {
                         };
                         let tx_event = tx_event.clone();
                         let submit_id = startup_submit_id.clone();
-                        let publication_gate = publication_gate.clone();
-                        join_set.spawn(async move {
-                            if !publication_gate.wait().await {
-                                return (server_name, Err(StartupOutcomeError::Cancelled));
-                            }
-                            if let Some(tx_event) = tx_event.as_ref() {
-                                for status in [McpStartupStatus::Starting, status] {
+                        eager_workers.push(
+                            async move {
+                                if let Some(tx_event) = tx_event.as_ref() {
                                     let _ = emit_update(
                                         submit_id.as_str(),
                                         tx_event,
@@ -854,17 +867,13 @@ impl McpConnectionSet {
                                     )
                                     .await;
                                 }
+                                (server_name, Err(error))
                             }
-                            (server_name, Err(error))
-                        });
+                            .boxed(),
+                        );
                     } else if let Some(client) = pending_client {
-                        let publication_gate = publication_gate.clone();
-                        join_set.spawn(async move {
-                            if !publication_gate.wait().await {
-                                return (server_name, Err(StartupOutcomeError::Cancelled));
-                            }
-                            (server_name, client.client().await)
-                        });
+                        eager_workers
+                            .push(async move { (server_name, client.client().await) }.boxed());
                     } else {
                         reused_ready.push(server_name);
                     }
@@ -939,6 +948,7 @@ impl McpConnectionSet {
                     })
                     .map(|manager| manager.auth_change_state_receiver()),
                 protocol_mode,
+                defer_startup,
                 catalog_item_limit,
                 connection_pool,
                 publish_apps,
@@ -979,7 +989,10 @@ impl McpConnectionSet {
             );
             let tx_event = tx_event.clone();
             let submit_id = startup_submit_id.clone();
-            let publication_gate = publication_gate.clone();
+
+            if !defer_startup {
+                eager_starts.push(server_name.clone());
+            }
             let startup = async move {
                 if let Some(mut startup_receiver) = startup_receiver
                     && tokio::select! {
@@ -989,10 +1002,7 @@ impl McpConnectionSet {
                 {
                     return (server_name, Err(StartupOutcomeError::Cancelled));
                 }
-                if !publication_gate.wait().await {
-                    return (server_name, Err(StartupOutcomeError::Cancelled));
-                }
-                if let Some(tx_event) = tx_event.as_ref() {
+                if defer_startup && let Some(tx_event) = tx_event.as_ref() {
                     let _ = emit_update(
                         submit_id.as_str(),
                         tx_event,
@@ -1091,9 +1101,10 @@ impl McpConnectionSet {
             let startup = AuthStorageOriginator::current().scope(startup);
             if defer_startup {
                 // Dormant servers must not hold the initial startup summary open.
-                tokio::spawn(startup);
+                deferred_workers.push(startup);
             } else {
-                join_set.spawn(startup);
+                let trace = codex_rmcp_client::McpRequestTrace::current();
+                eager_workers.push(trace.scope(startup).boxed());
             }
         }
         let manager = Self {
@@ -1110,13 +1121,30 @@ impl McpConnectionSet {
             elicitation_requests: elicitation_requests.clone(),
             trusted_access,
         };
-        let summary_publication_gate = publication_gate;
         tokio::spawn(async move {
-            let outcomes = join_set.join_all().await;
-            if let Some(tx_event) = tx_event {
-                if !summary_publication_gate.wait().await {
-                    return;
+            if !publication_gate.wait().await {
+                return;
+            }
+            // Announce the complete eager batch before a fast helper can report Ready.
+            // Dormant helpers announce themselves separately when their first caller arrives.
+            if let Some(tx_event) = &tx_event {
+                for server in eager_starts {
+                    let _ = emit_update(
+                        startup_submit_id.as_str(),
+                        tx_event,
+                        McpStartupUpdateEvent {
+                            server,
+                            status: McpStartupStatus::Starting,
+                        },
+                    )
+                    .await;
                 }
+            }
+            for worker in deferred_workers {
+                tokio::spawn(worker);
+            }
+            let outcomes = JoinSet::from_iter(eager_workers).join_all().await;
+            if let Some(tx_event) = tx_event {
                 let mut summary = McpStartupCompleteEvent {
                     ready: reused_ready,
                     ..Default::default()
@@ -1178,6 +1206,13 @@ impl McpConnectionSet {
 
     pub(crate) fn contains_server(&self, server_name: &str) -> bool {
         self.servers.contains_key(server_name)
+    }
+
+    pub(crate) fn shares_server_connection(&self, other: &Self, server: &str) -> bool {
+        self.servers
+            .get(server)
+            .zip(other.servers.get(server))
+            .is_some_and(|(left, right)| Arc::ptr_eq(&left.connection, &right.connection))
     }
 
     pub(crate) async fn authentication_failed_servers(&self) -> Vec<String> {

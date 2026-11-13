@@ -20,6 +20,7 @@ pub use bundle_loader::chatgpt_config_bundle_loader_for_storage_without_cache;
 pub use bundle_loader::ensure_config_server_login;
 pub use bundle_loader::managed_config_auth_manager;
 pub use bundle_loader::managed_config_bundle_loader;
+pub use bundle_loader::managed_config_bundle_loader_for_auth;
 pub use bundle_loader::managed_config_bundle_loader_for_storage;
 pub use codex_plus_plus::cloud_config_bundle_loader_for_selected_account;
 pub use codex_plus_plus::stop_cloud_config_refresh_before_account_picker;

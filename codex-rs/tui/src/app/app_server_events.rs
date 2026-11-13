@@ -63,34 +63,6 @@ impl App {
         }
     }
 
-    pub(super) fn refresh_mcp_startup_expected_servers_from_config(&mut self) {
-        if self
-            .current_displayed_thread_id()
-            .zip(self.primary_thread_id)
-            .is_some_and(|(thread_id, primary_thread_id)| {
-                self.agent_navigation.is_parent_owned(thread_id)
-                    || (thread_id != primary_thread_id
-                        && !self.side_threads.contains_key(&thread_id))
-            })
-        {
-            // Subagents can defer cached servers indefinitely, so only servers
-            // that actually report startup should keep their status running.
-            self.chat_widget
-                .set_mcp_startup_expected_servers(std::iter::empty());
-            return;
-        }
-
-        let enabled_config_mcp_servers: Vec<String> = self
-            .config
-            .mcp_servers
-            .get()
-            .iter()
-            .filter_map(|(name, server)| server.enabled.then_some(name.clone()))
-            .collect();
-        self.chat_widget
-            .set_mcp_startup_expected_servers(enabled_config_mcp_servers);
-    }
-
     pub(super) async fn handle_app_server_event(
         &mut self,
         app_server_client: &AppServerSession,
@@ -102,7 +74,6 @@ impl App {
                     skipped,
                     "app-server event consumer lagged; dropping ignored events"
                 );
-                self.refresh_mcp_startup_expected_servers_from_config();
                 self.chat_widget.finish_mcp_startup_after_lag();
                 if let Some(task) = self.agents_overview.refresh_task.take() {
                     task.abort();
@@ -145,6 +116,13 @@ impl App {
                 self.handle_server_request_event(app_server_client, request)
                     .await;
                 self.repaint_agents_overview();
+            }
+            AppServerEvent::ThreadStreamDisconnected(error) => {
+                self.handle_server_notification_event(
+                    app_server_client,
+                    ServerNotification::Error(*error),
+                )
+                .await;
             }
             AppServerEvent::Disconnected { message } => {
                 // The request result distinguishes a refused start from a lost reply.
@@ -248,8 +226,8 @@ impl App {
             return;
         }
         // Hidden helper threads must not enter visible thread routing or overview refreshes.
-        if let ServerNotificationThreadTarget::Thread(thread_id) =
-            server_notification_thread_target(&notification)
+        let target = server_notification_thread_target(&notification);
+        if let ServerNotificationThreadTarget::Thread(thread_id) = target
             && let Some(sender) = self.temporary_structured_requests.get(&thread_id)
         {
             if matches!(
@@ -337,9 +315,6 @@ impl App {
                                 || self.chat_widget.has_pending_protected_request();
                     }
                 }
-            }
-            ServerNotification::McpServerStatusUpdated(_) => {
-                self.refresh_mcp_startup_expected_servers_from_config();
             }
             ServerNotification::McpServerOauthLoginCompleted(notification) => {
                 // The start response identifies the new attempt. Hold completions until then
@@ -475,8 +450,16 @@ impl App {
             _ => {}
         }
 
-        match server_notification_thread_target(&notification) {
+        match target {
             ServerNotificationThreadTarget::Thread(thread_id) => {
+                if self.saved_openings.observe(
+                    app_server_client.backend_id(),
+                    thread_id,
+                    self.thread_event_channels.get(&thread_id),
+                    &notification,
+                ) {
+                    return;
+                }
                 if self.current_displayed_thread_id() != Some(thread_id)
                     && let ServerNotification::ItemCompleted(item) = &notification
                     && let ThreadItemPayload::UserMessage {

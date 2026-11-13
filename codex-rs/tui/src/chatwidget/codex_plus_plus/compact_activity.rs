@@ -23,6 +23,14 @@ struct CompactActivityHistoryCell {
 }
 
 impl HistoryCell for CompactActivityHistoryCell {
+    fn tool_call_labels(&self) -> Vec<String> {
+        self.inner.tool_call_labels()
+    }
+
+    fn activity_ids(&self) -> Vec<String> {
+        self.inner.activity_ids()
+    }
+
     fn display_lines(&self, _width: u16) -> Vec<Line<'static>> {
         match &self.main {
             CompactMainPresentation::Hidden => Vec::new(),
