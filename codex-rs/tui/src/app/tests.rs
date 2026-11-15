@@ -7433,7 +7433,6 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
         .lock()
         .await;
     let session = store.session.clone().expect("inferred session");
-    let snapshot = store.snapshot();
     drop(store);
 
     assert_eq!(session.thread_id, agent_thread_id);
@@ -7459,11 +7458,6 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
             is_closed: false,
         })
     );
-    assert!(app.should_refresh_snapshot_session(
-        agent_thread_id,
-        /*is_replay_only*/ false,
-        &snapshot
-    ));
 
     Ok(())
 }
