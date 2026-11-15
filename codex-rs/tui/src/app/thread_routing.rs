@@ -1195,6 +1195,7 @@ impl App {
                 None
             } else {
                 self.infer_session_for_started_thread(thread_id, started)
+                    .await
             }
         } else {
             None
@@ -1381,7 +1382,7 @@ impl App {
         }
     }
 
-    fn infer_session_for_started_thread(
+    async fn infer_session_for_started_thread(
         &self,
         thread_id: ThreadId,
         notification: &ThreadStartedNotification,
@@ -1407,7 +1408,7 @@ impl App {
             session.model.clear();
         }
         session.message_history = None;
-        session.rollout_path = notification.thread.path.clone();
+        session.rollout_path = rollout_path;
         Some(session)
     }
 
