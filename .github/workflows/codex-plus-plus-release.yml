@@ -4,437 +4,134 @@ on:
   workflow_dispatch:
     inputs:
       source_run_id:
-        description: Failed Codex++ release workflow run to recover
         required: true
         type: string
       release_tag:
-        description: Existing Codex++ release tag owned by the source run
         required: true
         type: string
-  push:
-    tags:
-      - "codex-plus-plus-v*"
 
 permissions: {}
 
-concurrency:
-  group: codex-plus-plus-release-${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
-  cancel-in-progress: false
-
-env:
-  CODEX_REPO_ROOT: ${{ github.workspace }}
-  APT_UPDATE_ARGS: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-  APT_INSTALL_ARGS: --no-install-recommends -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
-
 jobs:
-  prepare:
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      recovery: ${{ steps.version.outputs.recovery }}
-      release_tag: ${{ steps.version.outputs.release_tag }}
-      source_run_id: ${{ steps.version.outputs.source_run_id }}
-      source_sha: ${{ steps.version.outputs.source_sha }}
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Validate release tag
-        id: version
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          INPUT_RELEASE_TAG: ${{ inputs.release_tag }}
-          INPUT_SOURCE_RUN_ID: ${{ inputs.source_run_id }}
-        run: |
-          set -euo pipefail
-          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-            release_tag="$INPUT_RELEASE_TAG"
-            source_run_id="$INPUT_SOURCE_RUN_ID"
-            recovery=true
-          else
-            release_tag="$GITHUB_REF_NAME"
-            source_run_id="$GITHUB_RUN_ID"
-            recovery=false
-          fi
-
-          [[ "$source_run_id" =~ ^[0-9]+$ ]] || {
-            echo "Invalid source workflow run: ${source_run_id}"
-            exit 1
-          }
-          version="${release_tag#codex-plus-plus-v}"
-          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+-fork\.[0-9]+$ ]] || {
-            echo "Invalid Codex++ release tag: ${release_tag}"
-            exit 1
-          }
-
-          if [[ "$recovery" == "true" ]]; then
-            workflow_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/codex-plus-plus-release.yml" --jq .id)"
-            run="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${source_run_id}")"
-            run_workflow_id="$(jq -r .workflow_id <<<"$run")"
-            run_status="$(jq -r .status <<<"$run")"
-            run_conclusion="$(jq -r .conclusion <<<"$run")"
-            run_event="$(jq -r .event <<<"$run")"
-            run_tag="$(jq -r .head_branch <<<"$run")"
-            run_sha="$(jq -r .head_sha <<<"$run")"
-            tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${release_tag}" --jq .sha)"
-            [[ "$run_workflow_id" == "$workflow_id" && "$run_status" == "completed" && "$run_conclusion" == "failure" && "$run_event" == "push" && "$run_tag" == "$release_tag" && "$run_sha" == "$tag_sha" ]] || {
-              echo "Run ${source_run_id} is not a failed Codex++ release for ${release_tag} at ${tag_sha}"
-              exit 1
-            }
-            workspace_manifest="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/contents/codex-rs/Cargo.toml" -f "ref=${release_tag}" --jq .content | base64 --decode)"
-          else
-            workspace_manifest="$(cat codex-rs/Cargo.toml)"
-          fi
-
-          base_version="${version%%-fork.*}"
-          workspace_version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\([^"]*\)"/\1/p' <<<"$workspace_manifest" | head -1)"
-          [[ "$base_version" == "$workspace_version" ]] || {
-            echo "Tag base ${base_version} does not match workspace ${workspace_version}"
-            exit 1
-          }
-
-          echo "source_sha=${run_sha:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-          echo "recovery=$recovery" >> "$GITHUB_OUTPUT"
-          echo "release_tag=$release_tag" >> "$GITHUB_OUTPUT"
-          echo "source_run_id=$source_run_id" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-
-      - name: Validate release helpers
-        run: |
-          python scripts/codex_package/test_build_codex_plus_plus.py
-          python scripts/codex_package/tests/test_source_mtime_cache.py
-          python scripts/codex_package/tests/test_codex_plus_plus_release.py
-          python scripts/codex_package/tests/test_voice.py
-          python -m py_compile \
-            scripts/build_codex_plus_plus.py \
-            scripts/codex_package/codex_plus_plus/source_mtime_cache.py \
-            scripts/codex_package/codex_plus_plus/release.py
-
-  build-windows:
-    needs: prepare
-    if: needs.prepare.outputs.recovery == 'false'
-    uses: ./.github/workflows/codex-plus-plus-build.yml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      runner: windows-latest
-      target: x86_64-pc-windows-msvc
-      archive_suffix: zip
-      executable: bin/codex.exe
-
-  assets-windows:
-    needs: [prepare, build-windows]
-    uses: ./.github/workflows/codex-plus-plus-publish-assets.yml
-    permissions:
-      actions: read
-      contents: write
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      source_run_id: ${{ needs.prepare.outputs.source_run_id }}
-      source_sha: ${{ needs.prepare.outputs.source_sha }}
-      target: x86_64-pc-windows-msvc
-
-  publish-windows:
-    needs: [prepare, build-windows]
+  recover-launcher:
+    if: github.ref == 'refs/heads/recovery/publish-windows-linux-169-fork1'
     runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: read
       id-token: write
+    concurrency:
+      group: codex-plus-plus-publication
+      queue: max
+      cancel-in-progress: false
+    env:
+      VERSION: 0.169.0-fork.1
+      SOURCE_SHA: 01ada1b1c8e9beec53c32ab0e5c0637b77ab9f4b
+      SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+      RELEASE_TAG: ${{ inputs.release_tag }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          ref: 01ada1b1c8e9beec53c32ab0e5c0637b77ab9f4b
           persist-credentials: false
-      - uses: ./.github/actions/publish-codex-plus-plus-platform
-        with:
-          version: ${{ needs.prepare.outputs.version }}
-          target: x86_64-pc-windows-msvc
-          platform: win32-x64
-
-  build-macos:
-    needs: prepare
-    if: needs.prepare.outputs.recovery == 'false'
-    uses: ./.github/workflows/codex-plus-plus-build.yml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      runner: macos-15
-      target: aarch64-apple-darwin
-      archive_suffix: tar.gz
-      executable: bin/codex
-
-  assets-macos:
-    needs: [prepare, build-macos]
-    uses: ./.github/workflows/codex-plus-plus-publish-assets.yml
-    permissions:
-      actions: read
-      contents: write
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      source_run_id: ${{ needs.prepare.outputs.source_run_id }}
-      source_sha: ${{ needs.prepare.outputs.source_sha }}
-      target: aarch64-apple-darwin
-
-  publish-macos:
-    needs: [prepare, build-macos]
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/publish-codex-plus-plus-platform
-        with:
-          version: ${{ needs.prepare.outputs.version }}
-          target: aarch64-apple-darwin
-          platform: darwin-arm64
-
-  build-linux:
-    needs: prepare
-    if: needs.prepare.outputs.recovery == 'false'
-    uses: ./.github/workflows/codex-plus-plus-build.yml
-    permissions:
-      contents: read
-      actions: read
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      runner: ubuntu-24.04
-      target: x86_64-unknown-linux-musl
-      archive_suffix: tar.gz
-      executable: bin/codex
-
-  assets-linux:
-    needs: [prepare, build-linux]
-    uses: ./.github/workflows/codex-plus-plus-publish-assets.yml
-    permissions:
-      actions: read
-      contents: write
-    with:
-      version: ${{ needs.prepare.outputs.version }}
-      source_run_id: ${{ needs.prepare.outputs.source_run_id }}
-      source_sha: ${{ needs.prepare.outputs.source_sha }}
-      target: x86_64-unknown-linux-musl
-
-  publish-linux:
-    needs: [prepare, build-linux]
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/publish-codex-plus-plus-platform
-        with:
-          version: ${{ needs.prepare.outputs.version }}
-          target: x86_64-unknown-linux-musl
-          platform: linux-x64
-
-  stage-npm:
-    needs:
-      - prepare
-      - build-windows
-      - build-macos
-      - build-linux
-      - publish-windows
-      - publish-macos
-      - publish-linux
-    if: >-
-      always() && needs.prepare.result == 'success' &&
-      needs.prepare.outputs.recovery == 'false' &&
-      needs.build-windows.result == 'success' &&
-      needs.build-macos.result == 'success' &&
-      needs.build-linux.result == 'success'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
-
-      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
-        with:
-          node-version: "26.12.1"
-          package-manager-cache: false
-
-      - name: Pin npm
-        run: npm install --global npm@11.18.0
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: codex-plus-plus-native-*
-          path: dist/archives
-          merge-multiple: true
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: codex-plus-plus-npm-platform-*
-          path: dist/npm
-          merge-multiple: true
-
-      - name: Stage exact npm payloads
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          (cd dist/npm && sha256sum --check *.sha256)
-          python scripts/codex_package/codex_plus_plus/release.py hydrate \
-            --version "$VERSION" --archives-dir dist/archives --vendor-dir dist/vendor
-          python codex-cli/scripts/build_npm_package.py --release-version "$VERSION" \
-            --package codex-plus-plus --vendor-src dist/vendor \
-            --pack-output "dist/npm/codex-plus-plus-npm-${VERSION}.tgz"
-          python scripts/codex_package/codex_plus_plus/release.py verify \
-            --version "$VERSION" --archives-dir dist/archives --npm-dir dist/npm
-          cd dist/npm
-          for tarball in *.tgz; do sha256sum "$tarball" > "$tarball.sha256"; done
-
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: codex-plus-plus-npm-${{ needs.prepare.outputs.version }}
-          path: dist/npm/*
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 1
-
-  publish-npm:
-    needs:
-      - prepare
-      - stage-npm
-      - publish-windows
-      - publish-macos
-      - publish-linux
-    if: >-
-      always() &&
-      needs.prepare.result == 'success' &&
-      (needs.prepare.outputs.recovery == 'true' ||
-      (needs.stage-npm.result == 'success' &&
-      needs.publish-windows.result == 'success' &&
-      needs.publish-macos.result == 'success' &&
-      needs.publish-linux.result == 'success'))
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: read
-      contents: read
-      id-token: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-          ref: ${{ needs.prepare.outputs.release_tag }}
-
       - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
         with:
           node-version: "26.12.1"
           registry-url: https://registry.npmjs.org
           package-manager-cache: false
-
-      - name: Pin npm
-        run: npm install --global npm@11.18.0
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          name: codex-plus-plus-npm-${{ needs.prepare.outputs.version }}
-          path: dist/npm
-          run-id: ${{ needs.prepare.outputs.source_run_id }}
-
-      - name: Publish npm platforms before latest
-        env:
-          VERSION: ${{ needs.prepare.outputs.version }}
-        run: |
-          (cd dist/npm && sha256sum --check *.sha256)
-          python scripts/codex_package/codex_plus_plus/release.py publish \
-            --version "$VERSION" --npm-dir dist/npm --dry-run
-          python scripts/codex_package/codex_plus_plus/release.py publish \
-            --version "$VERSION" --npm-dir dist/npm
-
-  publish-github:
-    concurrency:
-      group: codex-plus-plus-publication
-      queue: max
-      cancel-in-progress: false
-    needs:
-      - prepare
-      - assets-windows
-      - assets-macos
-      - assets-linux
-      - build-windows
-      - build-macos
-      - build-linux
-      - stage-npm
-      - publish-npm
-    if: >-
-      always() &&
-      needs.prepare.result == 'success' &&
-      needs.publish-npm.result == 'success' &&
-      (needs.prepare.outputs.recovery == 'true' ||
-      (needs.build-windows.result == 'success' &&
-      needs.build-macos.result == 'success' &&
-      needs.build-linux.result == 'success' && needs.stage-npm.result == 'success'))
-    runs-on: ubuntu-24.04
-    permissions:
-      actions: write
-      contents: write
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          pattern: codex-plus-plus-native-*
-          path: dist/archives
-          merge-multiple: true
-          run-id: ${{ needs.prepare.outputs.source_run_id }}
-
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          github-token: ${{ github.token }}
-          name: codex-plus-plus-npm-${{ needs.prepare.outputs.version }}
-          path: dist/npm
-          run-id: ${{ needs.prepare.outputs.source_run_id }}
-
-      - name: Publish GitHub release
+      - name: Verify the source run and its Windows and Linux publications
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
         run: |
           set -euo pipefail
-          python scripts/codex_package/codex_plus_plus/github_release.py \
-            --version "$VERSION" --source-sha "$SOURCE_SHA" \
-            --archives-dir dist/archives --npm-dir dist/npm
-
-      - name: Delete intermediate artifacts
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SOURCE_RUN_ID: ${{ needs.prepare.outputs.source_run_id }}
+          test "$GITHUB_REPOSITORY" = JJLiebig/codex
+          test "$SOURCE_RUN_ID" = 43419131862
+          test "$RELEASE_TAG" = "codex-plus-plus-v$VERSION"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)" = "$SOURCE_SHA"
+          run="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID")"
+          jq -e --arg tag "$RELEASE_TAG" --arg sha "$SOURCE_SHA" '
+            .workflow_id == 311850962 and .event == "push" and .head_branch == $tag
+            and .head_sha == $sha and .status == "completed" and .run_attempt >= 3
+          ' <<<"$run"
+          gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs?per_page=100" |
+            jq -se '
+              [.[].jobs[] | select(.conclusion == "success") | .name] |
+              index("publish-windows") != null and index("publish-linux") != null
+            '
+      - name: Pack the exact-tag launcher
         run: |
-          gh api --paginate \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts?per_page=100" \
-            --jq '.artifacts[] | select(.name | startswith("codex-plus-plus-native-") or startswith("codex-plus-plus-npm-")) | .id' |
-          while read -r artifact_id; do
-            gh api --method DELETE \
-              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
-          done
+          set -euo pipefail
+          npm install --global npm@11.18.0
+          python codex-cli/scripts/build_npm_package.py --package codex-plus-plus \
+            --release-version "$VERSION" --pack-output "dist/npm/codex-plus-plus-npm-$VERSION.tgz"
+          sha256sum "dist/npm/codex-plus-plus-npm-$VERSION.tgz"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: codex-plus-plus-169-fork1-ready-launcher
+          path: dist/npm/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+      - name: Smoke-test the launcher against the published Linux payload
+        run: |
+          set -euo pipefail
+          prefix="$RUNNER_TEMP/launcher-smoke"
+          npm install --prefix "$prefix" --ignore-scripts --no-audit --no-fund \
+            "./dist/npm/codex-plus-plus-npm-$VERSION.tgz"
+          actual="$("$prefix/node_modules/.bin/codex" --version)"
+          printf '%s\n' "$actual"
+          test "$actual" = "codex-cli $VERSION"
+      - name: Publish the launcher and verify npm latest
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import sys
+          import time
+
+          sys.path.insert(0, "scripts/codex_package/codex_plus_plus")
+          from release import PACKAGE_NAME, npm_view, read_manifest, tarball_integrity
+
+          version = os.environ["VERSION"]
+          root_spec = f"{PACKAGE_NAME}@{version}"
+          tarball = Path(f"dist/npm/codex-plus-plus-npm-{version}.tgz")
+          manifest = read_manifest(tarball)
+          assert manifest["name"] == PACKAGE_NAME and manifest["version"] == version
+          assert manifest["optionalDependencies"] == {
+              f"{PACKAGE_NAME}-{tag}": f"npm:{root_spec}-{tag}"
+              for tag in ("win32-x64", "linux-x64", "darwin-arm64")
+          }
+          for tag, expected in {
+              "linux-x64": "sha512-6++gqPNHHL/DpieYmuB2V/rt2REzaST5MxwSi1CbcEftskqPuoSVDVORXKjPqRkGe2Aa3JOktc9oO8ZXN5gHDQ==",
+              "win32-x64": "sha512-6fFBfgVlfFciggZukbh3HNISzz0ATJ5iG59WFz7YjwQ8x60/j1VpEuxY7WI7dhAgYXkhroFhFHupZtbHWPrF1w==",
+          }.items():
+              assert npm_view(f"{root_spec}-{tag}", "dist.integrity") == expected, tag
+
+          latest = npm_view(PACKAGE_NAME, "dist-tags.latest")
+          if npm_view(root_spec, "dist.integrity") is not None:
+              assert latest == version, f"{root_spec} is already published; npm latest is {latest}"
+              print(f"{root_spec} is already npm latest")
+              sys.exit(0)
+          pattern = r"(\d+)\.(\d+)\.(\d+)-fork\.(\d+)"
+          assert latest and re.fullmatch(pattern, latest), f"Unexpected npm latest: {latest}"
+          assert tuple(map(int, re.fullmatch(pattern, latest).groups())) < (0, 169, 0, 1), latest
+          integrity = tarball_integrity(tarball)
+          subprocess.run(
+              ["npm", "publish", str(tarball), "--access", "public", "--tag", "latest", "--provenance"],
+              check=True,
+          )
+          for attempt in range(120):
+              current = npm_view(root_spec, "dist.integrity")
+              assert current in (None, integrity), f"Unexpected integrity for {root_spec}: {current}"
+              if current == integrity and npm_view(PACKAGE_NAME, "dist-tags.latest") == version:
+                  print(f"Confirmed {root_spec} as latest with matching integrity")
+                  break
+              time.sleep(10)
+          else:
+              raise RuntimeError(f"Timed out confirming {root_spec} as latest")
+          PY
