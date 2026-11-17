@@ -117,7 +117,7 @@ class GitHubReleaseTest(unittest.TestCase):
             version = "1.2.3-fork.2"
             tag = "codex-plus-plus-v" + version
             with patch.object(github_release, "gh", side_effect=github.gh):
-                for index, platform in enumerate(release.PLATFORMS):
+                for index, platform in enumerate(release.REQUIRED_PLATFORMS):
                     archive = release.archive_path(archives, version, platform)
                     archive.write_bytes(platform.target.encode())
                     github_release.publish(
@@ -129,8 +129,8 @@ class GitHubReleaseTest(unittest.TestCase):
                         platform.target,
                     )
                     published = github.releases[tag]["files"].copy()
-                    self.assertEqual(github.latest, tag)
-                    self.assertFalse(github.releases[tag]["draft"])
+                    self.assertEqual(github.latest, tag if index else None)
+                    self.assertEqual(github.releases[tag]["draft"], index == 0)
                     self.assertEqual(
                         len([n for n in published if n.startswith("codex-plus-plus-")]),
                         (index + 1) * 2,
@@ -151,14 +151,18 @@ class GitHubReleaseTest(unittest.TestCase):
                     self.assertEqual(github.releases[tag]["files"], published)
                 with tempfile.TemporaryDirectory() as npm_temporary:
                     npm = Path(npm_temporary)
-                    (npm / "root.tgz").write_bytes(b"all-platform root")
+                    (npm / "root.tgz").write_bytes(
+                        b"root with required platforms ready"
+                    )
                     github_release.publish(
                         "owner/repo", version, "tag-source", archives, npm, None
                     )
                     for name, data in published.items():
                         self.assertEqual(github.releases[tag]["files"][name], data)
                     published = github.releases[tag]["files"].copy()
-                    self.assertEqual(published["root.tgz"], b"all-platform root")
+                    self.assertEqual(
+                        published["root.tgz"], b"root with required platforms ready"
+                    )
                 archive.write_bytes(b"conflicting bytes")
                 with self.assertRaisesRegex(RuntimeError, "Conflicting release asset"):
                     github_release.publish(
@@ -172,15 +176,38 @@ class GitHubReleaseTest(unittest.TestCase):
                 self.assertEqual(github.releases[tag]["files"], published)
                 archive.write_bytes(platform.target.encode())
                 newer = "1.2.3-fork.10"
-                newer_archive = release.archive_path(archives, newer, platform)
-                newer_archive.write_bytes(b"newer")
-                github_release.publish(
-                    "owner/repo", newer, "tag-source", archives, None, platform.target
-                )
-                github_release.publish(
-                    "owner/repo", version, "tag-source", archives, None, platform.target
-                )
+                for platform in release.REQUIRED_PLATFORMS:
+                    newer_archive = release.archive_path(archives, newer, platform)
+                    newer_archive.write_bytes(b"newer")
+                    github_release.publish(
+                        "owner/repo",
+                        newer,
+                        "tag-source",
+                        archives,
+                        None,
+                        platform.target,
+                    )
+                macos = release.selected_platforms("darwin-arm64")[0]
+                archive = release.archive_path(archives, version, macos)
+                archive.write_bytes(b"late macOS archive")
+                with tempfile.TemporaryDirectory() as npm_temporary:
+                    npm = Path(npm_temporary)
+                    tarball = release.npm_tarball_path(npm, version, macos.tag)
+                    tarball.write_bytes(b"late macOS npm payload")
+                    github_release.publish(
+                        "owner/repo", version, "tag-source", archives, npm, macos.target
+                    )
+                    self.assertEqual(
+                        github.releases[tag]["files"][tarball.name],
+                        b"late macOS npm payload",
+                    )
                 self.assertEqual(github.latest, "codex-plus-plus-v" + newer)
+                for name, data in published.items():
+                    self.assertEqual(github.releases[tag]["files"][name], data)
+                self.assertEqual(
+                    github.releases[tag]["files"][archive.name], b"late macOS archive"
+                )
+                published = github.releases[tag]["files"].copy()
                 with self.assertRaisesRegex(RuntimeError, "validated source run"):
                     github_release.publish(
                         "owner/repo",
@@ -410,7 +437,7 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
 
             run.assert_not_called()
 
-    def test_publish_submits_platforms_before_waiting_and_latest_after_confirmation(
+    def test_publish_submits_required_platforms_before_latest_with_macos_absent(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -463,7 +490,7 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
             ):
                 release.publish(VERSION, npm_dir)
 
-            self.assertEqual(run.call_count, 4)
+            self.assertEqual(run.call_count, 3)
             self.assertEqual(sleep.call_count, 26 * 60 // 5)
 
     def test_platform_confirmation_failure_does_not_publish_latest(self) -> None:
@@ -494,7 +521,7 @@ class CodexPlusPlusReleaseTest(unittest.TestCase):
                 ):
                     release.publish(VERSION, npm_dir)
 
-                self.assertEqual(tags, [platform.tag for platform in release.PLATFORMS])
+                self.assertEqual(tags, ["linux-x64", "win32-x64"])
 
     def test_publish_continues_after_manual_linux_bootstrap(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

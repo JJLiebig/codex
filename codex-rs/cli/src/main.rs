@@ -792,7 +792,7 @@ fn parse_socket_path(raw: &str) -> Result<AbsolutePathBuf, String> {
 }
 
 /// Handle the app exit and print the results. Optionally run the update action.
-fn handle_app_exit(
+async fn handle_app_exit(
     exit_info: AppExitInfo,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
@@ -816,13 +816,13 @@ fn handle_app_exit(
         std::process::exit(1);
     }
     if let Some(action) = update_action {
-        run_update_action(action, cli_executable)?;
+        run_update_action(action, cli_executable).await?;
     }
     Ok(())
 }
 
 /// Run the update action and print the result.
-fn run_update_action(
+async fn run_update_action(
     action: UpdateAction,
     cli_executable: Option<&std::path::Path>,
 ) -> anyhow::Result<()> {
@@ -847,9 +847,9 @@ fn run_update_action(
     let status = if let UpdateAction::CodexPlusPlusStandalone(platform) = action {
         codex_plus_plus::published_update::run(platform)?
     } else {
+        let (cmd, args) = action.resolve_command_args().await?;
         #[cfg(windows)]
         {
-            let (cmd, args) = action.command_args();
             let cmd = if action.requires_direct_execution() {
                 // These args contain PowerShell metacharacters, so do not let
                 // PATHEXT select a batch shim for this action.
@@ -873,7 +873,6 @@ fn run_update_action(
         }
         #[cfg(not(windows))]
         {
-            let (cmd, args) = action.command_args();
             let command_path = crate::wsl_paths::normalize_for_wsl(cmd);
             let normalized_args: Vec<String> = args
                 .iter()
@@ -938,7 +937,7 @@ async fn run_update_command(
                 "Could not detect a safe automatic update for this Codex installation. Please update manually: {install_url}"
             );
         };
-        run_update_action(action, /*cli_executable*/ None)
+        run_update_action(action, /*cli_executable*/ None).await
     }
 }
 
@@ -1150,7 +1149,7 @@ async fn dispatch_cli(
     let launch_tui = move |interactive, remote, auth_token_env, arg0_paths| async move {
         let exit_info =
             run_interactive_tui(interactive, remote, auth_token_env, arg0_paths).await?;
-        handle_app_exit(exit_info, daemon_cli_executable.as_deref())
+        handle_app_exit(exit_info, daemon_cli_executable.as_deref()).await
     };
     let open_agents_overview = matches!(&subcommand, Some(Subcommand::Agents(_)));
     match subcommand {

@@ -27,13 +27,11 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
 
-    if match &info {
-        None => true,
-        Some(info) => info.is_stale(SystemTime::now(), FORK_RELEASE_STATUS_MAX_AGE),
-    } {
-        // Refresh the cached latest version in the background so TUI startup
-        // isn’t blocked by a network call. The UI reads the previously cached
-        // value (if any) for this run; the next run shows the banner if needed.
+    if info
+        .as_ref()
+        .is_none_or(|info| info.is_stale(SystemTime::now(), FORK_RELEASE_STATUS_MAX_AGE))
+    {
+        // Refresh in the background to keep startup independent of registry latency.
         tokio::spawn(async move {
             crate::codex_plus_plus::refresh_release_status(
                 &version_file,
@@ -44,16 +42,14 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
             .await
             .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
         });
+        // npm latest can change while the new platform payload is still pending.
+        if plan.package_manager_package().is_some() {
+            return None;
+        }
     }
 
-    info.and_then(|info| {
-        let latest = info.latest_fork_version?;
-        if is_newer(&latest, codex_cli_version()).unwrap_or(false) {
-            Some(latest)
-        } else {
-            None
-        }
-    })
+    let latest = info?.latest_fork_version?;
+    is_newer(&latest, codex_cli_version())?.then_some(latest)
 }
 
 /// Returns the latest version to show in a popup, if it should be shown.

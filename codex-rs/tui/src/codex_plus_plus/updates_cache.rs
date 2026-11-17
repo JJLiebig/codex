@@ -1,3 +1,4 @@
+use crate::UpdateAction;
 use crate::legacy_core::config::Config;
 use crate::version::codex_cli_version;
 use codex_install_context::codex_plus_plus::ForkReleaseStatus;
@@ -5,7 +6,10 @@ use std::path::Path;
 use std::path::PathBuf;
 
 pub(crate) fn version_filepath(config: &Config) -> PathBuf {
-    crate::codex_plus_plus::release_status_filepath(config.codex_home.as_path())
+    crate::codex_plus_plus::release_status_filepath(
+        config.codex_home.as_path(),
+        UpdateAction::current_plan(),
+    )
 }
 
 pub(crate) fn read_version_info(version_file: &Path) -> anyhow::Result<ForkReleaseStatus> {

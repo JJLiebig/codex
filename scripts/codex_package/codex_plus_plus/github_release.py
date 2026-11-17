@@ -11,6 +11,8 @@ import re
 import subprocess
 import tempfile
 
+from release import REQUIRED_PLATFORMS, archive_path
+
 
 def gh(*args, body=None, missing=False):
     result = subprocess.run(
@@ -134,6 +136,15 @@ def publish(repo, version, source_sha, archives, npm, target):
             raise RuntimeError("Immutable releases cannot append platform assets")
         if pending:
             gh("release", "upload", tag, *map(str, pending), "--repo", repo)
+        if current["draft"]:
+            available = existing.keys() | files.keys()
+            for platform in REQUIRED_PLATFORMS:
+                archive_name = archive_path(archives, version, platform).name
+                if (
+                    archive_name not in available
+                    or f"{archive_name}.sha256" not in available
+                ):
+                    return
         gh(
             "api",
             f"{api}/releases/{current['id']}",

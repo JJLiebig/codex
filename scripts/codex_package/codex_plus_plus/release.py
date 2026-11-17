@@ -26,16 +26,19 @@ class Platform:
     binary: str
 
 
-PLATFORMS = (
+REQUIRED_PLATFORMS = (
     Platform("linux-x64", "x86_64-unknown-linux-musl", "tar.gz", "codex"),
-    Platform("darwin-arm64", "aarch64-apple-darwin", "tar.gz", "codex"),
     Platform("win32-x64", "x86_64-pc-windows-msvc", "zip", "codex.exe"),
+)
+PLATFORMS = (
+    *REQUIRED_PLATFORMS,
+    Platform("darwin-arm64", "aarch64-apple-darwin", "tar.gz", "codex"),
 )
 
 
 def selected_platforms(platform: str | None) -> tuple[Platform, ...]:
     return (
-        PLATFORMS
+        REQUIRED_PLATFORMS
         if platform is None
         else (next(p for p in PLATFORMS if p.tag == platform),)
     )
@@ -238,7 +241,7 @@ def publish(
             )
         pending.append((path, spec, tag, expected))
 
-    # Submit all platform versions before waiting; latest must wait for every platform.
+    # Submit the required platform versions before waiting for confirmation.
     for batch in (
         [entry for entry in pending if entry[2] != "latest"],
         [entry for entry in pending if entry[2] == "latest"],

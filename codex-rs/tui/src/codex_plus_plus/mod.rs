@@ -32,6 +32,8 @@ pub(crate) use model_capacity_retry::status_details as model_capacity_retry_stat
 pub(crate) use native_account_maintenance::preflight as preflight_native_account_maintenance;
 #[cfg(any(not(debug_assertions), test))]
 pub(crate) use release_status::dismiss_version;
+#[cfg(not(debug_assertions))]
+pub(crate) use release_status::fetch_package_update_version;
 #[cfg(any(not(debug_assertions), test))]
 pub(crate) use release_status::read_release_status;
 #[cfg(not(debug_assertions))]

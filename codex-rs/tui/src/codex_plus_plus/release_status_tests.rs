@@ -64,8 +64,19 @@ async fn published_probe_tracks_the_installable_channel() {
         }
         server.reset().await;
         Mock::given(path(format!("/{tag}"))).respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "version": npm_version, "dist": {"tarball": "https://example.test/pkg.tgz", "integrity": "sha512-value"}
+            "version": npm_version,
+            "dist": {"tarball": "https://example.test/pkg.tgz", "integrity": "sha512-value"},
+            "optionalDependencies": {
+                (format!("@jjliebig/codex-plus-plus-{tag}")): format!("npm:@jjliebig/codex-plus-plus@1.2.2-fork.1-{tag}")
+            }
         }))).mount(&server).await;
+        Mock::given(path(format!("/1.2.2-fork.1-{tag}")))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": format!("1.2.2-fork.1-{tag}"),
+                "dist": {"tarball": "https://example.test/native.tgz", "integrity": "sha512-native"}
+            })))
+            .mount(&server)
+            .await;
         let suffix = if target.contains("windows") {
             "zip"
         } else {
@@ -95,9 +106,70 @@ async fn published_probe_tracks_the_installable_channel() {
 }
 
 #[tokio::test]
+async fn npm_update_waits_for_the_platform_pinned_by_latest() {
+    use wiremock::Mock;
+    use wiremock::MockServer;
+    use wiremock::ResponseTemplate;
+    use wiremock::matchers::path;
+
+    let server = MockServer::start().await;
+    let latest_url = format!("{}/latest", server.uri());
+    let package = "@jjliebig/codex-plus-plus";
+    let version = "1.2.3-fork.1";
+    let dist = serde_json::json!({"tarball": "https://example.test/codex.tgz", "integrity": "sha512-value"});
+    Mock::given(path("/latest"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": version,
+            "dist": dist,
+            "optionalDependencies": {
+                "@jjliebig/codex-plus-plus-linux-x64": "npm:@jjliebig/codex-plus-plus@1.2.3-fork.1-linux-x64",
+                "@jjliebig/codex-plus-plus-darwin-arm64": "npm:@jjliebig/codex-plus-plus@1.2.3-fork.1-darwin-arm64"
+            }
+        })))
+        .mount(&server)
+        .await;
+    for (route, package_version) in [
+        ("/1.2.3-fork.1-linux-x64", "1.2.3-fork.1-linux-x64"),
+        ("/darwin-arm64", "1.2.2-fork.1-darwin-arm64"),
+    ] {
+        Mock::given(path(route))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "version": package_version,
+                "dist": dist
+            })))
+            .mount(&server)
+            .await;
+    }
+    assert_eq!(
+        probe::fetch_npm_package_version(&latest_url, package, "linux-x64")
+            .await
+            .unwrap(),
+        version
+    );
+    let error = probe::fetch_npm_package_version(&latest_url, package, "darwin-arm64")
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("unavailable for darwin-arm64"));
+
+    Mock::given(path("/1.2.3-fork.1-darwin-arm64"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "version": "1.2.3-fork.1-darwin-arm64",
+            "dist": dist
+        })))
+        .mount(&server)
+        .await;
+    assert_eq!(
+        probe::fetch_npm_package_version(&latest_url, package, "darwin-arm64")
+            .await
+            .unwrap(),
+        version
+    );
+}
+
+#[tokio::test]
 async fn cache_round_trips_fresh_and_stale_status() {
     let codex_home = tempdir().expect("temp codex home");
-    let path = release_status_filepath(codex_home.path());
+    let path = release_status_filepath(codex_home.path(), UpdateAction::current_plan());
     let checked_at = UNIX_EPOCH + Duration::from_secs(10_000);
     let mut expected = ForkReleaseStatus::new(
         "0.144.4-fork.2".to_string(),
@@ -126,7 +198,7 @@ async fn cache_round_trips_fresh_and_stale_status() {
 #[tokio::test]
 async fn refresh_recovers_corrupt_cache_and_offline_preserves_it() {
     let codex_home = tempdir().expect("temp codex home");
-    let path = release_status_filepath(codex_home.path());
+    let path = release_status_filepath(codex_home.path(), UpdateAction::current_plan());
     tokio::fs::create_dir_all(path.parent().expect("cache parent"))
         .await
         .expect("create cache parent");

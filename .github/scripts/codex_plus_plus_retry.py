@@ -9,7 +9,7 @@ import subprocess
 
 WORKFLOW = "codex-plus-plus-release.yml"
 TAG = re.compile(r"codex-plus-plus-v(\d+)\.(\d+)\.(\d+)-fork\.(\d+)")
-MACOS_JOBS = ("build-macos / app", "build-macos / voice")
+MACOS_JOBS = ("build-macos / app", "build-macos / voice", "build-macos / build")
 ALLOCATION_FAILURE = (
     "The job was not acquired by Runner of type hosted even after multiple attempts"
 )
@@ -62,7 +62,7 @@ def retry_latest(api, repository, now):
         return {"status": "skipped", "reason": "release tags no longer match sources"}
     if run["status"] != "completed":
         return {"status": "skipped", "reason": "latest release still active"}
-    # Three extra run attempts total, shared by app and voice; never reset on a new job.
+    # Three extra run attempts total, shared by all macOS jobs.
     if run["run_attempt"] >= 4:
         return {"status": "skipped", "reason": "three extra attempts exhausted"}
     pages = api(
@@ -94,6 +94,9 @@ def retry_latest(api, repository, now):
         if job is None:
             return {"status": "skipped", "reason": "missing macOS job"}
         if job["conclusion"] == "success":
+            continue
+        # Assembly is skipped when one of its prerequisites needs an allocation retry.
+        if name == "build-macos / build" and job["conclusion"] == "skipped" and pending:
             continue
         if job["conclusion"] not in ("failure", "cancelled"):
             return {"status": "skipped", "reason": "macOS job not retryable"}

@@ -33,11 +33,11 @@ The workflows in this directory are split so that pull requests get fast, review
 ## Codex++ macOS Allocation Retries
 
 `codex-plus-plus-retry.yml` runs twice an hour after it reaches the default branch;
-it can also be dispatched manually on that branch. It retries one macOS app or
-voice job only when its latest check proves hosted-runner allocation failed.
+it can also be dispatched manually on that branch. It retries one macOS app,
+voice, or assembly job when its latest check proves hosted-runner allocation failed.
 The source release must be completed, match its tag and commit, and be less than
 one day old so its retained artifacts can still be used. At most three extra run
-attempts are allowed in total, shared by app and voice, including manual reruns.
+attempts are allowed in total across the three macOS jobs, including manual reruns.
 Active releases, unrelated failures, and manual job cancellations are left alone.
 Exhausted or expired releases need operator investigation rather than more retries.
 
@@ -49,25 +49,25 @@ Exhausted or expired releases need operator investigation rather than more retri
 
 ## Ready Codex++ platform assets
 
-Each successful platform build publishes its standalone archive and SHA-256
-sidecar immediately, without waiting for other builds or npm publication. Common
-installers and their sidecars always come from the validated release-tag commit.
-Later platforms append missing assets; existing bytes must match and are never
-clobbered. The repository must allow mutable releases: immutable GitHub releases
-cannot accept subsequent platform assets; publication fails rather than changing
-repository security settings.
+Each successful platform build uploads its standalone archive and SHA-256
+sidecar. The GitHub release goes public once both Windows and Linux archives
+and checksums are present. Installers and their checksums come from the validated
+release-tag commit. A later macOS build can append its archive, checksums, and
+published npm tarball to the same release. Existing assets must match the bytes
+being published. The repository must allow mutable releases to append assets.
 
 All partial publishers and the final GitHub publisher share one repository-wide
 job concurrency group with `queue: max` and `cancel-in-progress: false`.
 Publication compares numeric release versions before setting GitHub latest, so an
-older platform finishing late cannot rewind it. Root npm staging and publication,
-including its shared latest tag, retain their existing all-platform gates. Only
-that finalization deletes intermediate artifacts, after partial publishers finish.
+older platform finishing late cannot rewind it. Root npm publication waits for
+Windows and Linux. The root package pins the matching macOS version as an
+optional dependency. The macOS job publishes that package under `darwin-arm64`
+when ready. Finalization deletes the Windows, Linux, and root npm intermediates
+after their publishers finish. macOS intermediates expire on their own schedule.
 
 Latest standalone installers fail before invoking the managed installer if the
 latest release lacks this machine's archive or checksum, preserving the installed
-generation. They do not select an older platform release. A partial GitHub latest
-therefore indicates release availability, not readiness for every platform; npm
-and the Rust update/status presentation are unchanged. Explicit failed-run recovery
-retains its exact tag/source-run identity checks. This change does not activate a
-release or re-enable the allocation-retry workflow.
+generation. The package-manager update notice and `codex update` resolve npm
+`latest` and check its dependency for the current platform. If the dependency is
+still pending, the updater leaves the installed version in place. Explicit
+failed-run recovery checks the identity of the release tag and source run.
