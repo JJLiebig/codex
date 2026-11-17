@@ -144,7 +144,7 @@ class RetryTest(unittest.TestCase):
         api = FakeGitHub()
         api.runs[0]["conclusion"] = "success"
         for entry in api.jobs:
-            if entry["name"] in ("build-macos / app", "build-macos / voice"):
+            if entry["name"].startswith("build-macos / "):
                 entry["conclusion"] = "success"
         self.assertEqual(self.run_controller(api)["status"], "skipped")
         self.assertEqual(api.posts, [])
@@ -247,12 +247,15 @@ class RetryTest(unittest.TestCase):
                         self.run_controller(api)
                     self.assertEqual(api.posts, [])
 
-    def test_final_extra_attempt_is_allowed_but_never_resets_for_voice(self):
+    def test_macos_build_allocation_failure_shares_the_attempt_limit(self):
         api = FakeGitHub()
         api.runs[0]["run_attempt"] = 3
         api.jobs.append(job("build-macos / app", 60, attempt=3))
-        self.assertEqual(self.run_controller(api)["job"], 30)
-        self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/30/rerun"])
+        api.jobs.append(job("build-macos / voice", 70, attempt=3))
+        api.jobs.append(job("build-macos / build", 80, "cancelled", attempt=3))
+        api.annotations[80] = api.annotations[40]
+        self.assertEqual(self.run_controller(api)["job"], 80)
+        self.assertEqual(api.posts, [f"{ROOT}/actions/jobs/80/rerun"])
         api.posts.clear()
         api.runs[0]["run_attempt"] = 4
         self.assertEqual(self.run_controller(api)["status"], "skipped")

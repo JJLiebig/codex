@@ -11,12 +11,13 @@ use codex_install_context::codex_plus_plus::FORK_RELEASE_STATUS_MAX_AGE;
 use codex_install_context::codex_plus_plus::UpdateChannel;
 use codex_install_context::codex_plus_plus::UpdatePlan;
 use std::time::SystemTime;
+use tokio::sync::OnceCell;
 
 use crate::version::codex_cli_version;
 
 pub(crate) use crate::updates_cache::dismiss_version;
 
-pub fn get_upgrade_version(config: &Config) -> Option<String> {
+pub async fn get_upgrade_version(config: &Config) -> Option<String> {
     if !config.check_for_update_on_startup || is_source_build_version(codex_cli_version()) {
         return None;
     }
@@ -46,25 +47,35 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
         });
     }
 
-    info.and_then(|info| {
-        let latest = info.latest_fork_version?;
-        if is_newer(&latest, codex_cli_version()).unwrap_or(false) {
-            Some(latest)
-        } else {
-            None
-        }
-    })
+    let latest = info?.latest_fork_version?;
+    if !is_newer(&latest, codex_cli_version())? {
+        return None;
+    }
+    let latest = if plan.package_manager_package().is_some() {
+        static PACKAGE_VERSION: OnceCell<Option<String>> = OnceCell::const_new();
+        PACKAGE_VERSION
+            .get_or_init(|| async {
+                crate::codex_plus_plus::fetch_package_update_version(plan)
+                    .await
+                    .ok()
+            })
+            .await
+            .clone()?
+    } else {
+        latest
+    };
+    is_newer(&latest, codex_cli_version())?.then_some(latest)
 }
 
 /// Returns the latest version to show in a popup, if it should be shown.
 /// This respects the user's dismissal choice for the current latest version.
-pub fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
+pub async fn get_upgrade_version_for_popup(config: &Config) -> Option<String> {
     if !config.check_for_update_on_startup || is_source_build_version(codex_cli_version()) {
         return None;
     }
 
     let version_file = version_filepath(config);
-    let latest = get_upgrade_version(config)?;
+    let latest = get_upgrade_version(config).await?;
     // If the user dismissed this exact version previously, do not show the popup.
     if let Ok(info) = read_version_info(&version_file)
         && info.dismissed_version.as_deref() == Some(latest.as_str())

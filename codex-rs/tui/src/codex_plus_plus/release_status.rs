@@ -1,12 +1,13 @@
 use crate::UpdateAction;
 use codex_install_context::codex_plus_plus::ForkReleaseStatus;
+use codex_install_context::codex_plus_plus::UpdatePlan;
+use codex_install_context::codex_plus_plus::UpdateTarget;
 use serde::Deserialize;
 use serde::Serialize;
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
 
-const CACHE_PATH: &str = "codex-plus-plus/release-status.json";
 const MAX_CACHE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -18,8 +19,13 @@ struct CachedReleaseStatus {
     dismissed_version: Option<String>,
 }
 
-pub(crate) fn release_status_filepath(codex_home: &Path) -> PathBuf {
-    codex_home.join(CACHE_PATH)
+pub(crate) fn release_status_filepath(codex_home: &Path, plan: UpdatePlan) -> PathBuf {
+    let name = match plan.target() {
+        UpdateTarget::PackageManager { .. } => "release-status-npm.json",
+        UpdateTarget::Standalone { .. } => "release-status-standalone.json",
+        UpdateTarget::Homebrew | UpdateTarget::Manual => "release-status.json",
+    };
+    codex_home.join("codex-plus-plus").join(name)
 }
 
 pub(crate) fn read_release_status(path: &Path) -> anyhow::Result<ForkReleaseStatus> {
@@ -76,7 +82,7 @@ impl UpdateAction {
         codex_home: &Path,
         installed_version: &str,
     ) -> ForkReleaseStatus {
-        read_release_status(&release_status_filepath(codex_home))
+        read_release_status(&release_status_filepath(codex_home, Self::current_plan()))
             .map(|status| status.with_installed_fork_version(installed_version.to_string()))
             .unwrap_or_else(|_| ForkReleaseStatus::unavailable(installed_version.to_string()))
     }
@@ -87,10 +93,12 @@ impl UpdateAction {
 mod probe {
     use super::*;
     use crate::update_versions::extract_version_from_latest_tag;
+    use anyhow::Context;
     use codex_install_context::codex_plus_plus::LatestVersionSource;
-    use codex_install_context::codex_plus_plus::UpdatePlan;
+    use codex_install_context::codex_plus_plus::is_newer;
     use codex_login::default_client::create_client;
     use serde::de::DeserializeOwned;
+    use std::collections::HashMap;
     use std::future::Future;
     use std::time::Duration;
 
@@ -118,6 +126,22 @@ mod probe {
     struct NpmVersion {
         version: String,
         dist: Option<NpmDist>,
+        #[serde(default, rename = "optionalDependencies")]
+        optional_dependencies: HashMap<String, String>,
+    }
+
+    impl NpmVersion {
+        fn has_distribution(&self) -> bool {
+            self.dist.as_ref().is_some_and(|dist| {
+                dist.tarball
+                    .as_deref()
+                    .is_some_and(|value| !value.is_empty())
+                    && dist
+                        .integrity
+                        .as_deref()
+                        .is_some_and(|value| !value.is_empty())
+            })
+        }
     }
 
     #[derive(Deserialize)]
@@ -199,25 +223,21 @@ mod probe {
         url: &str,
         github_url: &str,
     ) -> anyhow::Result<String> {
+        if let Some(package) = plan.package_manager_package() {
+            return fetch_npm_package_version(url, package, host_package_platform()?).await;
+        }
         let npm = fetch_json::<NpmVersion>(url).await.ok().and_then(|info| {
-            let dist = info.dist?;
-            if dist.tarball.as_deref().is_none_or(str::is_empty)
-                || dist.integrity.as_deref().is_none_or(str::is_empty)
-            {
+            if !info.has_distribution() {
                 return None;
             }
-            let version = if plan.standalone_release_target().is_some() {
-                info.version
-                    .strip_suffix(&format!("-{}", url.rsplit('/').next()?))?
-                    .to_string()
-            } else {
-                info.version
-            };
-            codex_install_context::codex_plus_plus::is_newer(&version, "0.0.0-fork.0")?;
-            Some(version)
+            let version = info
+                .version
+                .strip_suffix(&format!("-{}", url.rsplit('/').next()?))?;
+            is_newer(version, "0.0.0-fork.0")?;
+            Some(version.to_string())
         });
         let Some(target) = plan.standalone_release_target() else {
-            return npm.ok_or_else(|| anyhow::anyhow!("npm release unavailable"));
+            anyhow::bail!("standalone release unavailable");
         };
         let LatestVersionSource::GitHub { tag_prefix, .. } = plan.latest_version_source() else {
             unreachable!("standalone releases use GitHub fallback");
@@ -241,7 +261,7 @@ mod probe {
             });
         let newest = match (npm, github) {
             (Some(npm), Some(github)) => {
-                if codex_install_context::codex_plus_plus::is_newer(&github, &npm) == Some(true) {
+                if is_newer(&github, &npm) == Some(true) {
                     Some(github)
                 } else {
                     Some(npm)
@@ -250,6 +270,61 @@ mod probe {
             (npm, github) => npm.or(github),
         };
         newest.ok_or_else(|| anyhow::anyhow!("published release unavailable"))
+    }
+
+    pub(crate) async fn fetch_package_update_version(plan: UpdatePlan) -> anyhow::Result<String> {
+        let url = plan
+            .fork_npm_version_url()
+            .context("Missing npm update source")?;
+        let package = plan
+            .package_manager_package()
+            .context("Missing npm update package")?;
+        fetch_npm_package_version(url, package, host_package_platform()?).await
+    }
+
+    fn host_package_platform() -> anyhow::Result<&'static str> {
+        match (std::env::consts::OS, std::env::consts::ARCH) {
+            ("linux", "x86_64") => Ok("linux-x64"),
+            ("macos", "aarch64") => Ok("darwin-arm64"),
+            ("windows", "x86_64") => Ok("win32-x64"),
+            (os, arch) => anyhow::bail!("Codex++ npm releases are unavailable for {os}/{arch}"),
+        }
+    }
+
+    pub(super) async fn fetch_npm_package_version(
+        url: &str,
+        package: &str,
+        platform: &str,
+    ) -> anyhow::Result<String> {
+        let root = fetch_json::<NpmVersion>(url).await?;
+        let version = root.version.trim();
+        anyhow::ensure!(
+            root.has_distribution() && is_newer(version, "0.0.0-fork.0").is_some(),
+            "Invalid Codex++ latest version on npm"
+        );
+        let unavailable = || {
+            format!(
+                "Codex++ {version} is unavailable for {platform} on npm. Try again when its platform package is published."
+            )
+        };
+        let registry_package = url.rsplit_once('/').context("Invalid npm update source")?.0;
+        let expected_version = format!("{version}-{platform}");
+        let expected_alias = format!("npm:{package}@{expected_version}");
+        anyhow::ensure!(
+            root.optional_dependencies
+                .get(&format!("{package}-{platform}"))
+                == Some(&expected_alias),
+            unavailable()
+        );
+        let dependency =
+            fetch_json::<NpmVersion>(&format!("{registry_package}/{expected_version}"))
+                .await
+                .with_context(unavailable)?;
+        anyhow::ensure!(
+            dependency.version == expected_version && dependency.has_distribution(),
+            unavailable()
+        );
+        Ok(version.to_string())
     }
 
     async fn fetch_json<T: DeserializeOwned>(url: &str) -> anyhow::Result<T> {
@@ -273,6 +348,8 @@ mod probe {
     }
 }
 
+#[cfg(not(debug_assertions))]
+pub(crate) use probe::fetch_package_update_version;
 #[cfg(not(debug_assertions))]
 pub(crate) use probe::refresh_release_status;
 

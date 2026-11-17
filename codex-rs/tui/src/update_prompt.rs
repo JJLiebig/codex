@@ -49,7 +49,7 @@ pub(crate) async fn run_update_prompt_if_needed(
     tui: &mut Tui,
     config: &Config,
 ) -> Result<UpdatePromptOutcome> {
-    let Some(latest_version) = updates::get_upgrade_version_for_popup(config) else {
+    let Some(latest_version) = updates::get_upgrade_version_for_popup(config).await else {
         return Ok(UpdatePromptOutcome::Continue);
     };
     let Some(update_action) = crate::update_action::get_update_action() else {

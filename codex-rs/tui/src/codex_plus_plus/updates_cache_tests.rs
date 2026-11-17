@@ -12,14 +12,6 @@ async fn dismiss_version_creates_cache_file_when_missing() {
         .await
         .expect("load config");
     let version_file = version_filepath(&config);
-    assert_eq!(
-        version_file,
-        codex_home
-            .path()
-            .join("codex-plus-plus")
-            .join("release-status.json")
-    );
-
     dismiss_version(&config, "999.0.0")
         .await
         .expect("dismiss version");

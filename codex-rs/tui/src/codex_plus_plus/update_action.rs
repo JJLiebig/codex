@@ -23,6 +23,26 @@ pub(super) fn standalone_action(platform: StandalonePlatform, dir: &Path) -> Opt
 }
 
 impl UpdateAction {
+    pub async fn resolve_command_args(self) -> anyhow::Result<(&'static str, Vec<String>)> {
+        let (command, args) = self.command_args();
+        let args: Vec<String> = args.iter().map(ToString::to_string).collect();
+        #[cfg(not(debug_assertions))]
+        let args = if matches!(self, Self::CodexPlusPlusPackageManager(_)) {
+            let version =
+                crate::codex_plus_plus::fetch_package_update_version(Self::current_plan()).await?;
+            let mut args = args;
+            let package = args
+                .last_mut()
+                .expect("package-manager update includes a package");
+            package.push('@');
+            package.push_str(&version);
+            args
+        } else {
+            args
+        };
+        Ok((command, args))
+    }
+
     /// Command shown to users. Codex++ installer commands stay internal to `codex update`.
     pub fn display_command(self) -> String {
         match self {
