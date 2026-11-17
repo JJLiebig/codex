@@ -111,12 +111,6 @@ fn runtime_catalog_disables_web_search_without_overriding_review_models() {
                 Some(MultiAgentVersion::V2),
             ),
             (
-                "global.openai.gpt-6-sol",
-                None,
-                false,
-                Some(MultiAgentVersion::V1),
-            ),
-            (
                 "global.openai.gpt-6-luna",
                 None,
                 false,
@@ -175,12 +169,6 @@ fn runtime_catalog_disables_web_search_without_overriding_review_models() {
                 None,
                 false,
                 Some(MultiAgentVersion::V2),
-            ),
-            (
-                "us.openai.gpt-6-sol",
-                None,
-                false,
-                Some(MultiAgentVersion::V1),
             ),
             (
                 "us.openai.gpt-6-luna",
