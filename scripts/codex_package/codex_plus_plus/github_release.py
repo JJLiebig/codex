@@ -10,15 +10,17 @@ from pathlib import Path
 import re
 import subprocess
 import tempfile
+from urllib.parse import urlencode
 
 from release import REQUIRED_PLATFORMS, archive_path
 
 
-def gh(*args, body=None, missing=False):
+def gh(*args, body=None, missing=False, output=None):
     result = subprocess.run(
         ["gh", *args],
         input=json.dumps(body).encode() if body is not None else None,
-        capture_output=True,
+        stdout=output if output is not None else subprocess.PIPE,
+        stderr=subprocess.PIPE,
         check=False,
     )
     if result.returncode:
@@ -26,9 +28,7 @@ def gh(*args, body=None, missing=False):
             return None
         raise RuntimeError(result.stderr.decode().strip())
     return (
-        json.loads(result.stdout)
-        if args[0] == "api" and result.stdout.strip()
-        else None
+        json.loads(result.stdout) if result.stdout and result.stdout.strip() else None
     )
 
 
@@ -81,6 +81,22 @@ def publish(repo, version, source_sha, archives, npm, target):
                 checksum.write_bytes(f"{sha256(path)}  {name}\n".encode())
                 files[checksum.name] = checksum
         current = gh("api", f"{api}/releases/tags/{tag}", missing=True)
+        if current is None:
+            # The tag endpoint only returns published releases. Older attempts
+            # could leave duplicate drafts, so resume the original release.
+            releases = gh(
+                "api", f"{api}/releases?per_page=100", "--paginate", "--slurp"
+            )
+            current = min(
+                (
+                    draft
+                    for page in releases
+                    for draft in page
+                    if draft["draft"] and draft["tag_name"] == tag
+                ),
+                key=lambda draft: draft["id"],
+                default=None,
+            )
         latest = gh("api", f"{api}/releases/latest", missing=True)
         make_latest = latest is None or key >= version_key(latest["tag_name"])
         if current is None:
@@ -117,25 +133,35 @@ def publish(repo, version, source_sha, archives, npm, target):
             digest = asset.get("digest")
             if not digest:
                 download = directory / "existing"
-                download.mkdir(exist_ok=True)
-                gh(
-                    "release",
-                    "download",
-                    tag,
-                    "--repo",
-                    repo,
-                    "--pattern",
-                    name,
-                    "--dir",
-                    str(download),
-                )
-                digest = f"sha256:{sha256(download / name)}"
+                with download.open("wb") as output:
+                    gh(
+                        "api",
+                        f"{api}/releases/assets/{asset['id']}",
+                        "--header",
+                        "Accept: application/octet-stream",
+                        "--allow-escape-sequences",
+                        output=output,
+                    )
+                digest = f"sha256:{sha256(download)}"
             if digest != f"sha256:{sha256(path)}":
                 raise RuntimeError(f"Conflicting release asset: {name}")
         if pending and current.get("immutable"):
             raise RuntimeError("Immutable releases cannot append platform assets")
-        if pending:
-            gh("release", "upload", tag, *map(str, pending), "--repo", repo)
+        for path in pending:
+            upload_url = current["upload_url"].removesuffix("{?name,label}")
+            query = urlencode({"name": path.name})
+            gh(
+                "api",
+                f"{upload_url}?{query}",
+                "--method",
+                "POST",
+                "--header",
+                "Content-Type: application/octet-stream",
+                "--header",
+                f"Content-Length: {path.stat().st_size}",
+                "--input",
+                str(path),
+            )
         if current["draft"]:
             available = existing.keys() | files.keys()
             for platform in REQUIRED_PLATFORMS:
