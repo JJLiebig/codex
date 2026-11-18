@@ -2876,8 +2876,11 @@ fn mcp_server_status_serializes_absent_server_info_metadata_as_null() {
 
 #[test]
 fn sandbox_policy_round_trips_workspace_write_access() {
+    let directory = tempfile::tempdir().expect("tempdir");
+    let root = AbsolutePathBuf::from_absolute_path(directory.path()).expect("absolute root");
+    std::fs::create_dir(root.join(".git")).expect("git metadata");
     let v2_policy = SandboxPolicy::WorkspaceWrite {
-        writable_roots: vec![],
+        writable_roots: vec![root.clone(), root.clone()],
         network_access: true,
         exclude_tmpdir_env_var: false,
         exclude_slash_tmp: false,
@@ -2887,11 +2890,37 @@ fn sandbox_policy_round_trips_workspace_write_access() {
     assert_eq!(
         core_policy,
         codex_protocol::protocol::SandboxPolicy::WorkspaceWrite {
-            writable_roots: vec![],
+            writable_roots: vec![root.clone(), root],
             network_access: true,
             exclude_tmpdir_env_var: false,
             exclude_slash_tmp: false,
         }
+    );
+
+    let profile = codex_protocol::models::PermissionProfile::from_legacy_sandbox_policy_template(
+        &v2_policy.to_core(),
+    );
+    assert!(
+        !profile
+            .file_system_sandbox_policy()
+            .entries
+            .iter()
+            .any(|entry| {
+                entry.access == codex_protocol::permissions::FileSystemAccessMode::Read
+                    && matches!(
+                        entry.path,
+                        codex_protocol::permissions::FileSystemPath::Path { .. }
+                    )
+            })
+    );
+
+    assert_eq!(
+        SandboxPolicy::from(
+            profile
+                .to_legacy_sandbox_policy_template()
+                .expect("portable legacy template")
+        ),
+        v2_policy,
     );
 
     let back_to_v2 = SandboxPolicy::from(core_policy);
@@ -3172,30 +3201,27 @@ fn audio_references_round_trip_through_core_and_json() {
 }
 
 #[test]
-fn answer_moderation_exposes_nullable_display_fields() {
-    for (stored, expected) in [
-        (
-            json!({"moderated": false}),
-            json!({"moderated": false, "display": null}),
-        ),
-        (
-            json!({"moderated": true, "display": {
-                "action": "answerHelpline",
-                "checkTrustedContacts": false,
-            }}),
-            json!({"moderated": true, "display": {
-                "action": "answerHelpline",
-                "blockType": null,
-                "cyberTrustedAccess": null,
-                "checkTrustedContacts": false,
-            }}),
-        ),
+fn answer_moderation_preserves_the_display_instruction() {
+    for display in [
+        JsonValue::Null,
+        json!({"version":1, "mode":"show", "trustedContacts":"check",
+            "annotation":{"kind":"wellbeingHelpline", "subject":"prompt"}}),
+        json!({"version":1, "mode":"hide", "replacement":{"kind":"wellbeingPromptHelpline"}}),
+        json!({"version":1, "mode":"block", "reason":{"kind":"protection","protectionType":"omnimod"}}),
+        json!({"version":1, "mode":"block", "reason":{"kind":"cyber","trustedAccess":false}}),
     ] {
-        let core: codex_protocol::items::AgentMessageModeration =
-            serde_json::from_value(stored).unwrap();
+        let stored = json!({"moderated": !display.is_null(), "display": display});
+        let mut with_extra_fields = stored.clone();
+        if let Some(object) = with_extra_fields["display"].as_object_mut() {
+            object.insert("additionalV1Field".into(), json!(true));
+        }
+        let core = serde_json::from_value::<codex_protocol::items::AgentMessageModeration>(
+            with_extra_fields,
+        )
+        .unwrap();
         assert_eq!(
             serde_json::to_value(AgentMessageModeration::from(core)).unwrap(),
-            expected
+            stored
         );
     }
 }
@@ -3775,6 +3801,19 @@ fn core_turn_item_into_thread_item_converts_supported_variants() {
             duration_ms: Some(42),
         }
     );
+}
+
+#[test]
+fn unsupported_answer_display_leaves_the_answer_restricted() {
+    for display in [
+        json!({"version": 2, "mode": "show", "trustedContacts": "skip"}),
+        json!({"version": 1, "mode": "unknown"}),
+    ] {
+        let parsed: AgentMessageModeration =
+            serde_json::from_value(json!({"moderated": false, "display": display})).unwrap();
+        assert!(parsed.moderated);
+        assert!(parsed.display.is_none());
+    }
 }
 
 #[test]

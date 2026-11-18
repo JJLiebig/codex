@@ -51,6 +51,7 @@ fn any_supplied_access_context_preserves_verification() {
 #[test]
 fn desktop_unknown_remote_and_unrelated_servers_preserve_verification() {
     use crate::McpPluginAttribution;
+    use crate::McpServerKey;
     use crate::McpServerRegistration;
     use crate::ResolvedMcpCatalog;
     let config: codex_config::McpServerConfig = serde_json::from_value(serde_json::json!({
@@ -69,14 +70,14 @@ fn desktop_unknown_remote_and_unrelated_servers_preserve_verification() {
             config.clone(),
         ));
         let catalog = builder.build();
+        let registration = Some(
+            catalog
+                .server(&McpServerKey::unscoped("cua_repl"))
+                .expect("the bundled plugin server should be registered"),
+        );
         for source in [SessionSource::Cli, SessionSource::Exec] {
             let server = EffectiveMcpServer::from_host_config(config.clone())
-                .with_standalone_browser_access(
-                    "cua_repl",
-                    catalog.server("cua_repl"),
-                    Some(&source),
-                    |_| false,
-                );
+                .with_standalone_browser_access("cua_repl", registration, Some(&source), |_| false);
             let mut expected = config.clone();
             if plugin == "unified-computer-use@openai-bundled"
                 && let McpServerTransportConfig::Stdio { args, .. } = &mut expected.transport
@@ -93,18 +94,15 @@ fn desktop_unknown_remote_and_unrelated_servers_preserve_verification() {
             Some(SessionSource::Custom("desktop".to_string())),
         ] {
             let server = EffectiveMcpServer::from_host_config(config.clone())
-                .with_standalone_browser_access(
-                    "cua_repl",
-                    catalog.server("cua_repl"),
-                    source.as_ref(),
-                    |_| false,
-                );
+                .with_standalone_browser_access("cua_repl", registration, source.as_ref(), |_| {
+                    false
+                });
             assert_eq!(server.config(), &config);
         }
         let server = EffectiveMcpServer::from_host_config(config.clone())
             .with_standalone_browser_access(
                 "other",
-                catalog.server("cua_repl"),
+                registration,
                 Some(&SessionSource::Cli),
                 |_| false,
             );
@@ -114,7 +112,7 @@ fn desktop_unknown_remote_and_unrelated_servers_preserve_verification() {
         let server = EffectiveMcpServer::from_host_config(remote.clone())
             .with_standalone_browser_access(
                 "cua_repl",
-                catalog.server("cua_repl"),
+                registration,
                 Some(&SessionSource::Exec),
                 |_| false,
             );

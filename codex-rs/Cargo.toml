@@ -55,6 +55,7 @@ members = [
     "hooks",
     "history",
     "http-client",
+    "http-headers-helper",
     "secrets",
     "exec",
     "file-system",
@@ -172,7 +173,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.169.1"
+version = "0.170.0"
 # Track the edition for all workspace crates in one place. Individual
 # crates can still override this value, but keeping it here means new
 # crates created with `cargo new -w ...` automatically inherit the 2024
@@ -216,6 +217,7 @@ codex-code-mode-runtime = { path = "code-mode-runtime" }
 codex-plugin-host = { path = "plugin-host" }
 codex-home = { path = "codex-home" }
 codex-http-client = { path = "http-client" }
+codex-http-headers-helper = { path = "http-headers-helper" }
 codex-websocket-auth = { path = "websocket-auth" }
 codex-websocket-client = { path = "websocket-client" }
 codex-config = { path = "config" }
@@ -321,6 +323,7 @@ codex-utils-head-tail-buffer = { path = "utils/head-tail-buffer" }
 codex-utils-home-dir = { path = "utils/home-dir" }
 codex-utils-image = { path = "utils/image" }
 codex-utils-json-to-toml = { path = "utils/json-to-toml" }
+codex-utils-model-facing-id = { path = "utils/model-facing-id" }
 codex-utils-oss = { path = "utils/oss" }
 codex-utils-output-truncation = { path = "utils/output-truncation" }
 codex-utils-path = { path = "utils/path-utils" }

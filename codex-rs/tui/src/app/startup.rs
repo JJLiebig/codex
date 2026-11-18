@@ -1058,6 +1058,7 @@ See the Codex keymap documentation for supported actions and examples."
             environment_manager,
             app_server_target,
             weekly_window_scheduler,
+            app_server_backend_id: Some(app_server.backend_id()),
             pending_right_click_paste: None,
             right_click_paste_environment: super::right_click_paste::PasteEnvironment::detect(),
             reconnect: ReconnectState {
@@ -1085,6 +1086,7 @@ See the Codex keymap documentation for supported actions and examples."
             pending_thread_titles: HashMap::new(),
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
+            backend_registry: Default::default(),
             agents_overview,
             side_threads: HashMap::new(),
             saved_openings: Default::default(),
@@ -1154,6 +1156,10 @@ See the Codex keymap documentation for supported actions and examples."
                 codex_cli_version(),
                 /*server_version*/ None,
             );
+        }
+        if let Some(thread_id) = app.current_displayed_thread_id() {
+            app.backend_registry
+                .observe(app_server.backend_id(), thread_id);
         }
         if start_in_agents_overview {
             app.open_agents_overview(&app_server);
@@ -1654,12 +1660,15 @@ See the Codex keymap documentation for supported actions and examples."
                                 backends.defer_side_startup(event);
                             }
                             Some(event) if owner != displayed_owner || !app.reconnect.offline => {
-                                if let Some(session) = backends.session(owner) {
-                                    app.handle_polled_backend_event(session, displayed_owner, event).await;
+                                if let Some(slot) = backends.slot(owner) {
+                                    let (session, parked_inputs) = backends.session_and_parked_inputs(slot);
+                                    app.handle_polled_backend_event(session, displayed_owner, parked_inputs, event).await;
                                 }
                             }
                             Some(_) => {}
                             None => {
+                                app.agents_overview
+                                    .invalidate_discovery(owner, owner == displayed_owner);
                                 if owner == displayed_owner {
                                     if app.reconnect.offline && app.pending_startup_thread_start {
                                         reconnect = None;

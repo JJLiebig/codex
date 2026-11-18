@@ -61,6 +61,7 @@ use crate::plan_tool::UpdatePlanArgs;
 use crate::request_permissions::RequestPermissionsEvent;
 use crate::request_permissions::RequestPermissionsResponse;
 use crate::request_user_input::RequestUserInputResponse;
+use crate::response_item_id::OptionalWireItemId;
 use crate::turn_input::CyberAccessProgram;
 use crate::turn_input::SuspendTurnOutcome;
 use crate::turn_input::TurnInputMode;
@@ -994,7 +995,8 @@ impl FromStr for ThreadHistoryMode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 pub struct InterAgentCommunication {
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
+    #[serde(with = "OptionalWireItemId")]
+    #[ts(optional, as = "Option<ResponseItemId>")]
     pub id: Option<ResponseItemId>,
     pub author: AgentPath,
     pub recipient: AgentPath,
@@ -2419,12 +2421,30 @@ pub struct ModelVerificationEvent {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
+#[serde(from = "StoredTargetedModeration")]
 pub struct TargetedAnswerModeration {
     pub item_id: String,
     pub moderated: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub display: Option<crate::items::AgentMessageDisplay>,
+}
+
+#[derive(Deserialize)]
+struct StoredTargetedModeration {
+    item_id: String,
+    #[serde(flatten)]
+    decision: crate::items::AgentMessageModeration,
+}
+
+impl From<StoredTargetedModeration> for TargetedAnswerModeration {
+    fn from(value: StoredTargetedModeration) -> Self {
+        Self {
+            item_id: value.item_id,
+            moderated: value.decision.moderated,
+            display: value.decision.display,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
@@ -3455,7 +3475,7 @@ pub enum MultiAgentVersion {
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, JsonSchema)]
 pub struct SessionContextWindow {
-    /// UUIDv7 identity of this context window.
+    /// Persisted model-facing window identity.
     pub window_id: crate::ContextWindowId,
 }
 

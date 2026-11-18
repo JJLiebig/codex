@@ -29,6 +29,8 @@ base64 = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 codex-ansi-escape = { workspace = true }
+codex-api = { workspace = true }
+codex-prompts = { workspace = true }
 codex-app-server-client = { workspace = true }
 codex-app-server-daemon = { workspace = true }
 codex-app-server-protocol = { workspace = true }
@@ -85,6 +87,7 @@ diffy = { workspace = true }
 dirs = { workspace = true }
 dunce = { workspace = true }
 fs2 = { workspace = true }
+http = { workspace = true }
 image = { workspace = true, features = ["jpeg", "png", "gif", "webp"] }
 itertools = { workspace = true }
 lazy_static = { workspace = true }
@@ -186,7 +189,6 @@ codex-utils-cargo-bin = { workspace = true }
 assert_matches = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 futures = { workspace = true }
-http = { workspace = true }
 insta = { workspace = true }
 opentelemetry_sdk = { workspace = true }
 pretty_assertions = { workspace = true }
