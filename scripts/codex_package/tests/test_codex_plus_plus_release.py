@@ -9,6 +9,7 @@ import sys
 import tarfile
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlsplit
 from unittest.mock import patch
 import zipfile
 
@@ -58,30 +59,44 @@ class FakeGitHub:
 
     def __init__(self):
         self.releases = {}
+        self.duplicate_drafts = []
         self.latest = None
         self.commit = "tag-source"
         self.installers = {}
 
-    def gh(self, *args, body=None, missing=False):
-        if args[0] == "release":
-            action, tag = args[1:3]
-            release = self.releases[tag]
-            if action == "upload":
-                for path in args[3 : args.index("--repo")]:
-                    path = Path(path)
-                    if path.name in release["files"]:
-                        raise RuntimeError("Refusing overwrite")
-                    release["files"][path.name] = path.read_bytes()
-            else:
-                name = args[args.index("--pattern") + 1]
-                directory = Path(args[args.index("--dir") + 1])
-                (directory / name).write_bytes(release["files"][name])
+    def create(self, fields):
+        release_id = len(self.releases) + len(self.duplicate_drafts) + 1
+        result = {
+            **fields,
+            "id": release_id,
+            "files": {},
+            "upload_url": (
+                f"https://uploads.github.com/repos/owner/repo/releases/{release_id}/assets"
+                "{?name,label}"
+            ),
+        }
+        if self.releases.setdefault(fields["tag_name"], result) is not result:
+            self.duplicate_drafts.append(result)
+        return result
+
+    def gh(self, *args, body=None, missing=False, output=None):
+        url = urlsplit(args[1])
+        endpoint = url.path.lstrip("/").split("/", 3)[3]
+        releases = [*self.releases.values(), *self.duplicate_drafts]
+        if url.netloc == "uploads.github.com":
+            release_id = int(endpoint.split("/")[1])
+            result = next(r for r in releases if r["id"] == release_id)
+            path = Path(args[args.index("--input") + 1])
+            (name,) = parse_qs(url.query)["name"]
+            if name in result["files"]:
+                raise RuntimeError("Refusing overwrite")
+            result["files"][name] = path.read_bytes()
             return None
-        endpoint = args[1].split("/", 3)[3]
         if endpoint.startswith("commits/"):
             return {"sha": self.commit}
         if endpoint.startswith("contents/"):
-            path, ref = endpoint.removeprefix("contents/").split("?ref=")
+            path = endpoint.removeprefix("contents/")
+            (ref,) = parse_qs(url.query)["ref"]
             if ref != self.commit:
                 raise RuntimeError("Wrong installer source")
             data = self.installers.setdefault(path, ("exact-tag:" + path).encode())
@@ -89,18 +104,30 @@ class FakeGitHub:
         if endpoint == "releases/latest":
             return self.releases.get(self.latest)
         if endpoint.startswith("releases/tags/"):
-            return self.releases.get(endpoint.removeprefix("releases/tags/"))
+            result = self.releases.get(endpoint.removeprefix("releases/tags/"))
+            return result if result and not result["draft"] else None
         if endpoint == "releases":
-            result = {**body, "id": len(self.releases) + 1, "files": {}}
-            self.releases[body["tag_name"]] = result
-            return result
+            if body is not None:
+                return self.create(body)
+            return [[r] for r in sorted(releases, key=lambda r: -r["id"])]
+        if endpoint.startswith("releases/assets/"):
+            release_id, index = divmod(int(endpoint.rsplit("/", 1)[1]), 100)
+            result = next(r for r in releases if r["id"] == release_id)
+            output.write(list(result["files"].values())[index])
+            return None
         release_id = int(endpoint.split("/")[1])
-        result = next(r for r in self.releases.values() if r["id"] == release_id)
-        if "/assets?" in endpoint:
+        result = next(r for r in releases if r["id"] == release_id)
+        if endpoint.endswith("/assets"):
             return [
                 [
-                    {"name": n, "digest": "sha256:" + hashlib.sha256(b).hexdigest()}
-                    for n, b in result["files"].items()
+                    {
+                        "id": release_id * 100 + index,
+                        "name": name,
+                        "digest": None
+                        if name == "install-codex-plus-plus.sh"
+                        else "sha256:" + hashlib.sha256(data).hexdigest(),
+                    }
+                    for index, (name, data) in enumerate(result["files"].items())
                 ]
             ]
         result.update(body)
@@ -140,6 +167,8 @@ class GitHubReleaseTest(unittest.TestCase):
                         published["install-codex-plus-plus.sh"],
                         b"exact-tag:scripts/install/install-codex-plus-plus.sh",
                     )
+                    if index == 0:
+                        duplicate = github.create({"tag_name": tag, "draft": True})
                     github_release.publish(
                         "owner/repo",
                         version,
@@ -148,6 +177,8 @@ class GitHubReleaseTest(unittest.TestCase):
                         None,
                         platform.target,
                     )
+                    self.assertEqual(github.duplicate_drafts, [duplicate])
+                    self.assertEqual(duplicate["files"], {})
                     self.assertEqual(github.releases[tag]["files"], published)
                 with tempfile.TemporaryDirectory() as npm_temporary:
                     npm = Path(npm_temporary)
