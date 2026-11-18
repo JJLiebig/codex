@@ -6123,9 +6123,12 @@ async fn rebuild_with_session_layers_refreshes_plugin_derived_mcp_config() -> an
     assert_eq!(
         mcp_config
             .mcp_server_catalog
-            .plugin_attributions_by_server_name(),
+            .plugin_attributions_by_server(),
         HashMap::from([(
-            "sample".to_string(),
+            codex_mcp::McpServerKey::in_environment(
+                codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
+                "sample",
+            ),
             McpPluginAttribution::new("sample@test".to_string(), "sample".to_string())
                 .with_host_root(PathUri::from_host_native_path(&plugin_root)?),
         )])
@@ -6187,7 +6190,7 @@ enabled = true
     assert!(
         mcp_config
             .mcp_server_catalog
-            .plugin_attributions_by_server_name()
+            .plugin_attributions_by_server()
             .is_empty()
     );
 
@@ -6290,7 +6293,10 @@ url = "https://sample.example/mcp"
     assert_eq!(
         mcp_config
             .mcp_server_catalog
-            .server("unlisted")
+            .server(&codex_mcp::McpServerKey::in_environment(
+                codex_config::DEFAULT_MCP_SERVER_ENVIRONMENT_ID,
+                "unlisted",
+            ))
             .map(|server| (server.source().clone(), server.config().clone())),
         Some((
             codex_mcp::McpServerSource::SelectedPlugin(McpPluginAttribution::new(
@@ -10536,6 +10542,10 @@ async fn load_config_applies_otel_trace_metadata() -> std::io::Result<()> {
     let mut fixture = create_test_fixture()?;
     fixture.cfg = toml::from_str(
         r#"
+[otel]
+headers_helper = "company-auth telemetry-headers"
+headers_helper_refresh_interval_ms = 900000
+
 [otel.span_attributes]
 "example.trace_attr" = "enabled"
 
@@ -10556,6 +10566,18 @@ beta = "two"
     )
     .await?;
 
+    assert_eq!(
+        config.otel.headers_helper.as_deref(),
+        Some("company-auth telemetry-headers")
+    );
+    assert_eq!(
+        config
+            .otel
+            .headers_helper_refresh_interval_ms
+            .unwrap()
+            .get(),
+        900000
+    );
     assert_eq!(
         config.otel.span_attributes,
         HashMap::from([("example.trace_attr".to_string(), "enabled".to_string())])

@@ -131,7 +131,6 @@ use codex_protocol::models::BaseInstructionsProvenance;
 use codex_protocol::models::PermissionProfile;
 pub use codex_protocol::models::PermissionProfileSnapshot;
 use codex_protocol::models::ProfileWorkspaceRoot;
-use codex_protocol::models::SandboxEnforcement;
 use codex_protocol::openai_models::ModelsResponse;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::permissions::DenyReadValidator;
@@ -519,14 +518,8 @@ impl Permissions {
         sandbox_policy: &SandboxPolicy,
         cwd: &Path,
     ) -> ConstraintResult<()> {
-        let file_system_sandbox_policy =
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(sandbox_policy, cwd);
-        let network_sandbox_policy = NetworkSandboxPolicy::from(sandbox_policy);
-        let permission_profile = PermissionProfile::from_runtime_permissions_with_enforcement(
-            SandboxEnforcement::from_legacy_sandbox_policy(sandbox_policy),
-            &file_system_sandbox_policy,
-            network_sandbox_policy,
-        );
+        let permission_profile =
+            PermissionProfile::from_legacy_sandbox_policy_for_cwd(sandbox_policy, cwd);
         self.can_set_permission_profile(&permission_profile)
     }
 
@@ -538,14 +531,8 @@ impl Permissions {
         cwd: &Path,
     ) -> ConstraintResult<()> {
         self.can_set_legacy_sandbox_policy(&sandbox_policy, cwd)?;
-        let file_system_sandbox_policy =
-            FileSystemSandboxPolicy::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd);
-        let network_sandbox_policy = NetworkSandboxPolicy::from(&sandbox_policy);
-        let permission_profile = PermissionProfile::from_runtime_permissions_with_enforcement(
-            SandboxEnforcement::from_legacy_sandbox_policy(&sandbox_policy),
-            &file_system_sandbox_policy,
-            network_sandbox_policy,
-        );
+        let permission_profile =
+            PermissionProfile::from_legacy_sandbox_policy_for_cwd(&sandbox_policy, cwd);
         self.workspace_roots = match &sandbox_policy {
             SandboxPolicy::WorkspaceWrite { writable_roots, .. } => {
                 let mut workspace_roots = vec![
@@ -1859,20 +1846,6 @@ impl Config {
         self.permissions.legacy_sandbox_policy(self.cwd.as_path())
     }
 
-    pub fn set_legacy_sandbox_policy(
-        &mut self,
-        sandbox_policy: SandboxPolicy,
-    ) -> ConstraintResult<()> {
-        self.workspace_roots_explicit = matches!(
-            &sandbox_policy,
-            SandboxPolicy::WorkspaceWrite { writable_roots, .. } if !writable_roots.is_empty()
-        );
-        self.permissions
-            .set_legacy_sandbox_policy(sandbox_policy, self.cwd.as_path())?;
-        self.workspace_roots = self.permissions.workspace_roots().to_vec();
-        Ok(())
-    }
-
     /// Combine runtime and profile roots without interpreting them on the current host.
     pub fn effective_workspace_roots(&self) -> Vec<PathUri> {
         let mut workspace_roots = self
@@ -2023,6 +1996,11 @@ impl Config {
         additional_plugin_registrations: impl IntoIterator<Item = McpServerRegistration>,
     ) -> McpConfig {
         let mut catalog = ResolvedMcpCatalog::builder();
+        catalog.set_exposure(if self.features.enabled(Feature::MultiEnvironmentMcp) {
+            codex_mcp::McpServerExposure::EnvironmentQualified
+        } else {
+            codex_mcp::McpServerExposure::Legacy
+        });
         if self.features.enabled(Feature::UseXaa)
             && let Some(auth) = &self.mcp_enterprise_managed_auth
         {
@@ -2049,12 +2027,13 @@ impl Config {
             }
             .with_host_root(PathUri::from_abs_path(&plugin.root));
             for (name, plugin_server) in plugin_mcp_servers {
-                catalog.register(McpServerRegistration::from_plugin(
+                let registration = McpServerRegistration::from_plugin(
                     name,
                     attribution.clone(),
                     plugin_order,
                     plugin_server,
-                ));
+                );
+                catalog.register(registration);
             }
         }
         for registration in additional_plugin_registrations {
@@ -4372,10 +4351,20 @@ impl Config {
                 let sections = guardian.sync_elastic_sections.as_ref().filter(|sections| !sections.is_empty())
                     .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData,
                         "sync_elastic_sections is required when sync_elastic_budgeting is enabled"))?;
-                let mut decoded_sections = BTreeMap::new();
+                let mut policy = codex_guardian_context::ElasticBudgetConfig::default();
                 for (name, limits) in sections {
                     let section = codex_guardian_context::ElasticSection::deserialize(name.as_str().into_deserializer())
                         .map_err(|error: serde::de::value::Error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+                    if section == codex_guardian_context::ElasticSection::TranscriptSelectedExecResults {
+                        if limits.nested_tool_names.is_empty() || limits.nested_tool_names.iter().any(|name| name.trim().is_empty()) {
+                            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
+                                "transcript_selected_exec_results requires nonempty nested_tool_names"));
+                        }
+                        policy.selected_exec_tool_names.clone_from(&limits.nested_tool_names);
+                    } else if !limits.nested_tool_names.is_empty() {
+                        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
+                            format!("nested_tool_names is only supported for transcript_selected_exec_results, found in {name}")));
+                    }
                     let mut section_limits = codex_guardian_context::ElasticSectionLimits::new(
                         limits.min_total_section_tokens,
                         limits.max_section_entry_tokens,
@@ -4384,12 +4373,11 @@ impl Config {
                         section_limits = section_limits.with_max_total_section_tokens(maximum)
                             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                     }
-                    if decoded_sections.insert(section, section_limits).is_some() {
+                    if policy.sections.insert(section, section_limits).is_some() {
                         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData,
                             format!("duplicate sync_elastic_sections section: {name}")));
                     }
                 }
-                let policy = codex_guardian_context::ElasticBudgetConfig { sections: decoded_sections };
                 policy.validate().map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
                 Ok::<_, std::io::Error>(policy)
             }).transpose()?;

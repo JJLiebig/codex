@@ -377,6 +377,8 @@ pub(crate) use realtime::realtime_delegation_input;
 pub(crate) use realtime::tests::activate_voice_for_thread;
 #[cfg(test)]
 pub(crate) use realtime::tests::commit_realtime_history_events;
+#[cfg(test)]
+pub(crate) use realtime::tests::start_voice_attempt_for_test;
 mod reasoning_shortcuts;
 use self::realtime::RealtimeConversationUiState;
 mod rendering;
@@ -711,6 +713,8 @@ pub(crate) struct ChatWidget {
     // order.
     suppress_initial_user_message_submit: bool,
     input_queue: InputQueueState,
+    /// Hold this conversation's queued input until its reply stream is usable.
+    pub(crate) thread_stream_disconnected: bool,
     safety_buffering_prompt: Option<UserMessage>,
     safety_buffering_source: UserMessageSource,
     /// Main chat-surface bindings resolved from `tui.keymap.chat`.
@@ -2127,6 +2131,7 @@ impl ChatWidget {
         self.bottom_pane.new_status_indicator()
     }
 
+    #[cfg(test)]
     pub(crate) fn status_line_text(&self) -> Option<String> {
         self.status_line_content()
             .cloned()
@@ -2155,13 +2160,13 @@ fn has_websocket_timing_metrics(summary: RuntimeMetricsSummary) -> bool {
 
 impl Drop for ChatWidget {
     fn drop(&mut self) {
-        if self.realtime_conversation.handle.is_some()
-            && let Some(thread_id) = self.thread_id
+        let had_live_peer = self.realtime_conversation.handle.is_some();
+        if let Some(thread_id) = self.reset_realtime_conversation()
+            && had_live_peer
         {
             self.app_event_tx
                 .send(AppEvent::StopRealtimeConversation { thread_id });
         }
-        self.reset_realtime_conversation();
         self.stop_rate_limit_poller();
     }
 }

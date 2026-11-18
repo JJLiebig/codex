@@ -4580,7 +4580,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
             .collect::<Vec<_>>()
             .join("\n")
     );
-    let sidebar_x = app.conversation_frame.chooser_area().unwrap().x;
+    let sidebar_x = app.conversation_frame.panel_area().unwrap().x;
     app.local_settings.tui.animations = true;
     keys!(KeyCode::Enter.into());
     assert!(!tui.has_deferred_thread_switch_clear());
@@ -5554,7 +5554,7 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
 
     keys!(prefix, chooser_key, prefix, KeyCode::Char('=').into());
     side_frame(&mut app, &mut tui, even)?;
-    assert_eq!(app.conversation_frame.chooser_area().unwrap().width, 100);
+    assert_eq!(app.conversation_frame.panel_area().unwrap().width, 100);
     keys!(prefix, KeyCode::Char('r').into(), KeyCode::Left.into());
     let frame = side_frame(&mut app, &mut tui, even)?;
     let (_, hint) = frame
@@ -5588,12 +5588,12 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(strip.divider_area(), Some(Rect::new(target, 0, 1, 1)));
     keys!(prefix, chooser_key);
     side_frame(&mut app, &mut tui, even)?;
-    assert!(app.conversation_frame.chooser_area().is_some());
+    assert!(app.conversation_frame.panel_area().is_some());
     assert_eq!(divider_at(&tui, 4), target);
 
     // Closing from the chooser must not switch to the tab before confirmation.
     let chooser_focus = app.chooser_focus();
-    let chooser = app.conversation_frame.chooser_area().unwrap();
+    let chooser = app.conversation_frame.panel_area().unwrap();
     let close_x = (chooser.x..chooser.right())
         .rfind(|&x| tui.terminal.previous_buffer()[(x, chooser.y)].symbol() == "×")
         .expect("close button on the second tab");
@@ -5653,6 +5653,119 @@ async fn handle_start_side_seeds_navigation_before_thread_started() -> Result<()
     assert_eq!(app.current_displayed_thread_id(), Some(side_thread_id));
 
     app_server.shutdown().await?;
+    Ok(())
+}
+
+#[tokio::test]
+async fn split_status_lines_reflow_across_focus_switches() -> Result<()> {
+    use crate::bottom_pane::StatusLineItem;
+    use ratatui::style::Modifier;
+    use ratatui::text::Line;
+
+    let (mut app, mut events, _ops) = make_test_app_with_channels().await;
+    let mut server = Box::pin(crate::start_embedded_app_server_for_picker(&app.config)).await?;
+    let primary = server.start_thread(&app.config).await?;
+    let main = primary.session.thread_id;
+    app.enqueue_primary_thread_session(primary.session, primary.turns)
+        .await?;
+    let side = ThreadId::new();
+    let channel = ThreadEventChannel::new(/*capacity*/ 1);
+    channel.store.lock().await.set_session(
+        test_thread_session(side, app.config.cwd.to_path_buf()),
+        Vec::new(),
+    );
+    app.thread_event_channels.insert(side, channel);
+    app.side_threads.insert(side, SideThreadState::new(main));
+    app.sidebar_mut().show(
+        sidebar::SidebarContent::Chat(side),
+        sidebar::PaneFocus::Main,
+    );
+    let mut tui = crate::tui::test_support::make_test_tui()?;
+    tui.set_owned_screen(/*owned*/ true)?;
+    drain_app_events(&mut app, &mut tui, &mut server, &mut events).await?;
+
+    let main_status = "MainStatusSummaryForThePrimaryWorkspaceContext MainStatusDetailsForThePrimaryWorkspaceContext";
+    let side_status = "SideStatusSummaryText SideStatusDetails";
+    let mut frames = Vec::new();
+    for (index, (focused, width, height)) in [
+        (main, 100, 24),
+        (side, 100, 24),
+        (main, 100, 24),
+        (main, 130, 24),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        if app.current_displayed_thread_id() != Some(focused) {
+            app.select_agent_thread(&mut tui, &mut server, focused)
+                .await?;
+            drain_app_events(&mut app, &mut tui, &mut server, &mut events).await?;
+        }
+        assert_eq!(app.current_displayed_thread_id(), Some(focused));
+        enable_side_retention(&mut app)?;
+        app.local_settings.tui.animations = false;
+        let size = Size::new(width, height);
+        // Resize refreshes the active native status, so install the fixture after reflow.
+        side_frame(&mut app, &mut tui, size)?;
+        let (name, draft, status) = if focused == main {
+            ("Main", "main draft", main_status)
+        } else {
+            ("Side", "side draft", side_status)
+        };
+        app.chat_widget.setup_status_line(
+            vec![StatusLineItem::ModelName],
+            /*use_theme_colors*/ false,
+        );
+        app.chat_widget
+            .set_status_line(Some(Line::from(status).into()));
+        app.chat_widget.apply_external_edit(draft.into());
+        if index == 0 {
+            // Seed the main conversation before focusing the side chat.
+            continue;
+        }
+
+        let frame = side_frame(&mut app, &mut tui, size)?;
+        assert!(
+            frame.contains("main draft") && frame.contains("side draft"),
+            "{frame}"
+        );
+        let divider = app.conversation_frame.divider_area().expect("split pane");
+        let buffer = tui.terminal.previous_buffer();
+        let mut rows = vec![format!("{name} focused at {width}x{height}")];
+        for (prefix, start, end) in [
+            ("MainStatus", 0, divider.x),
+            ("SideStatus", divider.right(), width),
+        ] {
+            for y in 0..height {
+                let text: String = (start..end).map(|x| buffer[(x, y)].symbol()).collect();
+                if text.trim_start().starts_with(prefix) {
+                    let muted = buffer[(start + 2, y)].modifier.contains(Modifier::DIM);
+                    let style = if muted { "muted" } else { "normal" };
+                    rows.push(format!("{style} {}", text.trim()));
+                }
+            }
+        }
+        frames.push(rows.join("\n"));
+    }
+    insta::assert_snapshot!(frames.join("\n\n"), @"
+    Side focused at 100x24
+    muted MainStatusSummaryForThePrimaryWorkspaceContext
+    muted MainStatusDetailsForThePrimaryWorkspaceContext
+    normal SideStatusSummaryText
+    normal SideStatusDetails
+
+    Main focused at 100x24
+    normal MainStatusSummaryForThePrimaryWorkspaceContext
+    normal MainStatusDetailsForThePrimaryWorkspaceContext
+    muted SideStatusSummaryText
+    muted SideStatusDetails
+
+    Main focused at 130x24
+    normal MainStatusSummaryForThePrimaryWorkspaceContext
+    normal MainStatusDetailsForThePrimaryWorkspaceContext
+    muted SideStatusSummaryText SideStatusDetails
+    ");
+    server.shutdown().await?;
     Ok(())
 }
 
@@ -8988,6 +9101,7 @@ async fn make_test_app() -> Box<App> {
         environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
         app_server_target: crate::AppServerTarget::Embedded,
         weekly_window_scheduler: None,
+        app_server_backend_id: None,
         reconnect: Default::default(),
         pending_right_click_paste: None,
         right_click_paste_environment: super::right_click_paste::PasteEnvironment {
@@ -9013,6 +9127,7 @@ async fn make_test_app() -> Box<App> {
         thread_event_listener_tasks: HashMap::new(),
         agent_navigation: AgentNavigationState::default(),
         pending_server_profiles: HashMap::new(),
+        backend_registry: Default::default(),
         agents_overview: Default::default(),
         side_threads: HashMap::new(),
         saved_openings: Default::default(),
@@ -9129,6 +9244,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             environment_manager: Arc::new(EnvironmentManager::default_for_tests()),
             app_server_target: crate::AppServerTarget::Embedded,
             weekly_window_scheduler: None,
+            app_server_backend_id: None,
             reconnect: Default::default(),
             pending_right_click_paste: None,
             right_click_paste_environment: super::right_click_paste::PasteEnvironment {
@@ -9154,6 +9270,7 @@ pub(super) async fn make_test_app_with_channels() -> (
             thread_event_listener_tasks: HashMap::new(),
             agent_navigation: AgentNavigationState::default(),
             pending_server_profiles: HashMap::new(),
+            backend_registry: Default::default(),
             agents_overview: Default::default(),
             side_threads: HashMap::new(),
             saved_openings: Default::default(),

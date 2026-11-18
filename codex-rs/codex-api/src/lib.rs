@@ -18,6 +18,7 @@ pub(crate) mod telemetry;
 /// Path of the Responses endpoint, relative to a provider's base URL.
 pub const RESPONSES_PATH: &str = "/responses";
 
+pub use crate::requests::headers::build_realtime_thread_headers;
 pub use crate::requests::headers::build_session_headers;
 pub use codex_client::RequestTelemetry;
 pub use codex_client::ReqwestTransport;
@@ -42,6 +43,7 @@ pub use crate::common::RawMemory;
 pub use crate::common::RawMemoryMetadata;
 pub use crate::common::Reasoning;
 pub use crate::common::ReasoningContext;
+pub use crate::common::ReasoningRemovalReason;
 pub use crate::common::ReasoningSummaryDelivery;
 pub use crate::common::ResponseCreateWsRequest;
 pub use crate::common::ResponseEvent;

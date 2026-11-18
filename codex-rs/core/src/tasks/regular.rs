@@ -1,4 +1,5 @@
 use crate::McpRefreshReason;
+use crate::agent::helper_daybreak::turn::SavedProgramResolution;
 use std::sync::Arc;
 
 use codex_async_utils::OrCancelExt;
@@ -137,10 +138,22 @@ impl SessionTask for RegularTask {
                 Some(*prewarmed_client_session)
             }
         };
-        let next_input = input;
+        if let Some(resolution) = ctx.extension_data.get::<SavedProgramResolution>()
+            && let Err(error) = resolution.validate()
+        {
+            let _ = run_hooks_and_record_inputs(
+                &sess,
+                &ctx,
+                &ctx.capture_current_model_info(),
+                &input,
+                PersistContext::Standard,
+            )
+            .await;
+            return Err(error);
+        }
         let mut turn_state = TurnRunState::from_prewarmed_client_session(prewarmed_client_session);
         turn_state.completion_claim = self.completion_claim;
-        completion_wake::run_turn_loop(sess, ctx, next_input, cancellation_token, turn_state).await
+        completion_wake::run_turn_loop(sess, ctx, input, cancellation_token, turn_state).await
     }
 }
 
