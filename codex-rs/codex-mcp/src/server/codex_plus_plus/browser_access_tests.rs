@@ -72,7 +72,10 @@ fn desktop_unknown_remote_and_unrelated_servers_preserve_verification() {
         let catalog = builder.build();
         let registration = Some(
             catalog
-                .server(&McpServerKey::unscoped("cua_repl"))
+                .server(&McpServerKey::in_environment(
+                    &config.environment_id,
+                    "cua_repl",
+                ))
                 .expect("the bundled plugin server should be registered"),
         );
         for source in [SessionSource::Cli, SessionSource::Exec] {
