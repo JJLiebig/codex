@@ -194,7 +194,7 @@ async fn exhausted_stream_retries_stop_for_explicit_limits_and_noninteractive_ca
         let server = start_mock_server().await;
         let test = test_codex()
             .with_session_source(source)
-            .with_config(|config| {
+            .with_config(move |config| {
                 config.model_provider.request_max_retries = Some(0);
                 config.model_provider.stream_max_retries = configured_limit;
             })
