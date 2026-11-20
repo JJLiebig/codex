@@ -123,8 +123,7 @@ async fn unrestricted_non_tty_uses_private_runner() -> Result<()> {
         marker.display().to_string(),
     );
     env.insert("CODEX_PARENT_PID".into(), std::process::id().to_string());
-    let command = vec![
-        "powershell.exe".into(),
+    let args = [
         "-NoLogo".into(),
         "-NoProfile".into(),
         "-NonInteractive".into(),
@@ -136,7 +135,8 @@ async fn unrestricted_non_tty_uses_private_runner() -> Result<()> {
     let arg0 = None;
     let started_at = Instant::now();
     let spawned = spawn_process(SpawnRequest {
-        command: &command,
+        program: std::ffi::OsStr::new("powershell.exe"),
+        args: &args,
         cwd: temp.path(),
         env: &env,
         arg0: &arg0,
@@ -144,7 +144,7 @@ async fn unrestricted_non_tty_uses_private_runner() -> Result<()> {
         windows_sandbox: None,
         tty: false,
         stdin_open: false,
-        inherited_fds: &[],
+        inherited_fds: codex_utils_pty::ChildFds::Inherited(&[]),
     })
     .await?;
     let codex_utils_pty::SpawnedProcess {

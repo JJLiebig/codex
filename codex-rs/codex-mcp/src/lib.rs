@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub use binding::McpBinding;
 pub use binding::McpPermissionSource;
 pub use binding::PreparedMcpCall;

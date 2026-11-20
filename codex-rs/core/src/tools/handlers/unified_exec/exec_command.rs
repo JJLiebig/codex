@@ -72,6 +72,7 @@ impl Default for ExecCommandHandler {
             lifetime: ExecCommandLifetime::Interactive,
             options: ExecCommandHandlerOptions {
                 allow_tty: true,
+                completion_wake: true,
                 include_windows_shell_guidance: cfg!(windows),
                 has_powershell: crate::shell::default_user_shell().shell_type
                     == crate::shell::ShellType::PowerShell,

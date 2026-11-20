@@ -40,7 +40,6 @@ use crate::plugins::build_plugin_injections;
 use crate::responses_metadata::CodexResponsesMetadata;
 use crate::responses_metadata::CodexResponsesRequestKind;
 use crate::responses_retry::ResponsesStreamRetryState;
-use crate::responses_retry::handle_response_stream_error;
 use crate::responses_retry::is_terminal_sampling_outcome;
 use crate::session::PreviousTurnSettings;
 use crate::session::TurnInput;
@@ -655,7 +654,7 @@ pub(crate) async fn run_turn(
             }
         };
         if is_continuation && !recorded_inputs.accepted.is_empty() {
-            let accepted_user_input = turn_user_input(&recorded_inputs.accepted);
+            let accepted_user_input = input_for_extensions(&recorded_inputs.accepted);
             let (_, accepted_plugins) =
                 required_mcp_servers_for_input(&sess, turn_context.as_ref(), &accepted_user_input)
                     .await;
