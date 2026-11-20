@@ -84,6 +84,7 @@ async fn compact_history_policy_keeps_complete_transcript_and_raw_output() {
     chat.raw_output_mode = false;
     let invocation = history_cell::McpInvocation {
         server: "workspace".to_string(),
+        environment_id: None,
         tool: "inspect".to_string(),
         arguments: Some(serde_json::json!({"path": "README.md"})),
     };

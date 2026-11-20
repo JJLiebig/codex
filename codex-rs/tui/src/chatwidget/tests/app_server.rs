@@ -1603,6 +1603,7 @@ async fn live_app_server_collab_wait_items_render_history() {
     let mcp_starting = McpServerStatusUpdatedNotification {
         thread_id: Some("thread-1".to_string()),
         name: "slow".to_string(),
+        environment_id: None,
         status: McpServerStartupState::Starting,
         error: None,
         failure_reason: None,

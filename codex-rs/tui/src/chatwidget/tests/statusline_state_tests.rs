@@ -31,7 +31,7 @@ async fn statusline_state_projects_the_displayed_settings() {
         serde_json::to_value(chat.statusline_state()).unwrap(),
         json!({
             "account": {"rate_limits": []},
-            "app": {"cli_version": CODEX_CLI_VERSION, "display_mode": "standard"},
+            "app": {"cli_version": codex_cli_version(), "display_mode": "standard"},
             "config": {"statusline_items": ["run-state"]},
             "thread": {
                 "workspace": {"cwd": expected_cwd},

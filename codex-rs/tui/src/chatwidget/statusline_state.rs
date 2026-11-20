@@ -8,7 +8,7 @@ use super::normalize_thread_name;
 use super::status_state::TerminalTitleStatusKind as TerminalTitleStatus;
 use super::status_surfaces::permissions_display;
 use crate::bottom_pane::StatusLineItem;
-use crate::version::CODEX_CLI_VERSION;
+use crate::version::codex_cli_version;
 use codex_protocol::config_types::ApprovalsReviewer as ConfigReviewer;
 use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::models::ManagedFileSystemPermissions as ManagedFileSystem;
@@ -261,7 +261,7 @@ impl ChatWidget {
         let permissions = &self.config.permissions;
         let selected_model = self.current_model();
         let app = StatuslineStateApp {
-            cli_version: CODEX_CLI_VERSION,
+            cli_version: codex_cli_version(),
             display_mode: self.history_render_mode(),
         };
         let config = StatuslineStateConfig {

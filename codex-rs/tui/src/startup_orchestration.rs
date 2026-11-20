@@ -564,6 +564,7 @@ pub(super) async fn run_main_inner(
                 return Ok(AppExitInfo {
                     token_usage: crate::token_usage::TokenUsage::default(),
                     thread_id: None,
+                    archive_warnings: Vec::new(),
                     disconnect_info: None,
                     resume_hint: None,
                     update_action: None,
