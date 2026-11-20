@@ -7780,7 +7780,7 @@ async fn inactive_thread_started_notification_does_not_inherit_primary_model() -
 
     app.chat_widget.handle_thread_session(session);
     let state = serde_json::to_value(app.chat_widget.statusline_state())?;
-    assert_eq!(state["thread"]["model"]["id"], primary_session.model);
+    assert!(state["thread"]["model"].get("id").is_none());
     Ok(())
 }
 
