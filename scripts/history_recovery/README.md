@@ -136,6 +136,12 @@ the managed launch fence cannot prevent those external launchers from starting.
 Already-compatible histories skip maintenance and its namespace restriction.
 Unknown/future histories refuse before changing the selected installation or data.
 
+The managed installer recognizes upstream 0.171.0's realtime index migration
+after the eight canonical migrations. It verifies the ledger and schema with both
+known line-ending variants and accepts the history without changing it. The offline
+repair still targets the eight-migration profile. If an older SQLite library rejects
+the JSON indexes, pass an up-to-date Python 3.12 or newer with `-PythonExe`.
+
 The verified backup is retained under `history-recovery-backups` beside history.
 If interrupted, the pending record remains until activation and gate cleanup both
 finish; the next managed launch resumes without repeating a completed repair.

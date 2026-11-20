@@ -76,6 +76,14 @@
       "crlf": "745e4ee42b02c79c4bc742a5405acbf460fcdaaa44394367ce93d3a3ff29f3876830f1bbeb44bdc87d7ad9af060a9587"
     }
   ],
+  "managed_windows_migration": {
+    "upstream": "05229d1874d4e04bc746a9954c71931a1ab852c6",
+    "path": "codex-rs/state/thread_history_migrations/0009_realtime_observation_indexes.sql",
+    "blob": "882fe923222d146a279ceb913b675b07778f9463",
+    "sql": "-- Support time ranges and position catch-up directly on the realtime projection.\nCREATE INDEX idx_thread_realtime_observed\n    ON thread_realtime_items(thread_id, json_extract(item_json, '$.observed_at_ms'), rollout_ordinal, item_id)\n    WHERE json_extract(item_json, '$.observed_at_ms') IS NOT NULL;\n\nCREATE INDEX idx_thread_realtime_session_observed\n    ON thread_realtime_items(thread_id, json_extract(item_json, '$.realtime_session_id'), json_extract(item_json, '$.observed_at_ms'), rollout_ordinal, item_id)\n    WHERE json_extract(item_json, '$.observed_at_ms') IS NOT NULL;\n\nCREATE INDEX idx_thread_realtime_session_position\n    ON thread_realtime_items(thread_id, json_extract(item_json, '$.realtime_session_id'), rollout_ordinal, item_id)\n    WHERE json_extract(item_json, '$.observed_at_ms') IS NOT NULL;\n",
+    "lf": "4def92ea0f557ec6333bfe80798c89eb5ac3bd569058a502846fc630aed20f774cd8de3628cd8af740c1be94dd8216b1",
+    "crlf": "53e4d5fbb908630f70cd08854f6f7b6d39b990950f812f5adfc482e3745786862672fda502c0462d64bb7c5d1b70dc9d"
+  },
   "target": {
     "profile": "upstream-alpha6-windows",
     "checksum_variant": "crlf",

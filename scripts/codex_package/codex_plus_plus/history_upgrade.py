@@ -8,7 +8,8 @@ import json
 
 def add_recovery(package):
     source = Path(__file__).resolve().parents[2] / "history_recovery"
-    canonical = json.loads((source / "manifest.json").read_bytes())["canonical"]
+    profile = json.loads((source / "manifest.json").read_bytes())
+    canonical = profile["canonical"] + [profile["managed_windows_migration"]]
     migrations = source.parents[1] / "codex-rs/state/thread_history_migrations"
     if {path.name for path in migrations.glob("*.sql")} != {
         Path(entry["path"]).name for entry in canonical

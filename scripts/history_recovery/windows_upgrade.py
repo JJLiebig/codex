@@ -16,7 +16,15 @@ def classify(path):
     # Ledger and schema only; apply checks integrity and content under its lock.
     with closing(recover.connect(path.resolve(strict=True), "ro")) as reader:
         reader.execute("BEGIN")
-        return recover.classify(reader, recover.manifest())
+        try:
+            return recover.classify(reader, recover.manifest(), managed_windows=True)
+        except sqlite3.DatabaseError as error:
+            if "unsafe use of json_extract()" in str(error):
+                raise recover.Refused(
+                    "This Python's SQLite cannot read the history indexes safely. "
+                    "Rerun the installer with -PythonExe pointing to recent Python 3.12 or newer."
+                ) from error
+            raise
 
 
 def complete(path):
