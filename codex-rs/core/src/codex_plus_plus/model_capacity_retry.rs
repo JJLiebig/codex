@@ -73,9 +73,10 @@ pub(crate) async fn retry_exhausted_transport(
     sess: &Session,
     turn_context: &TurnContext,
 ) -> bool {
-    if fast_retry_limit == 0
+    // A resumed thread can retain a different source from the current caller.
+    if turn_context.app_server_client_name.as_deref() != Some("codex-tui")
         || turn_context.session_source.is_non_root_agent()
-        || matches!(turn_context.session_source, SessionSource::Exec)
+        || turn_context.provider.info().stream_max_retries.is_some()
     {
         return false;
     }

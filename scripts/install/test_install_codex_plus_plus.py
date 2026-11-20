@@ -88,7 +88,7 @@ class InstallCodexPlusPlusTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "managed install paths must be outside the source package",
-                result.stderr,
+                " ".join(result.stderr.split()),
             )
 
     def test_different_shims_keep_independent_release_namespaces(self) -> None:
@@ -187,7 +187,7 @@ class InstallCodexPlusPlusTest(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn(
                 "managed install paths must be outside the source package",
-                result.stderr,
+                " ".join(result.stderr.split()),
             )
 
     def test_install_switches_generations_and_prunes_only_unlocked_releases(

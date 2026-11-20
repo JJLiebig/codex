@@ -98,13 +98,32 @@ async fn capacity_retry_waits_one_minute_and_preserves_input() -> anyhow::Result
     Ok(())
 }
 
+fn upstream_gateway_reset() -> ResponseTemplate {
+    ResponseTemplate::new(503).set_body_string(
+        "upstream connect error or disconnect/reset before headers. reset reason: remote connection failure",
+    )
+}
+
 #[tokio::test]
 async fn exhausted_stream_retries_back_off_with_same_prompt_and_cache_key() -> anyhow::Result<()> {
     skip_if_no_network!(Ok(()));
     let server = start_mock_server().await;
-    let upstream_reset = ResponseTemplate::new(503).set_body_string(
-        "upstream connect error or disconnect/reset before headers. reset reason: remote connection failure",
-    );
+    let test = test_codex()
+        .with_session_source(SessionSource::Cli)
+        .with_config(|config| {
+            config.model_provider.request_max_retries = Some(0);
+            config.model_provider.stream_max_retries = None;
+        })
+        .build_with_auto_env(&server)
+        .await?;
+    test.codex
+        .set_app_server_client_info(
+            Some("codex-tui".to_string()),
+            /*app_server_client_version*/ None,
+        )
+        .await?;
+
+    let fast_attempts = test.config.model_provider.stream_max_retries() as usize + 1;
     let broken_stream = ResponseTemplate::new(200)
         .insert_header("content-type", "text/event-stream")
         .insert_header("content-encoding", "gzip")
@@ -115,27 +134,12 @@ async fn exhausted_stream_retries_back_off_with_same_prompt_and_cache_key() -> a
             ev_response_created("resp-ok"),
             ev_completed("resp-ok"),
         ]));
-    let responses = mount_response_sequence(
-        &server,
-        vec![
-            upstream_reset.clone(),
-            broken_stream,
-            upstream_reset,
-            success,
-        ],
-    )
-    .await;
-    let test = test_codex()
-        .with_session_source(SessionSource::Cli)
-        .with_config(|config| {
-            config.model_provider.request_max_retries = Some(0);
-            config.model_provider.stream_max_retries = Some(1);
-        })
-        .build_with_auto_env(&server)
-        .await?;
+    let mut responses = vec![upstream_gateway_reset(); fast_attempts - 1];
+    responses.extend([broken_stream, upstream_gateway_reset(), success]);
+    let responses = mount_response_sequence(&server, responses).await;
 
     submit(&test.codex).await;
-    for (requests_before_retry, delay) in [(2, 60), (3, 120)] {
+    for (requests_before_retry, delay) in [(fast_attempts, 60), (fast_attempts + 1, 120)] {
         let event = wait_for_event(&test.codex, |event| {
             matches!(event, EventMsg::StreamError(error) if error.message == "Reconnecting... waiting for network")
                 || matches!(event, EventMsg::Error(_) | EventMsg::TurnComplete(_))
@@ -158,7 +162,7 @@ async fn exhausted_stream_retries_back_off_with_same_prompt_and_cache_key() -> a
     assert!(matches!(event, EventMsg::TurnComplete(_)), "{event:?}");
 
     let requests = responses.requests();
-    assert_eq!(requests.len(), 4);
+    assert_eq!(requests.len(), fast_attempts + 2);
     let initial = requests[0].body_json();
     let session_id = requests[0].header("session-id");
     assert!(session_id.is_some());
@@ -170,6 +174,53 @@ async fn exhausted_stream_retries_back_off_with_same_prompt_and_cache_key() -> a
         assert_eq!(candidate["tools"], initial["tools"]);
         assert_eq!(candidate["prompt_cache_key"], initial["prompt_cache_key"]);
         assert_eq!(request.header("session-id"), session_id);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn exhausted_stream_retries_stop_for_explicit_limits_and_noninteractive_calls()
+-> anyhow::Result<()> {
+    skip_if_no_network!(Ok(()));
+    for (source, client_name, configured_limit) in [
+        (SessionSource::Cli, Some("codex-tui"), Some(1)),
+        (SessionSource::Cli, Some("codex_exec"), None),
+        (
+            SessionSource::Custom("thread_sample".to_string()),
+            None,
+            None,
+        ),
+    ] {
+        let server = start_mock_server().await;
+        let test = test_codex()
+            .with_session_source(source)
+            .with_config(|config| {
+                config.model_provider.request_max_retries = Some(0);
+                config.model_provider.stream_max_retries = configured_limit;
+            })
+            .build_with_auto_env(&server)
+            .await?;
+        test.codex
+            .set_app_server_client_info(
+                client_name.map(str::to_string),
+                /*app_server_client_version*/ None,
+            )
+            .await?;
+        let fast_attempts = test.config.model_provider.stream_max_retries() as usize + 1;
+        let responses =
+            mount_response_sequence(&server, vec![upstream_gateway_reset(); fast_attempts]).await;
+
+        submit(&test.codex).await;
+        let event = wait_for_event(&test.codex, |event| {
+            matches!(event, EventMsg::StreamError(error) if error.message == "Reconnecting... waiting for network")
+                || matches!(event, EventMsg::Error(_) | EventMsg::TurnComplete(_))
+        })
+        .await;
+        assert!(
+            matches!(event, EventMsg::Error(_)),
+            "{client_name:?}, {configured_limit:?}: {event:?}"
+        );
+        assert_eq!(responses.requests().len(), fast_attempts);
     }
     Ok(())
 }
