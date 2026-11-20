@@ -390,6 +390,8 @@ max_recent_non_user_entries = 12
     assert_eq!(
         features.guardianv2,
         Some(FeatureToml::Config(crate::GuardianV2ConfigToml {
+            async_elastic_budgeting: None,
+            async_elastic_sections: None,
             sync_elastic_budgeting: None,
             sync_elastic_sections: None,
             transcript_mode: None,
@@ -914,6 +916,7 @@ non_code_mode_only = true
             hide_spawn_agent_metadata: Some(true),
             expose_spawn_agent_model_overrides: Some(true),
             wait_agent_enabled: Some(false),
+            interrupt_at_item_boundary: None,
             disable_native_tools: Some(true),
             disable_direct_message: Some(true),
             message_board_in_memory: Some(true),

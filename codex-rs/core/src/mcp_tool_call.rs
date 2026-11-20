@@ -8,6 +8,7 @@ use crate::config::Config;
 use crate::config::edit::ConfigEdit;
 use crate::config::edit::ConfigEditsBuilder;
 use crate::connectors;
+use crate::function_tool::FunctionCallError;
 use crate::guardian::GuardianApprovalRequest;
 use crate::guardian::GuardianMcpAnnotations;
 use crate::guardian::GuardianReviewContext;
@@ -167,7 +168,7 @@ pub(crate) async fn handle_mcp_tool_call(
     invocation_tool_name: ToolName,
     source: &crate::tools::context::ToolCallSource,
     arguments: String,
-) -> HandledMcpToolCall {
+) -> Result<CompletedMcpToolCall, FunctionCallError> {
     let turn_context = &step_context.turn;
     let server = advertised_tool.server_name().to_owned();
     let tool_name = advertised_tool.tool.name.to_string();
@@ -175,15 +176,19 @@ pub(crate) async fn handle_mcp_tool_call(
         Ok(value) => value,
         Err(e) => {
             error!("failed to parse tool call arguments: {e}");
-            return HandledMcpToolCall {
+            return Ok(CompletedMcpToolCall {
                 result: CallToolResult::from_error_text(format!("err: {e}")),
                 tool_input: JsonValue::Object(serde_json::Map::new()),
-            };
+            });
         }
     };
 
     let invocation = McpInvocation {
         server: server.clone(),
+        environment_id: advertised_tool
+            .server_key()
+            .scoped_environment_id()
+            .map(str::to_owned),
         tool: tool_name.clone(),
         arguments: arguments_value.clone(),
     };
@@ -226,11 +231,11 @@ pub(crate) async fn handle_mcp_tool_call(
                 /*already_started*/ false,
             )
             .await;
-            return HandledMcpToolCall {
+            return Ok(CompletedMcpToolCall {
                 result: CallToolResult::from_result(result),
                 tool_input: arguments_value
                     .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new())),
-            };
+            });
         }
     };
     let item_metadata = McpToolCallItemMetadata::from_tool_metadata(&server, Some(&metadata));
@@ -259,11 +264,11 @@ pub(crate) async fn handle_mcp_tool_call(
             connector_name.as_deref(),
             /*duration*/ None,
         );
-        return HandledMcpToolCall {
+        return Ok(CompletedMcpToolCall {
             result: CallToolResult::from_result(result),
             tool_input: arguments_value
                 .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new())),
-        };
+        });
     };
     let _approval_metadata = sess.register_mcp_tool_approval_metadata(
         &call_id,
@@ -392,11 +397,11 @@ pub(crate) async fn handle_mcp_tool_call(
             /*duration*/ None,
         );
 
-        return HandledMcpToolCall {
+        return Ok(CompletedMcpToolCall {
             result: CallToolResult::from_result(result),
             tool_input: arguments_value
                 .unwrap_or_else(|| JsonValue::Object(serde_json::Map::new())),
-        };
+        });
     }
 
     handle_approved_mcp_tool_call(
@@ -414,10 +419,15 @@ pub(crate) async fn handle_mcp_tool_call(
     .await
 }
 
-pub(crate) struct HandledMcpToolCall {
+pub(crate) struct CompletedMcpToolCall {
     pub(crate) result: CallToolResult,
     pub(crate) tool_input: JsonValue,
 }
+
+/// Preserves the local admission failure through RMCP's transport error context.
+#[derive(Debug, thiserror::Error)]
+#[error(transparent)]
+struct McpAdmissionError(FunctionCallError);
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct McpToolCallItemMetadata {
@@ -476,7 +486,7 @@ async fn handle_approved_mcp_tool_call(
     item_metadata: McpToolCallItemMetadata,
     source: &crate::tools::context::ToolCallSource,
     approval_application: McpToolApprovalApplication,
-) -> HandledMcpToolCall {
+) -> Result<CompletedMcpToolCall, FunctionCallError> {
     let turn_context = step_context.turn.as_ref();
     let server = invocation.server.clone();
     let tool_name = invocation.tool.clone();
@@ -498,15 +508,14 @@ async fn handle_approved_mcp_tool_call(
     } else {
         None
     };
-    // Code Mode can retain this step past a later turn's first native call.
-    // A call rejected here never reaches the peer or acquires MCP attribution.
-    if matches!(
-        search.as_deref(),
-        Some(crate::model_search::ModelSearch::Hosted { .. })
-    ) && !crate::model_search::SearchOwner::admit(
-        &sess.services.thread_extension_data,
-        codex_protocol::openai_models::WebSearchProvider::SearchMcp,
-    ) {
+    // Every Search MCP call can create provider-specific references. Claim Search MCP before the
+    // peer runs so a stale Code Mode call cannot mix them with native search references.
+    if is_search
+        && !crate::model_search::SearchOwner::admit(
+            &sess.services.thread_extension_data,
+            codex_protocol::openai_models::WebSearchProvider::SearchMcp,
+        )
+    {
         let result = notify_mcp_tool_call_skip(
             sess,
             turn_context,
@@ -517,17 +526,30 @@ async fn handle_approved_mcp_tool_call(
             /*already_started*/ true,
         )
         .await;
-        return HandledMcpToolCall {
+        return Ok(CompletedMcpToolCall {
             result: CallToolResult::from_result(result),
             tool_input,
-        };
+        });
     }
     let mut elicitation_type = None;
     let mut request_error_code = None;
+    let mut admission_error = None;
+    let admit = || {
+        let reason = sess
+            .tool_start_denial()
+            .map_err(|error| McpAdmissionError(FunctionCallError::Fatal(error.to_string())))?;
+        if let Some(reason) = reason {
+            return Err(McpAdmissionError(FunctionCallError::RespondToModel(format!(
+                "aborted before MCP handoff: {reason}"
+            )))
+            .into());
+        }
+        Ok(())
+    };
     let result = async {
         let result = async {
             let result = prepared_call
-                .call_with_preparation(/*requested_timeout*/ None, || async {
+                .call_with_admission(/*requested_timeout*/ None, admit, || async {
                     if let McpToolApprovalApplication::Apply { decision, policy } =
                         &approval_application
                     {
@@ -676,9 +698,16 @@ async fn handle_approved_mcp_tool_call(
                     Ok((rewritten_arguments, request_meta))
                 })
                 .await
-                .map_err(|error| {
-                    request_error_code = codex_rmcp_client::request_error_code(&error);
-                    format!("tool call error: {error:?}")
+                .map_err(|error| match error.downcast::<McpAdmissionError>() {
+                    Ok(McpAdmissionError(error)) => {
+                        let message = error.to_string();
+                        admission_error = Some(error);
+                        message
+                    }
+                    Err(error) => {
+                        request_error_code = codex_rmcp_client::request_error_code(&error);
+                        format!("tool call error: {error:?}")
+                    }
                 });
             // Keep the backend response intact, before callbacks or model/UI limits can change it.
             sess.services.rollout_thread_trace.record_mcp_tool_result(
@@ -743,6 +772,19 @@ async fn handle_approved_mcp_tool_call(
         },
     ))
     .await;
+    if let Some(error) = admission_error {
+        notify_mcp_tool_call_completed(
+            sess,
+            turn_context,
+            call_id,
+            invocation,
+            item_metadata,
+            Duration::ZERO,
+            truncate_mcp_tool_result_for_event(&result),
+        )
+        .await;
+        return Err(error);
+    }
     if let Err(error) = &result {
         tracing::warn!("MCP tool call error: {error:?}");
     }
@@ -788,10 +830,10 @@ async fn handle_approved_mcp_tool_call(
         Some(duration),
     );
 
-    HandledMcpToolCall {
+    Ok(CompletedMcpToolCall {
         result: CallToolResult::from_result(result),
         tool_input,
-    }
+    })
 }
 
 fn mcp_tool_call_span(
@@ -959,7 +1001,7 @@ async fn maybe_request_codex_apps_auth_elicitation(
     let response = sess
         .request_mcp_server_elicitation(
             turn_context,
-            CODEX_APPS_MCP_SERVER_NAME.to_string(),
+            McpServerKey::unscoped(CODEX_APPS_MCP_SERVER_NAME),
             request_id,
             request,
         )
@@ -1136,12 +1178,14 @@ async fn notify_mcp_tool_call_started(
 ) {
     let McpInvocation {
         server,
+        environment_id,
         tool,
         arguments,
     } = invocation;
     let item = TurnItem::McpToolCall(McpToolCallItem {
         id: call_id.to_string(),
         server,
+        environment_id,
         tool,
         arguments: arguments.unwrap_or(JsonValue::Null),
         connector_id: item_metadata.connector_id,
@@ -1182,12 +1226,14 @@ async fn notify_mcp_tool_call_completed(
     };
     let McpInvocation {
         server,
+        environment_id,
         tool,
         arguments,
     } = invocation;
     let item = TurnItem::McpToolCall(McpToolCallItem {
         id: call_id.to_string(),
         server,
+        environment_id,
         tool,
         arguments: arguments.unwrap_or(JsonValue::Null),
         connector_id: item_metadata.connector_id,
@@ -1926,7 +1972,7 @@ pub(crate) async fn request_mcp_tool_user_approval(
                 prompt_options,
             });
         let response = sess
-            .request_mcp_server_elicitation(turn_context, server.clone(), request_id, request)
+            .request_mcp_server_elicitation(turn_context, server_key.clone(), request_id, request)
             .await;
         // Missing replies are interruptions. A received Cancel needs provenance
         // from its source; RPC success alone does not establish a user action.
@@ -2068,6 +2114,22 @@ pub(crate) fn build_guardian_mcp_tool_review_request(
             }),
         prompt_permissions: None,
     }
+}
+
+/// Connector identity only when this exact App call is enabled and needs no user approval.
+pub(crate) fn bundled_app_hook_connector(call: &PreparedMcpCall) -> Option<&str> {
+    let info = call.tool_info();
+    if !call.is_host_owned_apps() {
+        return None;
+    }
+    let metadata = mcp_tool_metadata(info, call.plugin_id(), /*arguments*/ None).ok()?;
+    let policy = app_tool_policy(call.config(), &metadata, &info.tool.name);
+    if !policy.enabled
+        || requires_mcp_tool_approval_for_mode(metadata.annotations.as_ref(), policy.approval)
+    {
+        return None;
+    }
+    info.connector_id.as_deref()
 }
 
 fn mcp_tool_approval_policy(

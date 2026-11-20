@@ -93,6 +93,7 @@ fn mcp_tool_call(id: &str, server: &str, status: McpToolCallStatus) -> TurnItem 
     TurnItem::McpToolCall(McpToolCallItem {
         id: id.to_string(),
         server: server.to_string(),
+        environment_id: None,
         tool: "create_thread".to_string(),
         arguments: serde_json::Value::Null,
         connector_id: None,
@@ -344,6 +345,7 @@ fn streams_stable_segment_items_and_ignores_upstream_transcript_revisions() {
         done.items,
         vec![RealtimeItem {
             id: started.id,
+            observed_at_ms: started.observed_at_ms,
             realtime_session_id: "voice-1".to_string(),
             content: RealtimeItemContent::TranscriptSegment {
                 role: RealtimeTranscriptRole::Assistant,
@@ -371,6 +373,7 @@ fn emits_the_complete_item_lifecycle_when_only_a_final_transcript_arrives() {
         effects.items,
         vec![RealtimeItem {
             id: started.id,
+            observed_at_ms: started.observed_at_ms,
             realtime_session_id: "voice-1".to_string(),
             content: RealtimeItemContent::TranscriptSegment {
                 role: RealtimeTranscriptRole::Assistant,
@@ -565,6 +568,7 @@ fn promotes_successful_dynamic_tools_and_splits_active_transcripts() {
         items[0],
         RealtimeItem {
             id: first.item_id.clone(),
+            observed_at_ms: first.started_item.as_ref().unwrap().observed_at_ms,
             realtime_session_id: "voice-1".to_string(),
             content: RealtimeItemContent::TranscriptSegment {
                 role: RealtimeTranscriptRole::Assistant,

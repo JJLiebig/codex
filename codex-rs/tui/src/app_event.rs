@@ -51,6 +51,7 @@ use uuid::Uuid;
 
 use crate::app_command::AppCommand;
 use crate::app_server_session::AppServerStartedThread;
+use crate::backend_id::BackendId;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::StatusLineItem;
 use crate::bottom_pane::TerminalTitleItem;
@@ -318,10 +319,11 @@ pub(crate) enum CapturedSideStream {
 #[derive(Debug)]
 pub(crate) struct CapturedSideDisplay {
     pub(crate) rendered_completion_turn_ids: std::collections::HashMap<String, bool>,
+    pub(crate) generated_images: crate::history_cell::PendingGeneratedImages,
     pub(crate) active: Option<Box<dyn HistoryCell>>,
     pub(crate) auxiliary: Vec<crate::terminal_hyperlinks::HyperlinkLine>,
     pub(crate) draft: Box<crate::bottom_pane::TextArea>,
-    pub(crate) status_line: Option<crate::bottom_pane::footer_content::FooterContent>,
+    pub(crate) status_line: Option<crate::bottom_pane::StatusLine>,
     pub(crate) work: Option<CapturedSideWork>,
     pub(crate) last_completed_agent_message: Option<(String, String)>,
     pub(crate) cwd: AbsolutePathBuf,
@@ -356,10 +358,12 @@ impl CapturedSideWork {
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, IntoStaticStr)]
 pub(crate) enum AppEvent {
+    StatuslineRead(crate::chatwidget::StatuslineReadEvent),
     AccountEmailLoaded {
         request_id: uuid::Uuid,
         email: Option<String>,
         workspace: Option<String>,
+        plan_type: codex_protocol::account::PlanType,
     },
     SecuritySetupLoaded {
         request_id: uuid::Uuid,
@@ -367,6 +371,15 @@ pub(crate) enum AppEvent {
         notice: crate::security_setup::Notice,
     },
     OpenDaemonMenu,
+    RemoteControl(crate::app::remote_control::Action),
+    RemoteControlForBackend {
+        backend_id: crate::backend_id::BackendId,
+        action: crate::app::remote_control::Action,
+    },
+    RemoteControlFinished {
+        backend_id: crate::backend_id::BackendId,
+        result: crate::app::remote_control::Outcome,
+    },
     ConfirmDaemonRestart,
     RunDaemonRestart,
     ConfirmDaemonUpdate(crate::update_action::DaemonUpdateSource),
@@ -380,6 +393,7 @@ pub(crate) enum AppEvent {
     SearchAgentsOverview(Uuid, usize),
     AgentsOverviewSearchPage {
         id: Uuid,
+        backend_id: crate::backend_id::BackendId,
         rows: Vec<(Thread, bool)>,
         cursor: crate::app::agents_overview_discovery::AgentsOverviewDiscovery,
         ok: bool,
@@ -429,6 +443,7 @@ pub(crate) enum AppEvent {
     },
     /// Finish moving a task into or out of the shared pinned section.
     AgentsOverviewPinToggled {
+        backend_id: BackendId,
         request_id: Uuid,
         thread_id: ThreadId,
         pinned: bool,
@@ -445,15 +460,16 @@ pub(crate) enum AppEvent {
         thread_id: ThreadId,
         destination: ThreadTitleDestination,
         prompt: String,
+        expected_name: Option<String>,
         fallback_title: Option<String>,
         effort: Option<ReasoningEffort>,
         result: Result<String, String>,
     },
-    /// Route a hidden title request to its automatic rename or editable prompt.
+    /// Finish title generation and deliver an editable suggestion when requested.
     GeneratedThreadTitle {
         cancellation: CancellationToken,
         thread_id: ThreadId,
-        temporary_thread_id: ThreadId,
+        temporary_thread_id: Option<ThreadId>,
         destination: ThreadTitleDestination,
         result: Result<String, String>,
     },
@@ -477,6 +493,8 @@ pub(crate) enum AppEvent {
     },
     /// Open the agent picker for switching active threads.
     OpenAgentPicker,
+    /// Discover saved subagents on the owning backend after attaching a primary thread.
+    DiscoverSidebarAgents(ThreadId),
     /// Merge a completed root-scoped agent-picker refresh without blocking terminal input.
     AgentPickerThreadsLoaded {
         primary_thread_id: ThreadId,
@@ -522,6 +540,37 @@ pub(crate) enum AppEvent {
         request: uuid::Uuid,
     },
     StartQueuedSavedChat,
+    OpenSidebarAgent {
+        backend: crate::backend_id::BackendId,
+        source: ThreadId,
+        agent: ThreadId,
+    },
+    OpenSidebarDocument {
+        backend_id: crate::backend_id::BackendId,
+        source: ThreadId,
+        link: crate::markdown_render::FileLink,
+    },
+    SidebarDocumentResolved {
+        backend_id: crate::backend_id::BackendId,
+        parent: ThreadId,
+        source: ThreadId,
+        request: uuid::Uuid,
+        original_path: codex_app_server_client::AppServerPath,
+        path: std::result::Result<codex_utils_path_uri::PathUri, String>,
+        location: Option<crate::markdown_render::SourceLocation>,
+    },
+    SidebarDocumentLoaded {
+        backend_id: crate::backend_id::BackendId,
+        parent: ThreadId,
+        request: uuid::Uuid,
+        result: Result<crate::sidebar_image::DocumentContent, String>,
+    },
+    SidebarFilesLoaded {
+        backend_id: crate::backend_id::BackendId,
+        parent: ThreadId,
+        request: uuid::Uuid,
+        page: Option<codex_app_server_protocol::ThreadItemsListResponse>,
+    },
     SavedSideChatsLoaded {
         backend_id: crate::backend_id::BackendId,
         parent: ThreadId,
@@ -674,6 +723,15 @@ pub(crate) enum AppEvent {
     /// Move an empty conversation to the next connected backend.
     CycleNewConversationBackend,
 
+    /// Show the saved environments for the empty Cloud draft.
+    ChooseCloudEnvironment,
+
+    /// Move the empty Cloud draft to the selected environment.
+    StartCloudConversation {
+        source: ThreadId,
+        saved_environment: Option<codex_app_server_client::SavedEnvironment>,
+    },
+
     /// Continue a provider-locked conversation in a fresh chat using its saved history.
     ContinueProviderChat {
         thread_id: ThreadId,
@@ -736,6 +794,7 @@ pub(crate) enum AppEvent {
     DynamicToolCallCompleted {
         request_id: AppServerRequestId,
         response: DynamicToolCallResponse,
+        reply: Option<codex_app_server_client::AppServerReplyHandle>,
     },
 
     /// Register task tools inherited by a dynamically created thread.
@@ -793,11 +852,19 @@ pub(crate) enum AppEvent {
     /// Resume a thread by UUID or thread name inside the running TUI session.
     ResumeSessionByIdOrName(String),
 
+    /// Reattach an externally unarchived thread only while it remains displayed and unarchived.
+    ResumeUnarchivedThread(ThreadId),
+
     /// Attach a conversation through the registered backend that owns it.
     ResumeBackendSession(crate::resume_picker::SessionTarget),
 
     /// Archive the current active main thread and return to the command center.
     ArchiveCurrentThread,
+    ArchiveFinished {
+        backend_id: crate::backend_id::BackendId,
+        thread_id: ThreadId,
+        result: Result<(), String>,
+    },
 
     /// Permanently delete the current active main thread and return to the command center.
     DeleteCurrentThread,
@@ -962,13 +1029,13 @@ pub(crate) enum AppEvent {
     /// Fetch backend-estimated usage for the currently visible enterprise thread.
     RefreshThreadUsage {
         thread_id: ThreadId,
-        request_id: u64,
+        request_id: Uuid,
     },
 
     /// Result of fetching backend-estimated usage for a specific thread.
     ThreadUsageLoaded {
         thread_id: ThreadId,
-        request_id: u64,
+        request_id: Uuid,
         result: Result<ThreadUsageOutcome, String>,
     },
 
@@ -981,7 +1048,7 @@ pub(crate) enum AppEvent {
 
     /// Fetch workspace messages for the status-line headline item.
     RefreshStatusLineWorkspaceHeadline {
-        request_id: u64,
+        request_id: Uuid,
     },
 
     /// Commit settled asynchronous usage output after active-output barriers clear.
@@ -1290,6 +1357,7 @@ pub(crate) enum AppEvent {
 
     StartMcpLogin {
         name: String,
+        environment_id: Option<String>,
         thread_id: ThreadId,
     },
 
@@ -1535,6 +1603,12 @@ pub(crate) enum AppEvent {
     /// Save the voice for subsequent conversations through the app server.
     PersistRealtimeVoiceSelection {
         voice: codex_protocol::protocol::RealtimeVoice,
+    },
+
+    /// Toggle the service tier staged for the next Cloud submission.
+    ToggleCloudServiceTier {
+        thread_id: ThreadId,
+        tier: String,
     },
 
     /// Persist the selected service tier to the appropriate config.
@@ -1875,7 +1949,7 @@ pub(crate) enum AppEvent {
     },
     /// Async update of the workspace notification headline for status line rendering.
     StatusLineWorkspaceHeadlineUpdated {
-        request_id: u64,
+        request_id: Uuid,
         result: Result<crate::workspace_messages::WorkspaceHeadlineFetchResult, String>,
     },
     /// Apply a user-confirmed status-line item ordering/selection.
@@ -1885,6 +1959,22 @@ pub(crate) enum AppEvent {
     },
     /// Dismiss the status-line setup UI without changing config.
     StatusLineSetupCancelled,
+    OpenStatuslinePicker(crate::key_hint::KeyBinding),
+    CloseStatuslinePicker(uuid::Uuid),
+    ChooseStatuslineProvider {
+        scan: uuid::Uuid,
+        id: Option<crate::statusline_provider::ProviderId>,
+        key: crate::key_hint::KeyBinding,
+    },
+    CreateCustomStatusline {
+        backend: Option<crate::backend_id::BackendId>,
+        thread_id: Option<ThreadId>,
+        key: crate::key_hint::KeyBinding,
+    },
+    StatuslinePicker {
+        scan: uuid::Uuid,
+        updates: Vec<crate::statusline_provider::discovery::DiscoveryUpdate>,
+    },
 
     /// Apply a user-confirmed terminal-title item ordering/selection.
     TerminalTitleSetup {

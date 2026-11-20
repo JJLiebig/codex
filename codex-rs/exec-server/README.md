@@ -537,6 +537,27 @@ Destination policy still applies to every route. Enforcing mandatory upstream ro
 would require a separate fail-closed mode. A connection failure after selecting an
 upstream proxy is returned as an error, without retrying directly.
 
+### Transparent TCP
+
+In managed `requirements.toml`, set `enabled = true` and `transparent_tcp = true` in the
+network policy table you already use (`[permissions.network]`, `[network_proxy]`, or
+`[experimental_network]`). Use one table. Managed SOCKS5 must be enabled.
+
+Capture defaults to off. When requested through configuration, the controller requires a Linux
+executor advertising `networkProxyTransparentTcp`. If the sandbox cannot open or configure
+`/dev/net/tun`, the launch fails before the command runs. To opt in at executor startup:
+
+```sh
+codex exec-server --linux-sandbox-transparent-tcp --tcp-upstream-proxy proxy:8088
+```
+
+The executor chooses the mandatory plaintext HTTP CONNECT next hop for opaque SOCKS traffic.
+HTTP clients retain their existing proxy configuration. A failed CONNECT never retries directly.
+The upstream resolves hostnames; named tunnels are refused if local binding is disabled or
+an IP deny/review rule requires local resolution. Private IP literals additionally require
+`--proxy-private-ips-via-upstream`; loopback, link-local and the upstream itself are rejected.
+The upstream must enforce policy on the address it dials. See the [Linux host requirements](../linux-sandbox/README.md#transparent-tcp).
+
 ## Example session
 
 Initialize:

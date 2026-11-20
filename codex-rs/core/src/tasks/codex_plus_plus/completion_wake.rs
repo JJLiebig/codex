@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tokio_util::sync::CancellationToken;
 
+use crate::session::SamplingInterrupt;
 use crate::session::TurnInput;
 use crate::session::session::Session;
 use crate::session::turn::TurnRunState;
@@ -33,13 +34,13 @@ pub(crate) async fn run_turn_loop(
         turn.id = %ctx.sub_id,
     );
     loop {
-        let turn_result = run_turn(
+        let turn_result = Box::pin(run_turn(
             Arc::clone(&sess),
             Arc::clone(&ctx),
             next_input,
             &mut turn_state,
             cancellation_token.child_token(),
-        )
+        ))
         .instrument(run_turn_span.clone())
         .await;
         let last_agent_message = match turn_result {
@@ -60,7 +61,10 @@ pub(crate) async fn run_turn_loop(
         }
         // Terminal errors are already reported. Let task completion preserve pending
         // input instead of restarting the failed turn for that same input.
-        if ctx.terminal_error.lock().await.is_some() {
+        if ctx.terminal_error.lock().await.is_some()
+            || sess.work_budget().is_exhausted()
+            || SamplingInterrupt::is_requested_for(&sess, &ctx).await
+        {
             if !cancellation_token.is_cancelled() {
                 sess.services.unified_exec_manager.completion_wake.clear();
             }
@@ -87,7 +91,10 @@ pub(crate) async fn run_turn_loop(
             .completion_wake
             .wait_for_input(&sess, &ctx, &cancellation_token)
             .await;
-        if !sess.input_queue.has_pending_input(&sess.active_turn).await {
+        if sess.work_budget().is_exhausted()
+            || SamplingInterrupt::is_requested_for(&sess, &ctx).await
+            || !sess.input_queue.has_pending_input(&sess.active_turn).await
+        {
             return Ok(Some(super::super::regular::RegularTaskOutput {
                 last_agent_message,
                 mcp_startup_requirements: std::mem::take(&mut turn_state.mcp_startup_requirements),

@@ -4,8 +4,8 @@ use crate::outgoing_message::ThreadScopedOutgoingMessageSender;
 use crate::request_processors::thread_settings_from_config_snapshot;
 use crate::server_request_error::is_turn_transition_server_request_error;
 use crate::thread_state::PendingNetworkApproval;
+use crate::thread_state::ThreadListenerCommand;
 use crate::thread_state::ThreadState;
-use crate::thread_state::TurnSummary;
 use crate::thread_state::resolve_server_request_on_thread_listener;
 use crate::thread_status::ThreadWatchActiveGuard;
 use crate::thread_status::ThreadWatchManager;
@@ -136,7 +136,7 @@ enum CommandExecutionApprovalPresentation {
 }
 
 #[derive(Debug, PartialEq)]
-struct CommandExecutionCompletionItem {
+pub(crate) struct CommandExecutionCompletionItem {
     model_context: Option<ModelInvocationContext>,
     plugin_id: Option<String>,
     script_path: Option<String>,
@@ -158,6 +158,17 @@ pub(crate) async fn apply_bespoke_event_handling(
         id: event_turn_id,
         msg,
     } = event;
+    // A late terminal event must preserve the newer turn's requests and watch status.
+    let finishes_latest_turn = matches!(&msg, EventMsg::TurnComplete(_) | EventMsg::TurnAborted(_))
+        && thread_state
+            .lock()
+            .await
+            .last_started_turn_id
+            .as_deref()
+            .is_none_or(|latest| latest == event_turn_id);
+    if finishes_latest_turn {
+        outgoing.abort_pending_server_requests().await;
+    }
     let approval_starts_command = msg.command_approval_start().is_some();
     match msg {
         EventMsg::BackgroundCompletionWaiting { waiting } => {
@@ -171,7 +182,6 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::TurnStarted(payload) => {
-            // While not technically necessary as it was already done on TurnComplete, be extra cautios and abort any pending server requests.
             outgoing.abort_pending_server_requests().await;
             thread_watch_manager
                 .note_turn_started(&conversation_id.to_string())
@@ -200,13 +210,18 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::TurnComplete(turn_complete_event) => {
-            // All per-thread requests are bound to a turn, so abort them.
-            outgoing.abort_pending_server_requests().await;
-            respond_to_pending_interrupts(&thread_state, &outgoing).await;
-            let turn_failed = thread_state.lock().await.turn_summary.last_error.is_some();
-            thread_watch_manager
-                .note_turn_completed(&conversation_id.to_string(), turn_failed)
-                .await;
+            respond_to_pending_interrupts(&event_turn_id, &thread_state, &outgoing).await;
+            if finishes_latest_turn {
+                let turn_failed = thread_state
+                    .lock()
+                    .await
+                    .turn_summaries
+                    .get(&event_turn_id)
+                    .is_some_and(|summary| summary.last_error.is_some());
+                thread_watch_manager
+                    .note_turn_completed(&conversation_id.to_string(), turn_failed)
+                    .await;
+            }
             handle_turn_complete(
                 conversation_id,
                 event_turn_id,
@@ -236,6 +251,7 @@ pub(crate) async fn apply_bespoke_event_handling(
             let notification = McpServerStatusUpdatedNotification {
                 thread_id: Some(conversation_id.to_string()),
                 name: update.server,
+                environment_id: update.environment_id,
                 status,
                 error,
                 failure_reason,
@@ -475,6 +491,12 @@ pub(crate) async fn apply_bespoke_event_handling(
                 .await;
         }
         EventMsg::RealtimeConversationRealtime(event) => match event.payload {
+            RealtimeEvent::HistoryItemStarted(item) | RealtimeEvent::HistoryItemCompleted(item)
+                if matches!(
+                    &item.content,
+                    codex_protocol::realtime::RealtimeItemContent::TurnInputAccepted { .. }
+                        | codex_protocol::realtime::RealtimeItemContent::SessionEndInputSaved { .. }
+                ) => {}
             RealtimeEvent::HistoryItemStarted(item) => {
                 outgoing
                     .send_server_notification(ServerNotification::ThreadRealtimeItemStarted(
@@ -767,7 +789,9 @@ pub(crate) async fn apply_bespoke_event_handling(
                             .then_some(completion_item),
                     ),
                 };
-            if approval_starts_command && let Some(completion_item) = completion_item.as_ref() {
+            let opened_command_item = if approval_starts_command
+                && let Some(completion_item) = completion_item.as_ref()
+            {
                 start_command_execution_item(
                     &conversation_id,
                     event_turn_id.clone(),
@@ -777,8 +801,10 @@ pub(crate) async fn apply_bespoke_event_handling(
                     &outgoing,
                     &thread_state,
                 )
-                .await;
-            }
+                .await
+            } else {
+                false
+            };
             let proposed_execpolicy_amendment_v2 =
                 proposed_execpolicy_amendment.map(V2ExecPolicyAmendment::from);
             let proposed_network_policy_amendments_v2 =
@@ -834,6 +860,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     approval_id,
                     call_id,
                     completion_item,
+                    opened_command_item,
                     pending_request_id,
                     rx,
                     conversation,
@@ -951,6 +978,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 thread_id: conversation_id.to_string(),
                 turn_id,
                 server_name: request.server_name.clone(),
+                environment_id: request.environment_id.clone(),
                 request: request_body,
             };
             let (pending_request_id, rx) = outgoing
@@ -1075,7 +1103,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 return;
             }
 
-            let turn_error = turn_error_from_event(ev);
+            let turn_error = TurnError::from(ev);
             handle_error_notification(
                 conversation_id,
                 &event_turn_id,
@@ -1111,8 +1139,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 CoreTurnItem::CommandExecution(item) => thread_state
                     .lock()
                     .await
-                    .turn_summary
-                    .record_command_start(item.id.clone(), event.started_at_ms),
+                    .record_command_start(&event_turn_id, item.id.clone(), event.started_at_ms),
                 _ => true,
             };
             let dynamic_tool_call_params = match &event.item {
@@ -1152,6 +1179,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 &thread_manager,
                 &thread_watch_manager,
                 &thread_state,
+                &event_turn_id,
                 &mut event,
             )
             .await;
@@ -1216,7 +1244,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                     TurnCompletionMetadata {
                         status: TurnStatus::Interrupted,
                         root_turn_id: aborted.root_turn_id,
-                        error: aborted.error.map(turn_error_from_event),
+                        error: aborted.error.map(TurnError::from),
                         last_agent_message: None,
                         started_at: aborted.started_at,
                         completed_at: aborted.completed_at,
@@ -1269,13 +1297,13 @@ pub(crate) async fn apply_bespoke_event_handling(
         }
         // If this is a TurnAborted, reply to any pending interrupt requests.
         EventMsg::TurnAborted(turn_aborted_event) => {
-            // All per-thread requests are bound to a turn, so abort them.
-            outgoing.abort_pending_server_requests().await;
-            respond_to_pending_interrupts(&thread_state, &outgoing).await;
+            respond_to_pending_interrupts(&event_turn_id, &thread_state, &outgoing).await;
 
-            thread_watch_manager
-                .note_turn_interrupted(&conversation_id.to_string())
-                .await;
+            if finishes_latest_turn {
+                thread_watch_manager
+                    .note_turn_interrupted(&conversation_id.to_string())
+                    .await;
+            }
             handle_turn_interrupted(
                 conversation_id,
                 event_turn_id,
@@ -1427,6 +1455,7 @@ async fn apply_canonical_item_completed_side_effects(
     thread_manager: &Arc<ThreadManager>,
     thread_watch_manager: &ThreadWatchManager,
     thread_state: &Arc<Mutex<ThreadState>>,
+    event_turn_id: &str,
     event: &mut codex_protocol::protocol::ItemCompletedEvent,
 ) {
     match &event.item {
@@ -1434,9 +1463,7 @@ async fn apply_canonical_item_completed_side_effects(
             let observed_start = thread_state
                 .lock()
                 .await
-                .turn_summary
-                .command_start_times
-                .remove(&item.id);
+                .take_command_start(event_turn_id, &item.id);
             // A client can already be displaying the command's approval-time start.
             event.started_at_ms = observed_start.or(event.started_at_ms);
         }
@@ -1480,11 +1507,11 @@ async fn start_command_execution_item(
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) -> bool {
-    let first_start = thread_state
-        .lock()
-        .await
-        .turn_summary
-        .record_command_start(item_id.clone(), started_at_ms);
+    let first_start =
+        thread_state
+            .lock()
+            .await
+            .record_command_start(&turn_id, item_id.clone(), started_at_ms);
     if first_start {
         let notification = ItemStartedNotification::new(
             conversation_id.to_string(),
@@ -1515,7 +1542,7 @@ async fn start_command_execution_item(
 }
 
 #[allow(clippy::too_many_arguments)]
-async fn complete_command_execution_item(
+pub(crate) async fn complete_command_execution_item(
     conversation_id: &ThreadId,
     turn_id: String,
     item_id: String,
@@ -1528,9 +1555,7 @@ async fn complete_command_execution_item(
     let Some(started_at_ms) = thread_state
         .lock()
         .await
-        .turn_summary
-        .command_start_times
-        .remove(&item_id)
+        .take_command_start(&turn_id, &item_id)
     else {
         return;
     };
@@ -1564,14 +1589,6 @@ async fn complete_command_execution_item(
         .await;
 }
 
-async fn find_and_remove_turn_summary(
-    _conversation_id: ThreadId,
-    thread_state: &Arc<Mutex<ThreadState>>,
-) -> TurnSummary {
-    let mut state = thread_state.lock().await;
-    std::mem::take(&mut state.turn_summary)
-}
-
 async fn handle_turn_complete(
     conversation_id: ThreadId,
     event_turn_id: String,
@@ -1579,7 +1596,7 @@ async fn handle_turn_complete(
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) {
-    let turn_summary = find_and_remove_turn_summary(conversation_id, thread_state).await;
+    let turn_summary = thread_state.lock().await.take_turn_summary(&event_turn_id);
 
     let error = turn_summary.last_error;
     let (status, error, last_agent_message) = match error {
@@ -1611,7 +1628,7 @@ async fn handle_turn_interrupted(
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) {
-    let turn_summary = find_and_remove_turn_summary(conversation_id, thread_state).await;
+    let turn_summary = thread_state.lock().await.take_turn_summary(&event_turn_id);
 
     emit_turn_completed_with_status(
         conversation_id,
@@ -1619,7 +1636,7 @@ async fn handle_turn_interrupted(
         TurnCompletionMetadata {
             status: TurnStatus::Interrupted,
             root_turn_id: turn_aborted_event.root_turn_id,
-            error: turn_aborted_event.error.map(turn_error_from_event),
+            error: turn_aborted_event.error.map(TurnError::from),
             last_agent_message: None,
             started_at: turn_summary.started_at,
             completed_at: turn_aborted_event.completed_at,
@@ -1631,12 +1648,17 @@ async fn handle_turn_interrupted(
 }
 
 async fn respond_to_pending_interrupts(
+    event_turn_id: &str,
     thread_state: &Arc<Mutex<ThreadState>>,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
     let pending = {
         let mut state = thread_state.lock().await;
-        std::mem::take(&mut state.pending_interrupts)
+        state
+            .pending_interrupts
+            .extract_if(.., |(turn_id, _)| turn_id == event_turn_id)
+            .map(|(_, request_id)| request_id)
+            .collect::<Vec<_>>()
     };
 
     for request_id in pending {
@@ -1674,13 +1696,10 @@ async fn handle_token_count_event(
     }
 }
 
-async fn handle_error(
-    _conversation_id: ThreadId,
-    error: TurnError,
-    thread_state: &Arc<Mutex<ThreadState>>,
-) {
-    let mut state = thread_state.lock().await;
-    state.turn_summary.last_error = Some(error);
+async fn handle_error(turn_id: &str, error: TurnError, thread_state: &Arc<Mutex<ThreadState>>) {
+    if let Some(summary) = thread_state.lock().await.turn_summaries.get_mut(turn_id) {
+        summary.last_error = Some(error);
+    }
 }
 
 async fn handle_error_notification(
@@ -1690,7 +1709,7 @@ async fn handle_error_notification(
     outgoing: &ThreadScopedOutgoingMessageSender,
     thread_state: &Arc<Mutex<ThreadState>>,
 ) {
-    handle_error(conversation_id, error.clone(), thread_state).await;
+    handle_error(event_turn_id, error.clone(), thread_state).await;
     outgoing
         .send_server_notification(ServerNotification::Error(ErrorNotification {
             error,
@@ -2062,6 +2081,7 @@ async fn on_command_execution_request_approval_response(
     approval_id: Option<String>,
     item_id: String,
     completion_item: Option<CommandExecutionCompletionItem>,
+    opened_command_item: bool,
     pending_request_id: RequestId,
     receiver: oneshot::Receiver<ClientRequestResult>,
     conversation: Arc<CodexThread>,
@@ -2133,7 +2153,25 @@ async fn on_command_execution_request_approval_response(
                 }
             }
         }
-        Ok(Err(err)) if is_turn_transition_server_request_error(&err) => return,
+        Ok(Err(err)) if is_turn_transition_server_request_error(&err) => {
+            // A late approval can open an item after its turn has already cleaned up.
+            if opened_command_item && let Some(completion_item) = completion_item {
+                let state = thread_state.lock().await;
+                if !state.turn_summaries.contains_key(&event_turn_id)
+                    && let Some(sender) = state.listener_command_tx()
+                    && sender
+                        .send(ThreadListenerCommand::CompleteLateCommandApproval {
+                            turn_id: event_turn_id,
+                            item_id,
+                            completion_item: Box::new(completion_item),
+                        })
+                        .is_err()
+                {
+                    error!("failed to complete late command approval: thread listener closed");
+                }
+            }
+            return;
+        }
         Ok(Err(err)) => {
             error!("request failed with client error: {err:?}");
             (
@@ -2157,9 +2195,9 @@ async fn on_command_execution_request_approval_response(
         if approval_id.is_some() {
             let state = thread_state.lock().await;
             state
-                .turn_summary
                 .command_start_times
-                .contains_key(&item_id)
+                .get(&event_turn_id)
+                .is_some_and(|starts| starts.contains_key(&item_id))
         } else {
             false
         }
@@ -2199,15 +2237,6 @@ fn now_unix_timestamp_ms() -> i64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_millis() as i64)
         .unwrap_or_default()
-}
-
-fn turn_error_from_event(error: codex_protocol::protocol::ErrorEvent) -> TurnError {
-    TurnError {
-        message: error.message,
-        codex_error_info: error.codex_error_info.map(Into::into),
-        additional_details: None,
-        misalignment: error.misalignment.map(Into::into),
-    }
 }
 
 #[cfg(test)]
@@ -3136,11 +3165,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_error_records_message() -> Result<()> {
-        let conversation_id = ThreadId::new();
+        let event_turn_id = "turn-1";
         let thread_state = new_thread_state();
 
+        thread_state
+            .lock()
+            .await
+            .note_turn_started(event_turn_id, /*started_at*/ None);
         handle_error(
-            conversation_id,
+            event_turn_id,
             TurnError {
                 misalignment: None,
                 message: "boom".to_string(),
@@ -3151,7 +3184,7 @@ mod tests {
         )
         .await;
 
-        let turn_summary = find_and_remove_turn_summary(conversation_id, &thread_state).await;
+        let turn_summary = thread_state.lock().await.take_turn_summary(event_turn_id);
         assert_eq!(
             turn_summary.last_error,
             Some(TurnError {
@@ -3498,7 +3531,7 @@ mod tests {
         );
         let thread_state = new_thread_state();
         handle_error(
-            conversation_id,
+            &event_turn_id,
             TurnError {
                 misalignment: None,
                 message: "conversation is not running".to_string(),
@@ -3609,8 +3642,12 @@ mod tests {
         let conversation_id = ThreadId::new();
         let event_turn_id = "interrupt1".to_string();
         let thread_state = new_thread_state();
+        thread_state
+            .lock()
+            .await
+            .note_turn_started(&event_turn_id, /*started_at*/ None);
         handle_error(
-            conversation_id,
+            &event_turn_id,
             TurnError {
                 misalignment: None,
                 message: "oops".to_string(),
@@ -3677,7 +3714,7 @@ mod tests {
             }),
         );
         handle_error(
-            conversation_id,
+            &event_turn_id,
             TurnError {
                 misalignment: None,
                 message: "bad".to_string(),
@@ -3909,9 +3946,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_handle_turn_complete_emits_error_multiple_turns() -> Result<()> {
-        // Conversation A will have two turns; Conversation B will have one turn.
-        let conversation_a = ThreadId::new();
-        let conversation_b = ThreadId::new();
+        let conversation_id = ThreadId::new();
         let thread_state = new_thread_state();
 
         let (tx, mut rx) = mpsc::channel(CHANNEL_CAPACITY);
@@ -3925,10 +3960,13 @@ mod tests {
             ThreadId::new(),
         );
 
-        // Turn 1 on conversation A
-        let a_turn1 = "a_turn1".to_string();
+        let first = "first".to_string();
+        thread_state
+            .lock()
+            .await
+            .note_turn_started(&first, /*started_at*/ None);
         handle_error(
-            conversation_a,
+            &first,
             TurnError {
                 misalignment: None,
                 message: "a1".to_string(),
@@ -3938,19 +3976,14 @@ mod tests {
             &thread_state,
         )
         .await;
-        handle_turn_complete(
-            conversation_a,
-            a_turn1.clone(),
-            turn_complete_event(&a_turn1),
-            &outgoing,
-            &thread_state,
-        )
-        .await;
-
-        // Turn 1 on conversation B
-        let b_turn1 = "b_turn1".to_string();
+        // The second turn reports its error before the first one completes.
+        let second = "second".to_string();
+        thread_state
+            .lock()
+            .await
+            .note_turn_started(&second, /*started_at*/ None);
         handle_error(
-            conversation_b,
+            &second,
             TurnError {
                 misalignment: None,
                 message: "b1".to_string(),
@@ -3961,30 +3994,37 @@ mod tests {
         )
         .await;
         handle_turn_complete(
-            conversation_b,
-            b_turn1.clone(),
-            turn_complete_event(&b_turn1),
+            conversation_id,
+            first.clone(),
+            turn_complete_event(&first),
             &outgoing,
             &thread_state,
         )
         .await;
 
-        // Turn 2 on conversation A
-        let a_turn2 = "a_turn2".to_string();
         handle_turn_complete(
-            conversation_a,
-            a_turn2.clone(),
-            turn_complete_event(&a_turn2),
+            conversation_id,
+            second.clone(),
+            turn_complete_event(&second),
             &outgoing,
             &thread_state,
         )
         .await;
 
-        // Verify: A turn 1
+        let third = "third".to_string();
+        handle_turn_complete(
+            conversation_id,
+            third.clone(),
+            turn_complete_event(&third),
+            &outgoing,
+            &thread_state,
+        )
+        .await;
+
         let msg = recv_broadcast_notification(&mut rx).await?;
         match msg {
             ServerNotification::TurnCompleted(n) => {
-                assert_eq!(n.turn.id, a_turn1);
+                assert_eq!(n.turn.id, first);
                 assert_eq!(n.turn.status, TurnStatus::Failed);
                 assert_eq!(
                     n.turn.error,
@@ -3999,11 +4039,10 @@ mod tests {
             other => bail!("unexpected message: {other:?}"),
         }
 
-        // Verify: B turn 1
         let msg = recv_broadcast_notification(&mut rx).await?;
         match msg {
             ServerNotification::TurnCompleted(n) => {
-                assert_eq!(n.turn.id, b_turn1);
+                assert_eq!(n.turn.id, second);
                 assert_eq!(n.turn.status, TurnStatus::Failed);
                 assert_eq!(
                     n.turn.error,
@@ -4018,11 +4057,10 @@ mod tests {
             other => bail!("unexpected message: {other:?}"),
         }
 
-        // Verify: A turn 2
         let msg = recv_broadcast_notification(&mut rx).await?;
         match msg {
             ServerNotification::TurnCompleted(n) => {
-                assert_eq!(n.turn.id, a_turn2);
+                assert_eq!(n.turn.id, third);
                 assert_eq!(n.turn.status, TurnStatus::Completed);
                 assert_eq!(n.turn.error, None);
             }

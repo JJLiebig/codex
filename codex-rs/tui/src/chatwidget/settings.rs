@@ -226,6 +226,7 @@ impl ChatWidget {
         &mut self,
         current_email: Option<String>,
         current_workspace: Option<String>,
+        plan_type: PlanType,
     ) {
         if let Some(StatusAccountDisplay::ChatGpt {
             email, workspace, ..
@@ -233,6 +234,9 @@ impl ChatWidget {
         {
             *email = current_email;
             *workspace = current_workspace;
+            self.account_plan = Some(plan_type);
+            self.refresh_billing_plan();
+            self.refresh_status_surfaces();
         }
     }
 
@@ -291,6 +295,8 @@ impl ChatWidget {
         self.status_line_workspace_messages_disabled = false;
         self.clear_thread_usage_state();
         self.status_account_display = status_account_display;
+        self.account_plan = plan_type;
+        self.quota_plan = None;
         self.plan_type = plan_type;
         self.has_chatgpt_account = has_chatgpt_account;
         if api_key_changed {
@@ -533,6 +539,10 @@ impl ChatWidget {
     fn apply_thread_settings(&mut self, mut settings: ThreadSettings) {
         self.invalidate_permission_discovery();
         let cwd_changed = self.config.cwd != settings.cwd;
+        if let Some(environments) = &settings.environments {
+            self.primary_environment_cwd =
+                crate::session_state::primary_environment_cwd(environments);
+        }
         self.apply_thread_settings_cwd(settings.cwd.clone());
         self.config.model_provider_id = settings.model_provider.clone();
         self.set_daybreak_enabled(self.daybreak_enabled);
@@ -580,6 +590,7 @@ impl ChatWidget {
         }
         settings.collaboration_mode.settings.model = settings.model;
         settings.collaboration_mode.settings.reasoning_effort = settings.effort;
+        self.thread_settings_confirmed = true;
         self.set_effective_collaboration_mode(settings.collaboration_mode);
         self.refresh_effective_service_tier();
         self.refresh_status_surfaces();

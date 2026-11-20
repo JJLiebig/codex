@@ -176,7 +176,7 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
         .apply_older_history_page(target.thread_id, &old_cursor, page, &mut thread.turns)
         .await?;
     assert_eq!(
-        items.iter().map(ThreadItemPayload::id).collect::<Vec<_>>(),
+        items.iter().map(|(_, item)| item.id()).collect::<Vec<_>>(),
         vec!["item-3-0", "item-5-0"]
     );
     assert_eq!(
@@ -222,7 +222,7 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
             backwards_cursor: None,
         }),
     ] {
-        app.handle_event(
+        crate::boxed_future!(app.handle_event(
             &mut tui,
             &mut server,
             AppEvent::OlderThreadHistoryLoaded {
@@ -230,7 +230,7 @@ async fn history_hydration_metadata_tracks_missing_turns_and_stale_completions_k
                 cursor: old_cursor.clone(),
                 result,
             },
-        )
+        ))
         .await?;
         assert!(server.is_older_history_page_pending(target.thread_id, &cursor));
         assert_eq!(

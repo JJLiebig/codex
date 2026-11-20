@@ -29,6 +29,19 @@ pub(crate) enum ResponsesStreamRequest {
     RemoteCompactionV2,
 }
 
+/// A new generation cannot repair a terminal provider response or settle the
+/// previous attempt's bill. Preserve these outcomes across transport retries,
+/// same-turn steering, and compaction's fallback to another model.
+pub(crate) fn is_terminal_sampling_outcome(error: &CodexErr) -> bool {
+    matches!(
+        error.details(),
+        CodexErrorDetails::ResponseIncomplete(_)
+            | CodexErrorDetails::UsageAccountingFailed(_)
+            | CodexErrorDetails::SessionBudgetExceeded
+            | CodexErrorDetails::InferenceHookDenied { .. }
+    )
+}
+
 pub(crate) struct ResponsesStreamRetryState {
     retries: u64,
     connection_retries: u64,

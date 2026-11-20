@@ -9,7 +9,7 @@
 //! Live usage boundaries advance only when a response supplies usable usage.
 //! Oversized instructions keep an incomplete excerpt for bounded root review, including
 //! sources recovered from legacy Guardian checkpoints before their raw history is dropped.
-//! Prompt projections replace unavailable file images without changing retained history.
+//! Prompt projections replace unavailable file images and tool audio without changing retained history.
 
 #[path = "history_rejected_audio.rs"]
 pub(crate) mod rejected_audio;
@@ -25,7 +25,7 @@ use crate::context::world_state::WorldState;
 use crate::context::world_state::WorldStateSnapshot;
 use crate::context::world_state::WorldStateUpdate;
 use crate::context_manager::normalize;
-use crate::context_manager::replace_unresolvable_image_files;
+use crate::context_manager::replace_unresolvable_media_files;
 use crate::event_mapping::contextual_dev_fragments;
 use crate::event_mapping::is_contextual_user_message_content;
 use crate::event_mapping::parse_turn_item;
@@ -33,7 +33,6 @@ use crate::guardian::GUARDIAN_MAX_ROOT_MESSAGE_TOKENS;
 use crate::guardian::guardian_truncate_text;
 use crate::session::FileAudioDurations;
 use crate::session::turn_context::TurnContext;
-use crate::utils::json::serialized_json_bytes;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 use codex_attachment_store::AttachmentStore;
@@ -79,6 +78,7 @@ use codex_utils_output_truncation::approx_token_count;
 use codex_utils_output_truncation::approx_tokens_from_byte_count_i64;
 use codex_utils_output_truncation::truncate_function_output_payload;
 use codex_utils_output_truncation::with_serialization_allowance;
+use codex_utils_string::serialized_json_bytes;
 use image::ImageReader;
 use std::collections::BTreeSet;
 use std::io::Cursor;
@@ -680,6 +680,7 @@ impl ContextManager {
         self.sampling.record(&mut processed);
         if let ResponseItem::FunctionCallOutput { output, .. }
         | ResponseItem::CustomToolCallOutput { output, .. } = &mut processed.item
+            && !metadata.is_some_and(|metadata| metadata.tool_audio_budget_applied)
         {
             // The override already includes the tool's serialization allowance.
             let policy = metadata
@@ -716,7 +717,7 @@ impl ContextManager {
     /// Returns the history prepared for sending to the model. This applies a proper
     /// normalization and drops un-suited items. Unsupported image and audio content
     /// is stripped from messages and tool outputs according to `input_modalities`.
-    /// Unavailable file images are replaced with text placeholders.
+    /// Unavailable file images and tool audio are replaced with text placeholders.
     pub(crate) async fn for_prompt(
         self,
         input_modalities: &[InputModality],
@@ -736,7 +737,7 @@ impl ContextManager {
         image_store: &dyn AttachmentStore,
     ) -> Vec<ResponseItemEnvelope> {
         self.normalize_history(input_modalities);
-        replace_unresolvable_image_files(
+        replace_unresolvable_media_files(
             Arc::make_mut(&mut self.items)
                 .iter_mut()
                 .map(|envelope| &mut envelope.item),
@@ -1267,7 +1268,7 @@ impl ContextManager {
     }
 }
 
-/// Configuration updates require harness provenance; raw system messages are never retained.
+/// Configuration updates and internal system messages require harness provenance.
 fn is_api_message(message: &ResponseItem, metadata: Option<&CodexHarnessMetadata>) -> bool {
     match message {
         ResponseItem::Message { role, .. } => role.as_str() != "system",

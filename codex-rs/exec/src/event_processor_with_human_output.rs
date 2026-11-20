@@ -44,7 +44,7 @@ pub(crate) struct EventProcessorWithHumanOutput {
 impl EventProcessorWithHumanOutput {
     pub(crate) fn create_with_ansi(
         with_ansi: bool,
-        config: &Config,
+        config: Option<&Config>,
         last_message_path: Option<PathBuf>,
     ) -> Self {
         let style = |styled: Style, plain: Style| if with_ansi { styled } else { plain };
@@ -57,8 +57,8 @@ impl EventProcessorWithHumanOutput {
             magenta: style(Style::new().magenta(), Style::new()),
             red: style(Style::new().red(), Style::new()),
             yellow: style(Style::new().yellow(), Style::new()),
-            show_agent_reasoning: !config.hide_agent_reasoning,
-            show_raw_agent_reasoning: config.show_raw_agent_reasoning,
+            show_agent_reasoning: config.is_none_or(|config| !config.hide_agent_reasoning),
+            show_raw_agent_reasoning: config.is_some_and(|config| config.show_raw_agent_reasoning),
             last_message_path,
             final_message: None,
             final_message_rendered: false,
@@ -225,6 +225,10 @@ impl EventProcessor for EventProcessorWithHumanOutput {
         }
         eprintln!("--------");
         eprintln!("{}\n{}", "user".style(self.cyan), prompt);
+    }
+
+    fn print_thread_started(&mut self, thread_id: &str) {
+        eprintln!("thread id: {thread_id}");
     }
 
     fn process_server_notification(&mut self, notification: ServerNotification) -> CodexStatus {

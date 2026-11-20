@@ -112,6 +112,44 @@ impl ComposableRequirementsLayer {
                 });
             }
 
+            if let Some(otel) = regular_toml.get("otel")
+                && (otel.get("headers_helper").is_some()
+                    || otel.get("headers_helper_refresh_interval_ms").is_some())
+                && !matches!(
+                    source,
+                    RequirementSource::SystemRequirementsToml { .. }
+                        | RequirementSource::MdmManagedPreferences { .. }
+                )
+            {
+                return Err(RequirementsCompositionError::Parse {
+                    layer_source: source,
+                    message:
+                        "OTel headers helpers may only be configured in local managed requirements"
+                            .into(),
+                });
+            }
+
+            if let Some(command) = regular_toml
+                .get("otel")
+                .and_then(|otel| otel.get("headers_helper"))
+                .and_then(TomlValue::as_str)
+            {
+                let convention = path_context.as_ref().map_or_else(
+                    crate::path_context::convention,
+                    ConfigPathContext::convention,
+                );
+                if codex_utils_path_uri::PathUri::resolve_config_path_uri(
+                    command, convention, /*base*/ None, /*user_home_dir*/ None,
+                )
+                .is_err()
+                {
+                    return Err(RequirementsCompositionError::Parse {
+                        layer_source: source,
+                        message: "otel.headers_helper must be an absolute executable path in managed requirements".into(),
+                    });
+                }
+            }
+
             // These fields can only be set locally; ignore them before validating cloud policy.
             strip_cloud_auth_requirements(&source, &mut regular_toml);
 
@@ -154,10 +192,17 @@ impl ComposableRequirementsLayer {
         {
             table.insert("features".to_string(), features);
         }
-        if let Some(table) = regular_toml.as_table_mut()
-            && let Some(network) = table.remove("experimental_network")
+        if let Some(legacy) = &requirements.network
+            && let Some(nested) = requirements
+                .permissions
+                .as_ref()
+                .and_then(|p| p.network.as_deref())
+            && !legacy.describes_same_policy(nested)
         {
-            table.insert("network_proxy".to_string(), network);
+            return Err(RequirementsCompositionError::Parse {
+                layer_source: source,
+                message: "legacy and permissions.network requirements must describe the same network policy".into(),
+            });
         }
 
         // Hostname lookup is configuration-driven and may block on DNS, so only
@@ -301,11 +346,14 @@ pub(crate) fn strip_cloud_auth_requirements(source: &RequirementSource, value: &
     }
 }
 
-fn remove_top_level_field(value: &mut TomlValue, key: &str) -> Option<TomlValue> {
+pub(super) fn remove_top_level_field(value: &mut TomlValue, key: &str) -> Option<TomlValue> {
     value.as_table_mut()?.remove(key)
 }
 
-fn remove_nested_field_and_prune_empty(value: &mut TomlValue, path: &[&str]) -> Option<TomlValue> {
+pub(super) fn remove_nested_field_and_prune_empty(
+    value: &mut TomlValue,
+    path: &[&str],
+) -> Option<TomlValue> {
     let (key, remaining) = path.split_first()?;
     let table = value.as_table_mut()?;
     if remaining.is_empty() {

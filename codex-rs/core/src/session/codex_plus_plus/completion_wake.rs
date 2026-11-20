@@ -4,7 +4,6 @@ use crate::context::codex_plus_plus::BackgroundCompletion;
 #[derive(Default)]
 pub(crate) struct TurnRunState {
     pub(crate) mcp_startup_requirements: McpStartupRequirements,
-    pub(super) turn_diff_tracker: Option<SharedTurnDiffTracker>,
     pub(super) usage_limit_account_attempts: HashSet<String>,
     pub(crate) completion_claim: Option<u64>,
     pub(super) client_session: Option<ModelClientSession>,
@@ -22,24 +21,9 @@ impl TurnRunState {
         }
     }
 
-    pub(super) fn is_continuation(&self) -> bool {
-        self.turn_diff_tracker.is_some()
-    }
-
     pub(super) fn stop(&mut self) {
         self.stopped = true;
     }
-}
-
-pub(super) fn turn_diff_tracker(
-    turn_diff_tracker: &mut Option<SharedTurnDiffTracker>,
-    display_roots: Vec<(String, PathUri)>,
-) -> SharedTurnDiffTracker {
-    Arc::clone(turn_diff_tracker.get_or_insert_with(|| {
-        Arc::new(tokio::sync::Mutex::new(
-            TurnDiffTracker::with_environment_display_roots(display_roots),
-        ))
-    }))
 }
 
 pub(super) async fn track_initial_analytics(
@@ -214,10 +198,14 @@ pub(super) async fn record_claimed_completion(
         return false;
     }
     completion_claim.take();
-    sess.record_conversation_items_then(
+    let (items, image_preparations) = sess
+        .prepare_conversation_items_for_history(turn_context, model_info, vec![envelope.clone()])
+        .await;
+    sess.record_prepared_conversation_items(
         turn_context,
         model_info,
-        std::slice::from_ref(&envelope.item),
+        items,
+        image_preparations,
         || {
             sess.services
                 .unified_exec_manager

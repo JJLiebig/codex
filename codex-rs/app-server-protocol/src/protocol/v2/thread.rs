@@ -19,6 +19,7 @@ use super::TurnStatus;
 use super::UserInput;
 use super::shared::v2_enum_from_core;
 use crate::JsonSchema;
+use crate::RequestId;
 use crate::TS;
 use codex_experimental_api_macros::ExperimentalApi;
 pub use codex_protocol::capabilities::CapabilityRootLocation;
@@ -1461,6 +1462,11 @@ pub struct ThreadListParams {
     /// Optional page size; defaults to a reasonable server-side value.
     #[ts(optional = nullable)]
     pub limit: Option<u32>,
+    /// Restrict results to up to 100 thread IDs before pagination. Omit or send null
+    /// for unrestricted results. An empty list matches nothing. Exclusions still apply.
+    /// Repeat the same IDs on each page. The local store uses indexed metadata for this filter.
+    #[ts(optional = nullable)]
+    pub included_thread_ids: Option<Vec<String>>,
     /// Thread IDs to exclude before applying the result limit. Up to 100
     /// entries; invalid IDs or a larger list are rejected, never truncated.
     /// Send the same exclusions on each page. Omitted, null, or empty means no exclusions.
@@ -1514,9 +1520,8 @@ pub struct ThreadListParams {
     /// exactly matches one of these paths are returned.
     #[ts(optional = nullable, type = "string | Array<string> | null")]
     pub cwd: Option<ThreadListCwdFilter>,
-    /// If true, return from the state DB without scanning JSONL rollouts to
-    /// repair thread metadata. Omitted or false preserves scan-and-repair
-    /// behavior.
+    /// If true, the local store returns indexed metadata without scanning JSONL rollouts
+    /// for repairs. Requests with `includedThreadIds` always use indexed metadata.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub use_state_db_only: bool,
     /// Optional substring filter for the extracted thread title.
@@ -1569,7 +1574,8 @@ pub struct ThreadSearchParams {
     /// If false or null, only non-archived threads are returned.
     #[ts(optional = nullable)]
     pub archived: Option<bool>,
-    /// Required substring/full-text query for thread search.
+    /// Required substring/full-text query. `thread/search/stream` limits this to 65,536
+    /// UTF-8 bytes after trimming surrounding whitespace.
     pub search_term: String,
 }
 
@@ -1666,6 +1672,37 @@ pub struct ThreadSearchResponse {
     /// at the start of the page timestamp so same-second updates are not skipped.
     pub backwards_cursor: Option<String>,
 }
+
+/// A best-effort incremental batch for `thread/search/stream`. Match `requestId` to the request
+/// on this connection. Only a small subset of verified matches may be emitted; rows are unique
+/// and arrive in discovery order, but may be dropped under load or fall outside the final sorted
+/// page. Thread fields use stored metadata
+/// and the current watched status; live thread settings are enriched in the final response.
+/// Replace provisional rows with the authoritative final response. No partials follow it or an error.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSearchPartialNotification {
+    pub request_id: RequestId,
+    pub data: Vec<ThreadSearchResult>,
+}
+
+/// Request cancellation on the same connection. `thread/search/cancel` targets only
+/// `thread/search`; `thread/search/stream/cancel` targets only `thread/search/stream`.
+/// Cancellation is idempotent: the cancel response acknowledges the request, and an interrupted
+/// search completes with an error after its subprocess is stopped and reaped. If completion races
+/// cancellation, the original search may still succeed. An already-completed search is unaffected.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSearchCancelParams {
+    pub request_id: RequestId,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSearchCancelResponse {}
 
 /// Parameters for searching visible message occurrences within one paginated thread.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema, TS)]

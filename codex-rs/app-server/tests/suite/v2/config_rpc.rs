@@ -711,10 +711,17 @@ async fn config_requirements_read_redacts_otel_exporter_headers(
         .without_auto_env()
         .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
         .await?;
+    let helper = if cfg!(windows) {
+        "C:/company/otel-headers.exe"
+    } else {
+        "/opt/company/otel-headers"
+    };
     // Read policy without starting exporters or opening the example TLS files.
     std::fs::write(
         codex_home.path().join("requirements.toml"),
         r#"[otel]
+headers_helper = "$HELPER"
+headers_helper_refresh_interval_ms = 60000
 tool_result = { max_bytes = 1024 }
 log_user_prompt = false
 log_sse_deltas = false
@@ -726,6 +733,7 @@ trace_exporter = { otlp-grpc = { endpoint = "http://127.0.0.1:4317", headers = {
 metrics_exporter = "$METRICS_EXPORTER"
 span_attributes = { "service.name" = "managed-service" }
 tracestate = { managed = { tenant = "enterprise" } }"#
+            .replace("$HELPER", helper)
             .replace("$PROTOCOL", protocol)
             .replace("$METRICS_EXPORTER", metrics_exporter),
     )?;
@@ -735,6 +743,8 @@ tracestate = { managed = { tenant = "enterprise" } }"#
     assert_eq!(
         response["requirements"]["otel"],
         json!({
+            "headers_helper": helper,
+            "headers_helper_refresh_interval_ms": 60000,
             "tool_result": { "max_bytes": 1024 },
             "log_user_prompt": false,
             "log_sse_deltas": false,
@@ -851,6 +861,33 @@ metrics_exporter = { otlp-http = { endpoint = "http://127.0.0.1:1/v1/metrics", p
         assert!(!serialized.contains(secret), "response leaked {field}");
     }
 
+    Ok(())
+}
+
+#[tokio::test]
+async fn config_read_with_relative_cwd_picks_up_external_edits() -> Result<()> {
+    let home = TempDir::new()?;
+    write_config(&home, r#"model = "before""#)?;
+    let mut server = TestAppServer::builder()
+        .with_codex_home(home.path())
+        .without_auto_env()
+        .build_initialized_with_timeout(DEFAULT_READ_TIMEOUT)
+        .await?;
+
+    let mut models = Vec::new();
+    for model in ["before", "after"] {
+        write_config(&home, &format!(r#"model = "{model}""#))?;
+        let id = server
+            .send_config_read_request(ConfigReadParams {
+                include_layers: false,
+                cwd: Some(".".into()),
+            })
+            .await?;
+        let response: ConfigReadResponse =
+            timeout(DEFAULT_READ_TIMEOUT, server.read_response(id)).await??;
+        models.push(response.config.model);
+    }
+    assert_eq!(models, [Some("before".into()), Some("after".into())]);
     Ok(())
 }
 

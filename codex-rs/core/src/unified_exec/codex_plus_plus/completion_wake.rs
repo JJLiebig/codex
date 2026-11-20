@@ -371,12 +371,12 @@ pub(crate) fn add_wake_option(mut spec: ToolSpec, enabled: bool) -> ToolSpec {
 /// Preserve completion delivery when another task temporarily replaces the owning turn.
 pub(crate) async fn next_submission(
     session: &Arc<Session>,
-    submissions: &async_channel::Receiver<crate::session::Submission>,
+    submissions: &async_channel::Receiver<Box<crate::session::Submission>>,
 ) -> Option<crate::session::Submission> {
     loop {
         tokio::select! {
             biased;
-            sub = submissions.recv() => return sub.ok(),
+            sub = submissions.recv() => return sub.ok().map(|sub| *sub),
             _ = session.services.unified_exec_manager.completion_wake.idle_notify.notified() => {
                 session.maybe_start_turn_for_pending_work().await;
             }

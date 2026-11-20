@@ -95,7 +95,10 @@ async fn task_finish_rejects_uploaded_audio_without_losing_other_pending_input()
                             file_id: "file_disabled_at_finish".to_string(),
                         },
                     },
-                ],
+                ]
+                .into_iter()
+                .map(codex_user_input::ResolvedUserInput::from_client)
+                .collect(),
                 client_id: None,
                 metadata: Default::default(),
             }],
@@ -257,11 +260,12 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
     session
         .update_token_usage_info(
             &previous_context,
-            Some(&TokenUsage {
+            TokenUsage {
                 input_tokens: 1_000,
                 total_tokens: 1_000,
                 ..TokenUsage::default()
-            }),
+            }
+            .into(),
             /*includes_reasoning*/ false,
         )
         .await
@@ -287,7 +291,7 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
         session
             .update_token_usage_info(
                 &previous_context,
-                Some(&compaction_usage),
+                compaction_usage.clone().into(),
                 /*includes_reasoning*/ false,
             )
             .await
@@ -320,7 +324,7 @@ async fn turn_completion_metrics_follow_model_switch(scenario: UsageScenario) {
                 .record_token_usage_info(
                     &turn_context,
                     &response_context.initial_settings,
-                    Some(&response_usage),
+                    response_usage.clone().into(),
                     crate::session::TokenUsageContext::Sampling {
                         includes_reasoning: false,
                         input_item_count: 0,
