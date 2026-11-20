@@ -476,15 +476,22 @@ async fn conversation_records_history_without_an_event_observer(
 ) -> Result<()> {
     skip_if_no_network!(Ok(()));
     let api_server = start_mock_server().await;
-    let mut events = vec![
-        json!({ "type": "session.updated", "session": { "id": "voice-1" } }),
-        json!({ "type": "response.output_text.delta", "delta": "assistant first" }),
-        json!({ "type": "conversation.item.input_audio_transcription.delta", "delta": "user second" }),
-    ];
-    if outcome == ThreadRealtimeSessionOutcome::Failed {
-        events.push(json!({ "type": "error", "error": { "message": "fixture failure" } }));
-    }
-    let realtime_server = start_websocket_server(vec![vec![events.clone()], vec![events]]).await;
+    let session_ids = ["voice-1", "voice-2"];
+    let calls = session_ids
+        .iter()
+        .map(|session_id| {
+            let mut events = vec![
+                json!({ "type": "session.updated", "session": { "id": session_id } }),
+                json!({ "type": "response.output_text.delta", "delta": "assistant first" }),
+                json!({ "type": "conversation.item.input_audio_transcription.delta", "delta": "user second" }),
+            ];
+            if outcome == ThreadRealtimeSessionOutcome::Failed {
+                events.push(json!({ "type": "error", "error": { "message": "fixture failure" } }));
+            }
+            vec![events]
+        })
+        .collect();
+    let realtime_server = start_websocket_server(calls).await;
     let mut builder = test_codex()
         .with_history_mode(ThreadHistoryMode::Paginated)
         .with_config({
@@ -497,7 +504,8 @@ async fn conversation_records_history_without_an_event_observer(
     let test = builder.build_with_auto_env(&api_server).await?;
     test.codex.ensure_rollout_materialized().await;
     let mut expected = Vec::new();
-    for session_count in 1..=2 {
+    for previous_calls in 0..session_ids.len() {
+        let first_item = expected.len();
         test.codex
             .submit(Op::RealtimeConversationStart(ConversationStartParams {
                 client_managed_handoffs: false,
@@ -516,7 +524,7 @@ async fn conversation_records_history_without_an_event_observer(
                 realtime_start_instructions: None,
                 realtime_end_instructions: None,
                 prompt: Some(Some("fixture".to_string())),
-                realtime_session_id: Some("voice-1".to_string()),
+                realtime_session_id: None,
                 voice_session_id: None,
                 transport: None,
                 version: None,
@@ -553,7 +561,7 @@ async fn conversation_records_history_without_an_event_observer(
                         )
                     })
                     .count()
-                    == session_count
+                    == previous_calls + 1
                 {
                     break Ok::<_, anyhow::Error>(items);
                 }
@@ -586,10 +594,17 @@ async fn conversation_records_history_without_an_event_observer(
             .map(|item| item.id.as_str())
             .collect::<std::collections::HashSet<_>>();
         assert_eq!(ids.len(), items.len());
+        let session_id = &items[first_item].realtime_session_id;
+        Uuid::parse_str(session_id)?;
+        assert_ne!(session_id, &test.session_configured.thread_id.to_string());
+        assert_eq!(
+            items[first_item].id,
+            format!("realtime-session-start:{session_id}")
+        );
         assert!(
-            items
+            items[first_item..]
                 .iter()
-                .all(|item| item.realtime_session_id == "voice-1")
+                .all(|item| &item.realtime_session_id == session_id)
         );
     }
     test.codex.submit(Op::Shutdown).await?;
@@ -739,22 +754,20 @@ async fn conversation_websocket_transports_send_codex_headers_without_creating_a
     })
     .await
     .expect("realtime websocket connection failed");
-    let (expected_uri, expected_realtime_session_id) = match transport {
-        ConversationStartTransport::Websocket => (
-            "/v1/live?model=gpt-live-1-codex",
-            Some(conversation.thread_id.to_string()),
-        ),
-        ConversationStartTransport::ExistingCall { .. } => ("/v1/live/rtc_existing", None),
+    assert_eq!(started.version, RealtimeConversationVersion::V3);
+    let session_id = started.realtime_session_id.context("started session ID")?;
+    let expected_uri = match transport {
+        ConversationStartTransport::Websocket => {
+            Uuid::parse_str(&session_id)?;
+            assert_ne!(session_id, conversation.thread_id.to_string());
+            "/v1/live?model=gpt-live-1.1-codex"
+        }
+        ConversationStartTransport::ExistingCall { call_id, .. } => {
+            assert_eq!(session_id, call_id);
+            "/v1/live/rtc_existing"
+        }
         ConversationStartTransport::Webrtc { .. } => unreachable!("websocket transports only"),
     };
-    assert_eq!(
-        (started.version, started.realtime_session_id),
-        (
-            RealtimeConversationVersion::V3,
-            expected_realtime_session_id.clone()
-        )
-    );
-
     let handshake = realtime_server.single_handshake();
     assert_eq!(handshake.uri(), expected_uri);
     assert_eq!(
@@ -762,8 +775,8 @@ async fn conversation_websocket_transports_send_codex_headers_without_creating_a
         Some("Bearer dummy")
     );
     assert_eq!(
-        handshake.header("x-session-id"),
-        expected_realtime_session_id
+        handshake.header("x-session-id").as_deref(),
+        Some(session_id.as_str())
     );
     assert_eq!(
         (
@@ -804,15 +817,15 @@ async fn conversation_websocket_transports_send_codex_headers_without_creating_a
     Ok(())
 }
 
-#[test_case(None, "gpt-live-1-codex", None, None; "default model without source")]
+#[test_case(None, "gpt-live-1.1-codex", None, None; "default model without source")]
 #[test_case(Some("session-override-model"), "session-override-model", None, None; "explicit model without source")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::User), Some("user".to_string()); "user source")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::Feature("voice_chat".to_string())), Some("voice_chat".to_string()); "voice chat source")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::Feature("realtime_voice".to_string())), Some("realtime_voice".to_string()); "realtime voice source")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::GuardianReview), Some("guardian_review".to_string()); "child shares parent session")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::Feature("x".repeat(/*n*/ 256))), Some("x".repeat(/*n*/ 256)); "source at byte limit")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::Feature("x".repeat(/*n*/ 257))), None; "oversized source omitted")]
-#[test_case(None, "gpt-live-1-codex", Some(ThreadSource::Feature("é\r\n\"".to_string())), Some("é\r\n\"".to_string()); "source escaped for headers")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::User), Some("user".to_string()); "user source")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::Feature("voice_chat".to_string())), Some("voice_chat".to_string()); "voice chat source")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::Feature("realtime_voice".to_string())), Some("realtime_voice".to_string()); "realtime voice source")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::GuardianReview), Some("guardian_review".to_string()); "child shares parent session")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::Feature("x".repeat(/*n*/ 256))), Some("x".repeat(/*n*/ 256)); "source at byte limit")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::Feature("x".repeat(/*n*/ 257))), None; "oversized source omitted")]
+#[test_case(None, "gpt-live-1.1-codex", Some(ThreadSource::Feature("é\r\n\"".to_string())), Some("é\r\n\"".to_string()); "source escaped for headers")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn conversation_webrtc_frameless_chatgpt_sends_codex_headers_to_backend(
     model: Option<&str>,
@@ -985,11 +998,13 @@ async fn conversation_webrtc_frameless_chatgpt_sends_codex_headers_to_backend(
             "sdp": body["sdp"],
             "delegation": body["session"]["delegation"]["type"],
             "model": body["session"]["model"],
+            "voice": body["session"]["audio"]["output"]["voice"],
         }),
         json!({
             "sdp": "v=offer\r\n",
             "delegation": "client",
             "model": expected_model,
+            "voice": "cove",
         })
     );
 
@@ -1769,7 +1784,7 @@ async fn conversation_webrtc_default_v1_rejects_explicit_v2_voice() -> Result<()
                 sdp: "v=offer\r\n".to_string(),
             }),
             version: None,
-            voice: Some(RealtimeVoice::Cedar),
+            voice: Some(Some(RealtimeVoice::Cedar)),
         }))
         .await?;
 
@@ -3028,14 +3043,28 @@ async fn conversation_uses_empty_instructions_for_null_or_empty_prompt() -> Resu
     Ok(())
 }
 
+#[test_case(RealtimeConversationVersion::V1, None, Some(RealtimeVoice::Breeze), "breeze"; "v1 explicit voice")]
+#[test_case(RealtimeConversationVersion::V3, None, None, "marin"; "v3 API default")]
+#[test_case(RealtimeConversationVersion::V3, None, Some(RealtimeVoice::Marin), "marin"; "v3 explicit API voice")]
+#[test_case(RealtimeConversationVersion::V3, Some(RealtimeVoice::Cove), Some(RealtimeVoice::Marin), "marin"; "explicit voice overrides config")]
+#[test_case(RealtimeConversationVersion::V3, Some(RealtimeVoice::Cove), None, "cove"; "v3 configured voice")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn conversation_uses_explicit_start_voice() -> Result<()> {
+async fn conversation_selects_realtime_voice(
+    version: RealtimeConversationVersion,
+    configured_voice: Option<RealtimeVoice>,
+    voice: Option<RealtimeVoice>,
+    expected_voice: &str,
+) -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     // Responses prewarm can reconnect; give realtime its own scripted connections.
     let startup_server = start_websocket_server(vec![vec![]]).await;
     let server = start_websocket_server(vec![vec![vec![json!({
-        "type": "session.updated",
+        "type": if version == RealtimeConversationVersion::V3 {
+            "session.started"
+        } else {
+            "session.updated"
+        },
         "session": { "id": "sess_voice", "instructions": "backend prompt" }
     })]]])
     .await;
@@ -3043,6 +3072,7 @@ async fn conversation_uses_explicit_start_voice() -> Result<()> {
         let realtime_base_url = server.uri().to_string();
         move |config| {
             config.experimental_realtime_ws_base_url = Some(realtime_base_url);
+            config.realtime.voice = configured_voice;
         }
     });
     let test = builder.build_with_websocket_server(&startup_server).await?;
@@ -3073,8 +3103,8 @@ async fn conversation_uses_explicit_start_voice() -> Result<()> {
             realtime_session_id: None,
             voice_session_id: None,
             transport: None,
-            version: None,
-            voice: Some(RealtimeVoice::Breeze),
+            version: Some(version),
+            voice: voice.map(Some),
         }))
         .await?;
 
@@ -3094,7 +3124,7 @@ async fn conversation_uses_explicit_start_voice() -> Result<()> {
     let connections = server.connections();
     assert_eq!(
         connections[0][0].body_json()["session"]["audio"]["output"]["voice"],
-        "breeze"
+        expected_voice
     );
 
     startup_server.shutdown().await;
@@ -3209,7 +3239,7 @@ async fn conversation_rejects_voice_for_wrong_realtime_version() -> Result<()> {
             voice_session_id: None,
             transport: None,
             version: None,
-            voice: Some(RealtimeVoice::Cove),
+            voice: Some(Some(RealtimeVoice::Cove)),
         }))
         .await?;
 
@@ -3964,17 +3994,27 @@ async fn conversation_user_text_turn_is_not_sent_to_realtime(ephemeral: bool) ->
     .await;
     assert_eq!(session_updated, "sess_user_text");
 
+    let mut transcript_started = None;
+    let mut output_seen = false;
     wait_for_event(&test.codex, |event| {
         if let EventMsg::RealtimeConversationRealtime(event) = event {
-            match event.payload {
-                RealtimeEvent::HistoryItemStarted(_)
-                | RealtimeEvent::HistoryTranscriptDelta { .. }
+            match &event.payload {
+                RealtimeEvent::HistoryItemStarted(item) => {
+                    assert!(!ephemeral);
+                    if matches!(
+                        item.content,
+                        codex_protocol::realtime::RealtimeItemContent::Frame { .. }
+                    ) {
+                        transcript_started = Some(item.clone());
+                    }
+                }
+                RealtimeEvent::HistoryTranscriptDelta { .. }
                 | RealtimeEvent::HistoryItemCompleted(_) => assert!(!ephemeral),
-                RealtimeEvent::OutputTranscriptDelta(_) => return true,
+                RealtimeEvent::OutputTranscriptDelta(_) => output_seen = true,
                 _ => {}
             }
         }
-        false
+        output_seen && (ephemeral || transcript_started.is_some())
     })
     .await;
 
@@ -3985,6 +4025,44 @@ async fn conversation_user_text_turn_is_not_sent_to_realtime(ephemeral: bool) ->
             text_elements: Vec::new(),
         }]))
         .await?;
+
+    if let Some(started) = transcript_started {
+        assert!(started.observed_at_ms.is_some());
+        let sealed = wait_for_event_match(&test.codex, |event| match event {
+            EventMsg::RealtimeConversationRealtime(RealtimeConversationRealtimeEvent {
+                payload: RealtimeEvent::HistoryItemCompleted(item),
+            }) if item.id == started.id => Some(item.clone()),
+            _ => None,
+        })
+        .await;
+        assert_eq!(sealed.observed_at_ms, started.observed_at_ms);
+        assert!(matches!(
+            &sealed.content,
+            codex_protocol::realtime::RealtimeItemContent::Frame { channels }
+                if channels.voice_transcript.text == "spoken before typed input"
+        ));
+        // Completion is the persistence barrier; no additional flush is needed to read it.
+        let timeline = test
+            .thread_store
+            .list_timeline(ListTimelineParams {
+                thread_id: test.session_configured.thread_id,
+                cursor: None,
+                page_size: 100,
+            })
+            .await?;
+        let persisted = timeline
+            .items
+            .iter()
+            .find_map(|entry| match entry {
+                ThreadTimelineEntry::Realtime { item, .. } if item.id == sealed.id => Some(item),
+                _ => None,
+            })
+            .expect("completed realtime item is already readable");
+        assert_eq!(
+            persisted,
+            &codex_app_server_protocol::ThreadRealtimeItem::from(sealed)
+        );
+    }
 
     let turn_complete = wait_for_event_match(&test.codex, |event| match event {
         EventMsg::TurnComplete(turn_complete) => Some(turn_complete.clone()),
@@ -3997,9 +4075,6 @@ async fn conversation_user_text_turn_is_not_sent_to_realtime(ephemeral: bool) ->
     assert!(model_user_texts.iter().any(|text| text == user_text));
 
     if !ephemeral {
-        test.thread_store
-            .flush_thread(test.session_configured.thread_id)
-            .await?;
         let timeline = test
             .thread_store
             .list_timeline(ListTimelineParams {

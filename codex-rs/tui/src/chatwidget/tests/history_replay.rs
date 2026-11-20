@@ -2,8 +2,6 @@ use super::helpers::drain_insert_history_transcript;
 use super::*;
 use crate::app_event::HistoryLookupResponse;
 use codex_app_server_protocol::ImageReference;
-use codex_app_server_protocol::NetworkAccess;
-use codex_app_server_protocol::SandboxPolicy;
 use codex_app_server_protocol::ThreadItem;
 use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::ManagedFileSystemPermissions;
@@ -22,6 +20,9 @@ async fn resumed_initial_messages_render_history() {
     let thread_id = ThreadId::new();
     let rollout_file = NamedTempFile::new().unwrap();
     let mut configured = crate::session_state::ThreadSessionState {
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: true,
         background_completion_waiting: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
@@ -186,6 +187,9 @@ async fn restored_conversation_ultra_remains_selected_after_switching_to_plan() 
 
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -510,6 +514,9 @@ async fn replayed_user_message_preserves_text_elements_and_local_images() {
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -584,6 +591,9 @@ async fn replayed_user_message_preserves_remote_image_urls() {
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -686,12 +696,11 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         },
     };
     let expected_permission_profile = expected_app_server_permission_profile.clone();
-    let expected_core_sandbox = expected_permission_profile
-        .to_legacy_sandbox_policy(expected_cwd.as_path())
-        .expect("permission profile should project to legacy sandbox policy");
-    let expected_sandbox = SandboxPolicy::from(expected_core_sandbox);
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -721,8 +730,6 @@ async fn session_configured_syncs_widget_config_permissions_and_cwd() {
         AskForApproval::from(chat.config_ref().permissions.approval_policy.value()),
         AskForApproval::Never
     );
-    let actual_sandbox = SandboxPolicy::from(chat.config_ref().legacy_sandbox_policy());
-    assert_eq!(&actual_sandbox, &expected_sandbox);
     assert_eq!(
         chat.config_ref().permissions.effective_permission_profile(),
         expected_app_server_permission_profile
@@ -774,6 +781,9 @@ async fn session_configured_preserves_profile_workspace_roots() {
         .materialize_project_roots_with_workspace_roots(&session_effective_workspace_roots);
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -818,11 +828,11 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
         network: NetworkSandboxPolicy::Restricted,
     };
     let expected_permission_profile = expected_app_server_permission_profile.clone();
-    let expected_sandbox = SandboxPolicy::ExternalSandbox {
-        network_access: NetworkAccess::Restricted,
-    };
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -848,8 +858,6 @@ async fn session_configured_external_sandbox_keeps_external_runtime_policy() {
 
     chat.handle_thread_session(configured);
 
-    let actual_sandbox = SandboxPolicy::from(chat.config_ref().legacy_sandbox_policy());
-    assert_eq!(&actual_sandbox, &expected_sandbox);
     assert_eq!(
         chat.config_ref().permissions.effective_permission_profile(),
         expected_app_server_permission_profile
@@ -866,6 +874,9 @@ async fn replayed_user_message_with_only_remote_images_renders_history_cell() {
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -928,6 +939,9 @@ async fn replayed_user_message_with_only_local_images_renders_history_cell() {
     let rollout_file = NamedTempFile::new().unwrap();
     let configured = crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id,
@@ -1287,6 +1301,9 @@ async fn replayed_reasoning_item_preserves_summary_parts_and_hides_raw_reasoning
     chat.config.show_raw_agent_reasoning = false;
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -1340,6 +1357,9 @@ async fn replayed_reasoning_item_shows_raw_reasoning_when_enabled() {
     chat.config.show_raw_agent_reasoning = true;
     chat.handle_thread_session(crate::session_state::ThreadSessionState {
         background_completion_waiting: false,
+        read_only_history: false,
+        thread_settings_confirmed: true,
+        primary_environment_cwd: None,
         daybreak_enabled: false,
         windows_sandbox_host: crate::app::WindowsSandboxHost::Local,
         thread_id: ThreadId::new(),
@@ -1389,6 +1409,7 @@ async fn replayed_mcp_tool_call_stays_active_until_completion() {
     let _ = drain_insert_history(&mut rx);
 
     let mut item = AppServerThreadItemPayload::McpToolCall {
+        environment_id: None,
         id: "mcp-1".to_string(),
         server: "copilot-bridge".to_string(),
         tool: "copilot".to_string(),
@@ -1434,6 +1455,7 @@ async fn failed_repl_mcp_tool_call_preserves_status_and_result() {
 
         chat.handle_server_notification(
             ServerNotification::ItemCompleted(ItemCompletedNotification::new("thread-1".to_string(), "turn-1".to_string(), AppServerThreadItemPayload::McpToolCall {
+                    environment_id: None,
                     id: "mcp-failed".to_string(),
                     server: server.to_string(),
                     tool: "js".to_string(),
@@ -1500,6 +1522,7 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
     ));
 
     chat.on_mcp_tool_call_started(AppServerThreadItemPayload::McpToolCall {
+        environment_id: None,
         id: "mcp-deferred".to_string(),
         server: "copilot-bridge".to_string(),
         tool: "copilot".to_string(),
@@ -1518,6 +1541,7 @@ async fn deferred_mcp_lifecycle_events_keep_fifo_after_stream_finishes() {
 
     chat.stream_controller = None;
     chat.on_mcp_tool_call_completed(AppServerThreadItemPayload::McpToolCall {
+        environment_id: None,
         id: "mcp-deferred".to_string(),
         server: "copilot-bridge".to_string(),
         tool: "copilot".to_string(),

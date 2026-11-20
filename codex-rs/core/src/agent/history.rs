@@ -1,6 +1,8 @@
 //! Loads stored agent context and prepares the history a child inherits when it forks.
 
+use crate::agent::control::LocalAgentRuntime;
 use crate::agent::types::SpawnAgentOptions;
+use crate::compact_remote_v2::retained_client_items;
 use crate::config::Config;
 use crate::context::BaseInstructionsFragment;
 use crate::context::ContextualUserFragment;
@@ -22,6 +24,7 @@ use crate::thread_manager::ThreadManagerState;
 use crate::thread_manager::fork_history_from_snapshot;
 use codex_context_fragments::set_annotated_content;
 use codex_context_fragments::to_annotated_content;
+use codex_history::CodexHarnessMetadata;
 use codex_history::InitialHistory;
 use codex_history::ResponseItemEnvelope;
 use codex_history::RolloutItem;
@@ -38,10 +41,52 @@ use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_thread_store::LoadThreadHistoryParams;
-use codex_thread_store::ReadThreadParams;
+
+impl LocalAgentRuntime {
+    pub(crate) async fn retained_items_for_fresh_child(
+        &self,
+        initial_history: &InitialHistory,
+        session_source: &SessionSource,
+    ) -> Vec<ResponseItemEnvelope> {
+        // Full-history forks already carry their retained items.
+        let (InitialHistory::New, Some(parent_thread_id)) =
+            (initial_history, session_source.parent_thread_id())
+        else {
+            return Vec::new();
+        };
+        let Ok(manager) = self.upgrade() else {
+            return Vec::new();
+        };
+        let Ok(parent) = manager.get_thread(parent_thread_id).await else {
+            return Vec::new();
+        };
+        let history = parent.session.clone_history().await;
+        let mut items: Vec<_> = retained_client_items(
+            history.annotated_items(),
+            &history.file_audio_durations,
+            ResponseItemEnvelope::is_always_retained,
+        )
+        .into_values()
+        .collect();
+        for item in &mut items {
+            let parent_metadata = item.metadata.take().unwrap_or_default();
+            // Keep item metadata needed for retention and replay. Checkpoints belong to the child.
+            item.metadata = Some(CodexHarnessMetadata {
+                retain_across_windows: parent_metadata.retain_across_windows,
+                retained_source: parent_metadata.retained_source,
+                history_truncation_token_limit: parent_metadata.history_truncation_token_limit,
+                image_replay_sources: parent_metadata.image_replay_sources,
+                inherited_user_message: true,
+                ..Default::default()
+            });
+        }
+        items
+    }
+}
 
 fn keep_forked_rollout_item(item: &RolloutItem, preserve_context_baselines: bool) -> bool {
     match item {
+        RolloutItem::ResponseItem(envelope) if envelope.is_always_retained() => true,
         RolloutItem::ResponseItem(envelope) => match &envelope.item {
             ResponseItem::Message { role, phase, .. } => match role.as_str() {
                 "system" | "developer" | "user" => true,
@@ -132,29 +177,14 @@ pub(super) async fn load_agent_model_context(
     state: &ThreadManagerState,
     thread_id: ThreadId,
     history_mode: ThreadHistoryMode,
-) -> CodexResult<Option<codex_thread_store::StoredModelContext>> {
+) -> CodexResult<codex_thread_store::StoredModelContext> {
+    let params = LoadThreadHistoryParams {
+        thread_id,
+        include_archived: true,
+    };
     match history_mode {
-        ThreadHistoryMode::Legacy => Ok(state
-            .read_stored_thread(ReadThreadParams {
-                thread_id,
-                include_archived: true,
-                include_history: true,
-            })
-            .await?
-            .history
-            .map(|history| codex_thread_store::StoredModelContext {
-                thread_id,
-                revision: history.revision,
-                items: history.items,
-            })),
-        ThreadHistoryMode::Paginated => Ok(Some(
-            state
-                .load_latest_model_context(LoadThreadHistoryParams {
-                    thread_id,
-                    include_archived: true,
-                })
-                .await?,
-        )),
+        ThreadHistoryMode::Legacy => state.load_legacy_model_context(params).await,
+        ThreadHistoryMode::Paginated => state.load_latest_model_context(params).await,
     }
 }
 
@@ -227,11 +257,6 @@ pub(super) async fn prepare_forked_history(
     let mut forked_rollout_items =
         load_agent_model_context(state, parent_thread_id, parent_history_mode)
             .await?
-            .ok_or_else(|| {
-                CodexErr::Fatal(format!(
-                    "parent thread history unavailable for fork: {parent_thread_id}"
-                ))
-            })?
             .items;
 
     let multi_agent_v2_usage_hint_texts_to_filter: Vec<String> =
@@ -277,9 +302,11 @@ pub(super) async fn prepare_forked_history(
         forked_rollout_items = items;
     }
     let retain_forked_item = |envelope: &mut ResponseItemEnvelope, replaced: &mut bool| {
-        if multi_agent_version == MultiAgentVersion::V2
-            && (preserve_fork_prefix
-                || matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "user" || role == "assistant"))
+        let explicitly_retained = envelope.is_always_retained();
+        if explicitly_retained
+            || (multi_agent_version == MultiAgentVersion::V2
+                && (preserve_fork_prefix
+                    || matches!(&envelope.item, ResponseItem::Message { role, .. } if role == "user" || role == "assistant")))
         {
             // Resume must not recapture copied parent messages as local authorization.
             envelope
@@ -294,7 +321,7 @@ pub(super) async fn prepare_forked_history(
             // Assistant and tool positions belong to the parent counter, not the child.
             metadata.user_input_order = None;
         }
-        if preserve_fork_prefix {
+        if preserve_fork_prefix || explicitly_retained {
             return true;
         }
         let response_item = &mut envelope.item;

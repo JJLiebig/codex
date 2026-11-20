@@ -14,7 +14,7 @@ pub(super) async fn reserve(
     Vec<TurnInput>,
 )> {
     let mut active_turn = session.active_turn.lock().await;
-    if active_turn.is_some() || session.outcome_handoffs_closed() {
+    if active_turn.is_some() || session.turn_starts_closed() {
         return None;
     }
     let needs_new_turn = session.input_queue.has_trigger_turn_mailbox_items().await;
@@ -22,6 +22,10 @@ pub(super) async fn reserve(
         && (needs_new_turn
             || session.has_outstanding_durable_sleep()
             || session.should_wake_on_agent_messages().await);
+    if let Err(error) = session.check_rollout_budget() {
+        tracing::debug!(%error, "rollout budget stopped a pending-work wake");
+        return None;
+    }
     let claimed_completion = session
         .services
         .unified_exec_manager
@@ -36,14 +40,7 @@ pub(super) async fn reserve(
     let previous_options = if needs_new_turn {
         Default::default()
     } else {
-        session
-            .state
-            .lock()
-            .await
-            .turn_attribution
-            .as_ref()
-            .map(codex_history::TurnAttribution::start_options)
-            .unwrap_or_default()
+        session.agent_message_wake_options().await
     };
     let active_turn = active_turn.get_or_insert_with(ActiveTurn::default);
     Some((

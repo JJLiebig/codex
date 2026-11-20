@@ -26,6 +26,7 @@ use crate::style::secondary_text_style;
 use crate::terminal_palette::best_color;
 use crate::terminal_palette::default_bg;
 use crate::text_formatting::truncate_text;
+use crate::thread_label::ThreadLabelStyle;
 use crate::thread_transcript::RawReasoningVisibility;
 use crate::thread_transcript::TranscriptCells;
 use crate::thread_transcript::load_session_transcript;
@@ -475,6 +476,7 @@ struct SessionPickerViewPersistence {
 
 struct SessionPickerRunOptions {
     backend_id: crate::backend_id::BackendId,
+    cloud_backends: HashSet<BackendId>,
     use_theme_colors: bool,
     copy_on_select: bool,
     copy_on_select_clear_selection: bool,
@@ -631,6 +633,12 @@ async fn run_resume_picker_with_launch_context(
     let runtime_keymap = picker_runtime_keymap(local_settings)?;
     let options = SessionPickerRunOptions {
         backend_id: app_server.session.backend_id(),
+        cloud_backends: app_servers
+            .iter()
+            .map(|backend| &backend.session)
+            .filter(|session| session.thread_params_mode() == crate::ThreadParamsMode::Cloud)
+            .map(AppServerSession::backend_id)
+            .collect(),
         use_theme_colors: local_settings.tui.status_line_use_colors,
         copy_on_select: local_settings.copy_on_select(&codex_terminal_detection::terminal_info()),
         copy_on_select_clear_selection: local_settings.tui.copy_on_select_clear_selection,
@@ -685,6 +693,10 @@ pub async fn run_fork_picker_with_app_server(
     let runtime_keymap = picker_runtime_keymap(local_settings)?;
     let options = SessionPickerRunOptions {
         backend_id: app_server.backend_id(),
+        cloud_backends: (app_server.thread_params_mode() == crate::ThreadParamsMode::Cloud)
+            .then(|| app_server.backend_id())
+            .into_iter()
+            .collect(),
         use_theme_colors: local_settings.tui.status_line_use_colors,
         copy_on_select: local_settings.copy_on_select(&codex_terminal_detection::terminal_info()),
         copy_on_select_clear_selection: local_settings.tui.copy_on_select_clear_selection,
@@ -760,6 +772,7 @@ async fn run_session_picker_event_loop(
         options.local_filter_cwd.clone(),
         options.action,
     );
+    state.cloud_backends = options.cloud_backends;
     state.filter_mode =
         SessionFilterMode::from_show_all(options.show_all, options.filter_cwd.as_deref());
     state.filter_cwd = options.filter_cwd;
@@ -941,6 +954,11 @@ fn spawn_app_server_source(backend: AppServerPickerBackend) -> sources::Source {
         config,
     } = backend;
     let backend_id = app_server.backend_id();
+    let initial_mode = if app_server.uses_remote_workspace() {
+        PageLoadMode::StoreDefault
+    } else {
+        PageLoadMode::StateDbOnly
+    };
     let (bg_tx, events) = mpsc::unbounded_channel();
     let (request_tx, mut request_rx) = mpsc::unbounded_channel::<PickerLoadRequest>();
 
@@ -1085,6 +1103,7 @@ fn spawn_app_server_source(backend: AppServerPickerBackend) -> sources::Source {
 
     sources::Source {
         backend_id,
+        initial_mode,
         loader: Arc::new(move |request: PickerLoadRequest| {
             let _ = request_tx.send(request);
         }),
@@ -1123,6 +1142,7 @@ impl Drop for AltScreenGuard<'_> {
 
 struct PickerState {
     backend_id: crate::backend_id::BackendId,
+    cloud_backends: HashSet<BackendId>,
     clock_format: ClockFormat,
     use_theme_colors: bool,
     copy_on_select: bool,
@@ -1327,6 +1347,13 @@ impl Row {
 }
 
 impl PickerState {
+    fn label_style(&self, row: &Row) -> ThreadLabelStyle {
+        ThreadLabelStyle::from_is_cloud(
+            self.cloud_backends
+                .contains(&row.backend_id.unwrap_or(self.backend_id)),
+        )
+    }
+
     fn new(
         backend_id: crate::backend_id::BackendId,
         requester: FrameRequester,
@@ -1338,6 +1365,7 @@ impl PickerState {
     ) -> Self {
         Self {
             backend_id,
+            cloud_backends: HashSet::new(),
             clock_format: ClockFormat::system(),
             use_theme_colors: true,
             copy_on_select: false,
@@ -1392,38 +1420,66 @@ impl PickerState {
     }
 
     fn route_key_chord(&mut self, key: KeyEvent) -> Option<KeyEvent> {
-        if matches!(&self.overlay, Some(Overlay::Transcript(overlay)) if overlay.owns_interaction_key(key))
-        {
-            if self.chord_matcher.cancel() {
-                self.requester.schedule_frame();
-            }
-            return Some(key);
-        }
-        let context = if matches!(&self.overlay, Some(Overlay::Transcript(overlay)) if overlay.is_search_editing())
-        {
-            crate::keymap::KeymapContext::Editor
-        } else if self.overlay.is_some() {
-            crate::keymap::KeymapContext::Pager
+        use crate::keymap::KeyChordMatch;
+        use crate::keymap::KeymapContext;
+        use crate::keymap::KeymapContextSet;
+
+        let mut contexts = KeymapContextSet::new(if self.overlay.is_some() {
+            KeymapContext::Pager
         } else {
-            crate::keymap::KeymapContext::List
-        };
+            KeymapContext::List
+        });
+        if let Some(Overlay::Transcript(overlay)) = &self.overlay {
+            if overlay.is_search_editing() {
+                contexts = KeymapContextSet::new(KeymapContext::Editor);
+            }
+            let selecting = overlay.is_select_mode() && !overlay.is_search_editing();
+            if selecting {
+                contexts = contexts.with_transcript_select();
+            }
+            if overlay.owns_interaction_key(key) {
+                let markdown_chord = selecting
+                    && match self
+                        .chord_matcher
+                        .clone()
+                        .advance(key, &self.keymap.chords, contexts)
+                    {
+                        KeyChordMatch::Completed(key) => {
+                            self.keymap.pager.mark_markdown.is_pressed(key)
+                        }
+                        KeyChordMatch::Pending(prefix) => {
+                            self.keymap.chords.bindings.iter().any(|binding| {
+                                binding.action.action == "mark_markdown"
+                                    && binding.chord.prefix == prefix
+                            })
+                        }
+                        KeyChordMatch::PassThrough
+                        | KeyChordMatch::Cancelled
+                        | KeyChordMatch::Ignored => false,
+                    };
+                if !markdown_chord {
+                    if self.chord_matcher.cancel() {
+                        self.requester.schedule_frame();
+                    }
+                    return Some(key);
+                }
+            }
+        }
         let was_pending = self.chord_matcher.is_pending();
-        let result = self.chord_matcher.advance(
-            key,
-            &self.keymap.chords,
-            crate::keymap::KeymapContextSet::new(context),
-        );
+        let result = self
+            .chord_matcher
+            .advance(key, &self.keymap.chords, contexts);
         if was_pending && !self.chord_matcher.is_pending() {
             self.requester.schedule_frame();
         }
         match result {
-            crate::keymap::KeyChordMatch::PassThrough => Some(key),
-            crate::keymap::KeyChordMatch::Completed(dispatch_event) => Some(dispatch_event),
-            crate::keymap::KeyChordMatch::Pending(_) | crate::keymap::KeyChordMatch::Cancelled => {
+            KeyChordMatch::PassThrough => Some(key),
+            KeyChordMatch::Completed(dispatch_event) => Some(dispatch_event),
+            KeyChordMatch::Pending(_) | KeyChordMatch::Cancelled => {
                 self.requester.schedule_frame();
                 None
             }
-            crate::keymap::KeyChordMatch::Ignored => None,
+            KeyChordMatch::Ignored => None,
         }
     }
 
@@ -2561,6 +2617,7 @@ fn thread_list_params(
     ThreadListParams {
         include_attached_threads: false,
         current_account_only: true,
+        included_thread_ids: None,
         excluded_thread_ids: None,
         attached_to_thread_id: None,
         originators: None,
@@ -3361,7 +3418,7 @@ fn render_comfortable_session_lines(
     };
     let marker = selection_marker(is_selected, is_expanded);
     let unread = state.unread_revision(row).is_some();
-    let title = truncate_text(
+    let title = state.label_style(row).render_text(
         row.display_preview(),
         (width as usize).saturating_sub(marker.width() + 2 * usize::from(unread)),
     );
@@ -3464,6 +3521,7 @@ fn render_dense_session_lines(
         marker,
         date: &date,
         title: row.display_preview(),
+        label_style: state.label_style(row),
         unread: state.unread_revision(row).is_some(),
         thread_id: row.thread_id,
         use_theme_colors: state.use_theme_colors,
@@ -3484,6 +3542,7 @@ struct DenseSummaryInput<'a> {
     marker: Span<'static>,
     date: &'a str,
     title: &'a str,
+    label_style: ThreadLabelStyle,
     is_selected: bool,
     is_zebra: bool,
     width: u16,
@@ -3500,13 +3559,15 @@ fn dense_summary_line(input: DenseSummaryInput<'_>) -> Line<'static> {
     let marker_width = input.marker.width();
     let available = (input.width as usize).saturating_sub(marker_width);
     let columns = dense_columns(available);
+    let title_width = columns
+        .title_width
+        .saturating_sub(2 * usize::from(input.unread));
+    let title = input
+        .label_style
+        .render_text(input.title, title_width.saturating_sub(1));
+    let title = pad_dense_column(title, title_width);
     let title = session_title_span(
-        dense_column_text(
-            input.title,
-            columns
-                .title_width
-                .saturating_sub(2 * usize::from(input.unread)),
-        ),
+        title,
         input.thread_id,
         input.use_theme_colors,
         input.is_selected,
@@ -3577,7 +3638,10 @@ fn dense_row_background_style(selected: bool) -> Style {
 }
 
 fn dense_column_text(text: &str, width: usize) -> String {
-    let text = truncate_text(text, width.saturating_sub(1));
+    pad_dense_column(truncate_text(text, width.saturating_sub(1)), width)
+}
+
+fn pad_dense_column(text: String, width: usize) -> String {
     let padding = width.saturating_sub(UnicodeWidthStr::width(text.as_str()));
     format!("{text}{}", " ".repeat(padding))
 }
@@ -3846,6 +3910,10 @@ fn render_expanded_session_details(
         (None, Some(thread_id)) => thread_id.to_string(),
         (None, None) => "-".to_string(),
     };
+    let session_label_style = row
+        .thread_name
+        .as_ref()
+        .map_or(ThreadLabelStyle::Plain, |_| state.label_style(row));
     let directory = row
         .cwd
         .as_ref()
@@ -3857,7 +3925,9 @@ fn render_expanded_session_details(
     );
 
     vec![
-        expanded_detail_line("Session:", &session, width),
+        expanded_detail_line_with("Session:", width, |value_width| {
+            session_label_style.render_text(&session, value_width)
+        }),
         expanded_time_detail_line(
             "Created:",
             reference,
@@ -3995,17 +4065,25 @@ fn conversation_user_style() -> Style {
 }
 
 fn expanded_detail_line(label: &'static str, value: &str, width: u16) -> Line<'static> {
+    expanded_detail_line_with(label, width, |value_width| {
+        truncate_text(value, value_width)
+    })
+}
+
+fn expanded_detail_line_with(
+    label: &'static str,
+    width: u16,
+    render_value: impl FnOnce(usize) -> String,
+) -> Line<'static> {
     const LABEL_WIDTH: usize = 10;
-    let prefix_width = 4;
-    let gap_width = 2;
-    let value_width = (width as usize)
-        .saturating_sub(prefix_width + LABEL_WIDTH + gap_width)
+    let value_width = usize::from(width)
+        .saturating_sub("  │ ".width() + LABEL_WIDTH + "  ".width())
         .max(1);
     vec![
         "  │ ".set_style(secondary_text_style()),
         format!("{label:<LABEL_WIDTH$}").set_style(secondary_text_style()),
         "  ".set_style(secondary_text_style()),
-        truncate_text(value, value_width).into(),
+        render_value(value_width).into(),
     ]
     .into()
 }
@@ -4798,6 +4876,11 @@ mod tests {
         assert!(rendered.contains("Created:    17 minutes ago · 2026-05-02 14:31:08"));
         assert!(rendered.contains("Updated:    now · 2026-05-02 14:48:19"));
         assert!(rendered.contains(&format!("Directory:  {expected_directory}")));
+        state.cloud_backends.insert(state.backend_id);
+        insta::assert_snapshot!(
+            render_expanded_session_details(&row, &state, /*width*/ 53)[0].to_string(),
+            @"  │ Session:    ☁︎ feat(tui): add raw scrollback mode…"
+        );
         assert!(rendered.contains("Branch:      codex/raw-scrollback-mode"));
         assert!(rendered.contains("Conversation:"));
     }
@@ -5088,6 +5171,7 @@ mod tests {
         ];
         let local_backend = state.backend_id;
         let cloud_backend = crate::backend_id::BackendId::new();
+        state.cloud_backends.insert(cloud_backend);
         rows[0].backend_id = Some(cloud_backend);
         for row in &mut rows[1..] {
             row.backend_id = Some(local_backend);
@@ -5133,6 +5217,20 @@ mod tests {
 
         let snapshot = render_picker_list(&state, /*width*/ 80, /*height*/ 12);
         assert_snapshot!("resume_picker_table", snapshot);
+        let cloud_row = &state.filtered_rows[0];
+        insta::assert_snapshot!(
+            render_dense_session_lines(
+                cloud_row,
+                &state,
+                /*is_selected*/ false,
+                /*is_expanded*/ false,
+                /*is_zebra*/ false,
+                /*width*/ 30,
+            )[0]
+                .to_string()
+                .trim_end(),
+            @"  42s ago     ☁︎ Fix resume p…"
+        );
     }
 
     #[test]
@@ -6452,6 +6550,7 @@ session_picker_view = "dense"
             marker: selection_marker(/*is_selected*/ true, /*is_expanded*/ false),
             date: "15m ago",
             title: "Selected dense row",
+            label_style: ThreadLabelStyle::Plain,
             thread_id: None,
             use_theme_colors: true,
             is_selected: true,
@@ -6471,6 +6570,7 @@ session_picker_view = "dense"
             marker: selection_marker(/*is_selected*/ false, /*is_expanded*/ false),
             date: "15m ago",
             title: "Zebra dense row",
+            label_style: ThreadLabelStyle::Plain,
             thread_id: None,
             use_theme_colors: true,
             is_selected: false,

@@ -250,6 +250,7 @@ impl TranscriptOverlay {
     }
 
     pub(crate) fn set_keymap_bindings(&mut self, keymap: &RuntimeKeymap) {
+        self.keymap.clone_from(&keymap.pager);
         self.find_transcript.clone_from(&keymap.app.find_transcript);
         self.select_transcript
             .clone_from(&keymap.app.select_transcript);
@@ -339,6 +340,11 @@ impl TranscriptOverlay {
             .iter()
             .rposition(|cell| is_session_history_prefix_cell(cell.as_ref()))
             .map_or(/*default*/ 0, |index| index + 1);
+        self.insert_history_page(index, cells);
+        index
+    }
+
+    pub(crate) fn insert_history_page(&mut self, index: usize, cells: Vec<Arc<dyn HistoryCell>>) {
         let added = cells.len();
         self.cells.splice(index..index, cells);
         for highlight in [&mut self.highlight_cell, &mut self.pending_highlight] {
@@ -348,7 +354,6 @@ impl TranscriptOverlay {
         }
         self.view.set_highlight(self.highlight_cell);
         self.view.history_loaded(&self.cells, index..index + added);
-        index
     }
 
     pub(crate) fn replace_cells(&mut self, cells: Vec<Arc<dyn HistoryCell>>) {

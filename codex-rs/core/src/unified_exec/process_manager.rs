@@ -230,7 +230,7 @@ fn exec_server_params_for_request(
     // Threads sharing an executor and sandbox retries can reuse a public handle
     // while the executor still retains its previous process.
     let exec_server_process_id = format!("{process_id}-{}", Uuid::new_v4());
-    codex_exec_server::ExecParams {
+    let mut params = codex_exec_server::ExecParams {
         process_id: exec_server_process_id.into(),
         metadata: tool_ctx.map(|ctx| codex_exec_server::ExecMetadata {
             thread_id: Some(ctx.session.thread_id()),
@@ -248,7 +248,16 @@ fn exec_server_params_for_request(
         enforce_managed_network: request.exec_server_enforce_managed_network,
         managed_network: request.exec_server_managed_network.clone(),
         network_proxy: request.exec_server_network_proxy.clone(),
+    };
+    let sandboxed = params.sandbox.is_some();
+    // A prepared context uses the local sandbox. A remote proxy uses the executor's OS.
+    if let Some(local) = &mut params.managed_network {
+        local.transparent_tcp &= sandboxed && cfg!(target_os = "linux");
     }
+    if let Some(remote) = &mut params.network_proxy {
+        remote.proxy.transparent_tcp &= sandboxed;
+    }
+    params
 }
 
 /// Borrowed process state prepared for a `write_stdin` or poll operation.
@@ -1319,23 +1328,18 @@ impl UnifiedExecProcessManager {
         tool_ctx: &ToolCtx,
         request: ExecRequest,
         network: Option<&NetworkProxy>,
-        network_proxy_launch: Option<codex_network_proxy::RemoteNetworkProxyLaunchConfig>,
         exec_server_env_config: Option<ExecServerEnvConfig>,
         shell_snapshot: Option<codex_exec_server::ShellSnapshotRequest>,
         windows_sandbox_proxy_settings_mode: codex_sandboxing::WindowsSandboxProxySettingsMode,
         tty: bool,
         environment: &codex_exec_server::Environment,
     ) -> Result<UnifiedExecProcess, ToolError> {
-        let network_policy_decider = network_proxy_launch
+        let network_policy_decider = request
+            .exec_server_network_proxy
             .as_ref()
             .filter(|launch| launch.policy_decision_timeout_ms.is_some())
             .and_then(|launch| network?.remote_policy_decider(launch.proxy.allow_local_binding));
-        let missing_remote_proxy =
-            environment.is_remote() && network.is_some() && network_proxy_launch.is_none();
         let request = ExecRequest {
-            exec_server_enforce_managed_network: request.exec_server_enforce_managed_network
-                && !missing_remote_proxy,
-            exec_server_network_proxy: network_proxy_launch,
             exec_server_env_config,
             exec_server_shell_snapshot: shell_snapshot,
             ..request
@@ -1416,9 +1420,9 @@ impl UnifiedExecProcessManager {
                 path: request.cwd.clone(),
             })?;
 
-        if request.command.is_empty() {
-            return Err(UnifiedExecError::MissingCommandLine);
-        }
+        let (program, args) = request
+            .program_and_args()
+            .ok_or(UnifiedExecError::MissingCommandLine)?;
         let network_proxy_restricting_sid = {
             #[cfg(target_os = "windows")]
             {
@@ -1463,7 +1467,8 @@ impl UnifiedExecProcessManager {
                 None
             };
         let spawn_result = codex_sandboxing::spawn_process(codex_sandboxing::SpawnRequest {
-            command: &request.command,
+            program,
+            args,
             cwd: native_cwd.as_path(),
             env: &request.env,
             arg0: &request.arg0,

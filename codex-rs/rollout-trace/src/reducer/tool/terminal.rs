@@ -6,8 +6,9 @@
 //! `write_stdin`, can still form a terminal row from the canonical dispatch
 //! invocation/result payloads when those payloads carry the session join key.
 //! Runtime process handles are recyclable and thread-local. Each exec creates a
-//! distinct reduced session; stdin uses the runtime's resolved exec when recorded,
-//! falling back to the latest session for its handle in older traces.
+//! distinct reduced session. A stdin invocation initially joins by handle. Once
+//! the runtime resolves the target, that event identifies the exact exec. A
+//! partial recording can end between invocation and resolution.
 
 use anyhow::Context;
 use anyhow::Result;
@@ -49,14 +50,15 @@ impl TraceReducer {
             return Ok(None);
         }
         let operation_kind = TerminalOperationKind::WriteStdin;
-        let Some(invocation_payload) = invocation_payload else {
+        let Some(invocation_payload) = invocation_payload.filter(|p| p.capture.is_complete())
+        else {
             // Payload writes are best-effort in the live recorder. If the
             // canonical invocation is missing, keep the ToolCall but avoid
             // fabricating a lossy terminal row.
             return Ok(None);
         };
 
-        let payload = self.read_payload_json(invocation_payload)?;
+        let payload = self.payload_reader.read_json(invocation_payload)?;
         let Some(request) = parse_dispatch_terminal_request(payload).with_context(|| {
             format!(
                 "parse terminal invocation payload {} as dispatch payload",
@@ -91,7 +93,10 @@ impl TraceReducer {
             return Ok(None);
         };
 
-        let payload = self.read_payload_json(runtime_payload)?;
+        if !runtime_payload.capture.is_complete() {
+            return Ok(None);
+        }
+        let payload = self.payload_reader.read_json(runtime_payload)?;
         let payload: ExecCommandBeginPayload =
             serde_json::from_value(payload).with_context(|| {
                 format!(
@@ -171,14 +176,10 @@ impl TraceReducer {
             bail!("terminal end referenced unknown operation {operation_id}");
         };
         let response = response_payload
+            .filter(|p| p.capture.is_complete())
             .map(|payload| {
-                let value = self.read_payload_json(payload)?;
-                let response = parse_terminal_response_payload(
-                    value,
-                    &operation_kind,
-                    &payload.raw_payload_id,
-                )?;
-                Ok::<_, anyhow::Error>((payload.raw_payload_id.clone(), response))
+                let value = self.payload_reader.read_json(payload)?;
+                parse_terminal_response_payload(value, &operation_kind, &payload.raw_payload_id)
             })
             .transpose()?;
 
@@ -190,8 +191,10 @@ impl TraceReducer {
             operation.execution.ended_seq = Some(seq);
             operation.execution.status = status;
 
-            if let Some((raw_payload_id, response)) = response {
-                push_unique(&mut operation.raw_payload_ids, &raw_payload_id);
+            if let Some(payload) = response_payload {
+                push_unique(&mut operation.raw_payload_ids, &payload.raw_payload_id);
+            }
+            if let Some(response) = response {
                 operation.result = Some(response.result);
                 response.process_id
             } else {

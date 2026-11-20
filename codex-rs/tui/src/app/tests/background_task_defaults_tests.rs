@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app::agents_overview::AGENTS_OVERVIEW_VIEW_ID;
+use crate::app::session_lifecycle::FreshSessionStart;
 use crate::app::tests::session_lifecycle_requests::HistoryCapabilities;
 use crate::app::tests::session_lifecycle_requests::recorded_params;
 use crate::app::tests::session_lifecycle_requests::start_recording_app_server_with_history;
@@ -913,7 +914,7 @@ async fn command_center_new_restores_blank_drafts_and_builtin_permissions() -> R
     app.start_fresh_session(
         &mut tui,
         &mut server,
-        /*session_start_source*/ None,
+        FreshSessionStart::PreserveCurrentView(None),
         /*initial_user_message*/ None,
         /*new_thread_name*/ None,
     )
@@ -1223,7 +1224,7 @@ async fn command_center_new_checkout_and_worktree_preserve_source_and_default_br
                     return Ok::<_, color_eyre::Report>(());
                 }
             }
-            color_eyre::eyre::bail!("permissions menu event stream closed")
+            color_eyre::eyre::bail!("permissions menu event stream closed");
         })
         .await??;
         app.chat_widget.handle_key_event(KeyCode::Up.into());

@@ -321,7 +321,8 @@ impl ProcessExecManager {
             .await
         } else {
             codex_sandboxing::spawn_process(codex_sandboxing::SpawnRequest {
-                command: &command,
+                program: std::ffi::OsStr::new(program),
+                args,
                 cwd: cwd.as_path(),
                 env: &env,
                 arg0: &arg0,

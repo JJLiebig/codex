@@ -2,6 +2,7 @@
 use std::os::unix::process::ExitStatusExt;
 
 use std::collections::HashMap;
+use std::ffi::OsString;
 use std::io;
 #[cfg(target_os = "windows")]
 use std::path::Path;
@@ -37,6 +38,7 @@ use codex_protocol::protocol::ExecCommandOutputDeltaEvent;
 use codex_protocol::protocol::ExecOutputStream;
 use codex_sandboxing::SandboxCommand;
 use codex_sandboxing::SandboxManager;
+use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxSelection;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::SandboxType;
@@ -121,19 +123,6 @@ pub enum ExecCapturePolicy {
     FullBufferWithExpiration,
     /// Full-buffer helpers that honor expiration and suppress unredacted sandbox diagnostics.
     SensitiveFullBuffer,
-}
-
-fn select_process_exec_tool_sandbox_type(
-    permission_profile: &PermissionProfile,
-    windows_sandbox_type: SandboxType,
-    enforce_managed_network: bool,
-) -> SandboxType {
-    SandboxManager::new().select_initial(
-        permission_profile,
-        SandboxablePreference::Auto,
-        windows_sandbox_type,
-        enforce_managed_network,
-    )
 }
 
 fn network_proxy_environment_error(
@@ -365,14 +354,8 @@ pub async fn build_exec_request(
         sandbox_permissions: _,
     } = params;
 
+    let manager = SandboxManager::new();
     let enforce_managed_network = network.is_some();
-    let sandbox_type = select_process_exec_tool_sandbox_type(
-        permission_profile,
-        windows_sandbox_type,
-        enforce_managed_network,
-    );
-    tracing::debug!("Sandbox type: {sandbox_type:?}");
-
     let (env, managed_network) = if let Some(network) = network.as_ref() {
         let prepared = network
             .prepare_for_optional_environment(env, network_environment_id.as_deref())
@@ -383,6 +366,12 @@ pub async fn build_exec_request(
     } else {
         (env, None)
     };
+    let sandbox_policy_cwd_uri = PathUri::from_abs_path(sandbox_cwd);
+    let workspace_roots = if windows_sandbox_workspace_roots.is_empty() {
+        std::slice::from_ref(&sandbox_policy_cwd_uri)
+    } else {
+        windows_sandbox_workspace_roots
+    };
     let (program, args) = command.split_first().ok_or_else(|| {
         CodexErr::Io(io::Error::new(
             io::ErrorKind::InvalidInput,
@@ -390,9 +379,6 @@ pub async fn build_exec_request(
         ))
     })?;
     let cwd = PathUri::from_abs_path(&cwd);
-    let sandbox_policy_cwd_uri = PathUri::from_abs_path(sandbox_cwd);
-
-    let manager = SandboxManager::new();
     let command = SandboxCommand {
         program: program.clone().into(),
         args: args.to_vec(),
@@ -405,16 +391,28 @@ pub async fn build_exec_request(
         expiration,
         capture_policy,
     };
+    // An already-bound profile only needs its concrete paths validated. Its Windows
+    // launcher hints can include foreign roots that this host won't use.
+    let policy_roots = if permission_profile.has_workspace_root_rules() {
+        workspace_roots
+    } else {
+        &[]
+    };
     let request = manager
         .transform(SandboxTransformRequest {
             command,
             permissions: permission_profile,
-            workspace_roots: None,
-            runtime_readable_paths: &[],
-            selection: SandboxSelection::Explicit(sandbox_type),
-            enforce_managed_network,
-            environment_id: network_environment_id.as_deref(),
-            network: network.as_ref(),
+            workspace_roots: Some(policy_roots),
+            runtime_readable_paths: None,
+            selection: SandboxSelection::Platform {
+                preference: SandboxablePreference::Auto,
+                windows_sandbox: windows_sandbox_type,
+            },
+            network: SandboxNetwork::new(
+                enforce_managed_network,
+                network.as_ref(),
+                network_environment_id.as_deref(),
+            ),
             sandbox_policy_cwd: &sandbox_policy_cwd_uri,
             sandbox_exe: if cfg!(windows) {
                 codex_self_exe.as_deref()
@@ -424,27 +422,10 @@ pub async fn build_exec_request(
             use_legacy_landlock,
             windows_sandbox_level,
         })?
-        .into_command_request();
-    // These hints belong to the native Windows backend. Other backends use
-    // the materialized profile and must not project executor paths onto this host.
-    let windows_sandbox_workspace_roots = if sandbox_type == SandboxType::WindowsRestrictedToken {
-        if windows_sandbox_workspace_roots.is_empty() {
-            vec![sandbox_cwd.clone()]
-        } else {
-            windows_sandbox_workspace_roots
-                .iter()
-                .map(PathUri::to_abs_path)
-                .collect::<io::Result<Vec<_>>>()
-                .map_err(|err| {
-                    CodexErr::InvalidRequest(format!(
-                        "invalid Windows sandbox workspace roots: {err}"
-                    ))
-                })?
-        }
-    } else {
-        Vec::new()
-    };
-    ExecRequest::from_sandbox_exec_request(request, options, windows_sandbox_workspace_roots).await
+        .into_command_request()?;
+    let request = ExecRequest::from_sandbox_exec_request(request, options, workspace_roots).await?;
+    tracing::debug!("Sandbox type: {:?}", request.sandbox);
+    Ok(request)
 }
 
 pub(crate) async fn execute_exec_request(
@@ -454,6 +435,7 @@ pub(crate) async fn execute_exec_request(
 ) -> Result<ExecToolCallOutput> {
     let ExecRequest {
         command,
+        native_program,
         cwd,
         env,
         exec_server_env_config: _,
@@ -502,6 +484,7 @@ pub(crate) async fn execute_exec_request(
     let start = Instant::now();
     let raw_output_result = get_raw_output_result(
         params,
+        native_program,
         network_sandbox_policy,
         stdout_stream,
         after_spawn,
@@ -519,6 +502,7 @@ pub(crate) async fn execute_exec_request(
 #[allow(clippy::too_many_arguments)]
 async fn get_raw_output_result(
     params: ExecParams,
+    native_program: Option<OsString>,
     network_sandbox_policy: NetworkSandboxPolicy,
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
@@ -543,7 +527,14 @@ async fn get_raw_output_result(
         .await;
     }
 
-    exec(params, network_sandbox_policy, stdout_stream, after_spawn).await
+    exec(
+        params,
+        native_program,
+        network_sandbox_policy,
+        stdout_stream,
+        after_spawn,
+    )
+    .await
 }
 
 #[cfg(target_os = "windows")]
@@ -925,6 +916,7 @@ fn aggregate_output(
 /// wrapper args, as appropriate.
 async fn exec(
     params: ExecParams,
+    native_program: Option<OsString>,
     network_sandbox_policy: NetworkSandboxPolicy,
     stdout_stream: Option<StdoutStream>,
     after_spawn: Option<Box<dyn FnOnce() + Send>>,
@@ -962,7 +954,7 @@ async fn exec(
     })?;
     let arg0_ref = arg0.as_deref();
     let child = spawn_child_async(SpawnChildRequest {
-        program: PathBuf::from(program),
+        program: native_program.map_or_else(|| PathBuf::from(program), PathBuf::from),
         args: args.into(),
         arg0: arg0_ref,
         cwd,

@@ -476,6 +476,14 @@ struct CompletedTurnState {
     duration_ms: Option<u64>,
 }
 
+#[derive(Clone, Copy, Default)]
+enum TurnDictation {
+    #[default]
+    NoUserInput,
+    Unknown,
+    Known(bool),
+}
+
 #[derive(Default)]
 struct TurnState {
     connection_id: Option<u64>,
@@ -492,6 +500,7 @@ struct TurnState {
     codex_error: Option<TurnCodexError>,
     latest_diff: Option<String>,
     steer_count: usize,
+    dictation: TurnDictation,
     tool_counts: TurnToolCounts,
     completed_cua_tool_item_ids: HashSet<String>,
     resource_skill_invocations: HashSet<String>,
@@ -816,6 +825,19 @@ impl AnalyticsReducer {
                 }
                 CustomAnalyticsFact::TurnCodexError(input) => {
                     self.ingest_turn_codex_error(*input);
+                }
+                CustomAnalyticsFact::AcceptedUserInput {
+                    turn_id,
+                    used_dictation,
+                } => {
+                    let state = self.turn_state(turn_id);
+                    state.dictation = match (state.dictation, used_dictation) {
+                        (TurnDictation::Known(true), _) | (_, Some(true)) => {
+                            TurnDictation::Known(true)
+                        }
+                        (TurnDictation::Unknown, _) | (_, None) => TurnDictation::Unknown,
+                        (_, Some(false)) => TurnDictation::Known(false),
+                    };
                 }
                 CustomAnalyticsFact::ImagePreparation(input) => {
                     self.ingest_image_preparation(*input);
@@ -4039,6 +4061,10 @@ fn codex_turn_event_params(
         codex_error_http_status_code: codex_error.and_then(|error| error.http_status_code),
         usage_limit_window_minutes: codex_error.and_then(|error| error.usage_limit_window_minutes),
         steer_count: Some(turn_state.steer_count),
+        used_dictation: match turn_state.dictation {
+            TurnDictation::Known(value) => Some(value),
+            TurnDictation::NoUserInput | TurnDictation::Unknown => None,
+        },
         total_tool_call_count: Some(turn_state.tool_counts.total),
         shell_command_count: Some(turn_state.tool_counts.shell_command),
         file_change_count: Some(turn_state.tool_counts.file_change),
@@ -4274,6 +4300,7 @@ mod tests {
                         ThreadItemPayload::McpToolCall {
                             id: keys[2].item_id.clone(),
                             server: "server".to_string(),
+                            environment_id: None,
                             tool: "tool".to_string(),
                             status: McpToolCallStatus::Failed,
                             arguments: serde_json::json!({}),

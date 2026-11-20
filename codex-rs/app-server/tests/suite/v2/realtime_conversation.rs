@@ -755,8 +755,11 @@ async fn realtime_conversation_streams_timeline_items() -> Result<()> {
     .await?;
     assert_eq!(session_started.item, session_completed.item);
     assert_eq!(
-        Uuid::parse_str(&session_started.item.id)?.get_version_num(),
-        7
+        session_started.item.id,
+        format!(
+            "realtime-session-start:{}",
+            session_started.item.realtime_session_id
+        )
     );
     assert!(matches!(
         session_completed.item.content,
@@ -1427,7 +1430,17 @@ async fn realtime_timeline_splits_accepted_steering_and_persists_promoted_artifa
     );
     for entry in &page.data {
         if let ThreadTimelineEntry::Realtime { item, .. } = entry {
-            assert_eq!(Uuid::parse_str(&item.id)?.get_version_num(), 7);
+            if matches!(
+                item.content,
+                ThreadRealtimeItemContent::RealtimeSessionStarted
+            ) {
+                assert_eq!(
+                    item.id,
+                    format!("realtime-session-start:{}", item.realtime_session_id)
+                );
+            } else {
+                assert_eq!(Uuid::parse_str(&item.id)?.get_version_num(), 7);
+            }
         }
     }
 
@@ -2400,12 +2413,19 @@ async fn webrtc_v1_start_posts_offer_returns_sdp_and_joins_sideband() -> Result<
     // Phase 2: start through app-server and assert the app receives both the started notification
     // and the answer SDP.
     let started = harness.start_webrtc_realtime("v=offer\r\n").await?;
+    let call_request = harness.call_capture.single_request();
+    let session_id = call_request
+        .headers
+        .get("x-session-id")
+        .context("call session ID")?
+        .to_str()?;
+    assert_ne!(session_id, harness.thread_id);
     assert_eq!(
         started,
         StartedWebrtcRealtime {
             started: ThreadRealtimeStartedNotification {
                 thread_id: harness.thread_id.clone(),
-                realtime_session_id: Some(harness.thread_id.clone()),
+                realtime_session_id: Some(session_id.to_string()),
                 version: RealtimeConversationVersion::V1,
             },
             sdp: ThreadRealtimeSdpNotification {
@@ -2531,7 +2551,7 @@ async fn existing_call_attaches_without_reinitializing_the_client_session(
         started,
         ThreadRealtimeStartedNotification {
             thread_id: harness.thread_id.clone(),
-            realtime_session_id: realtime_session_id.map(str::to_string),
+            realtime_session_id: Some(realtime_session_id.unwrap_or("rtc_existing").to_string()),
             version: expected_version,
         }
     );
@@ -2663,12 +2683,19 @@ async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -
             RealtimeConversationVersion::V3,
         )
         .await?;
+    let call_request = harness.call_capture.single_request();
+    let session_id = call_request
+        .headers
+        .get("x-session-id")
+        .context("call session ID")?
+        .to_str()?;
+    assert_ne!(session_id, harness.thread_id);
     assert_eq!(
         started,
         StartedWebrtcRealtime {
             started: ThreadRealtimeStartedNotification {
                 thread_id: harness.thread_id.clone(),
-                realtime_session_id: Some(harness.thread_id.clone()),
+                realtime_session_id: Some(session_id.to_string()),
                 version: RealtimeConversationVersion::V3,
             },
             sdp: ThreadRealtimeSdpNotification {
@@ -2681,7 +2708,7 @@ async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -
     assert_call_create_multipart(
         harness.call_capture.single_request(),
         "v=offer\r\n",
-        r#"{"audio":{"output":{"voice":"cove"}},"delegation":{"ack_filler":false,"type":"client"},"instructions":"backend prompt\n\nstartup context","model":"gpt-live-1-codex"}"#,
+        r#"{"audio":{"output":{"voice":"marin"}},"delegation":{"ack_filler":false,"type":"client"},"instructions":"backend prompt\n\nstartup context","model":"gpt-live-1.1-codex"}"#,
         "/v1/live",
     )?;
     assert!(
@@ -2708,6 +2735,75 @@ async fn webrtc_v3_start_posts_live_session_and_joins_without_session_update() -
         "Frameless WebRTC sideband must not send a second session.update"
     );
 
+    harness.shutdown().await;
+    Ok(())
+}
+
+#[test_case(None, None, "marin"; "cleared setting uses API default")]
+#[test_case(Some("maple"), None, "maple"; "changed setting takes effect")]
+#[test_case(Some("maple"), Some("marin"), "marin"; "explicit voice overrides setting")]
+#[tokio::test]
+async fn webrtc_v3_uses_current_voice_setting(
+    saved_voice: Option<&str>,
+    requested_voice: Option<&str>,
+    expected_voice: &str,
+) -> Result<()> {
+    skip_if_no_network!(Ok(()));
+
+    let mut harness = RealtimeE2eHarness::new(
+        RealtimeTestVersion::V1,
+        no_main_loop_responses(),
+        realtime_sideband(vec![open_realtime_sideband_connection(vec![vec![]])]),
+    )
+    .await?;
+    let config_path = harness._codex_home.path().join("config.toml");
+    let original_config = std::fs::read_to_string(&config_path)?;
+    std::fs::write(
+        &config_path,
+        original_config.replace("[realtime]", "[realtime]\nvoice = \"cove\""),
+    )?;
+    let request_id = harness
+        .mcp
+        .send_thread_start_request_with_auto_env(ThreadStartParams::default())
+        .await?;
+    let thread: ThreadStartResponse =
+        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request_id)).await??;
+
+    // The thread retains Cove. The next call must use the current setting, including removal.
+    let updated_config = match saved_voice {
+        Some(voice) => {
+            original_config.replace("[realtime]", &format!("[realtime]\nvoice = {voice:?}"))
+        }
+        None => original_config,
+    };
+    std::fs::write(config_path, updated_config)?;
+    let request_id = harness
+        .mcp
+        .send_thread_realtime_start_request(serde_json::from_value(json!({
+            "threadId": thread.thread.id,
+            "version": "v3",
+            "transport": {"type": "webrtc", "sdp": "v=offer\r\n"},
+            "outputModality": "audio",
+            "includeStartupContext": false,
+            "prompt": "voice selection test",
+            "voice": requested_voice,
+        }))?)
+        .await?;
+    let _: ThreadRealtimeStartResponse =
+        timeout(DEFAULT_TIMEOUT, harness.mcp.read_response(request_id)).await??;
+    let _: ThreadRealtimeSdpNotification = harness.read_notification("thread/realtime/sdp").await?;
+    assert_call_create_multipart(
+        harness.call_capture.single_request(),
+        "v=offer\r\n",
+        &json!({
+            "audio": {"output": {"voice": expected_voice}},
+            "delegation": {"type": "client"},
+            "instructions": "backend prompt",
+            "model": "gpt-live-1.1-codex",
+        })
+        .to_string(),
+        "/v1/live",
+    )?;
     harness.shutdown().await;
     Ok(())
 }
@@ -4253,12 +4349,19 @@ async fn realtime_starts_on_forked_and_resumed_threads(
     }
 
     let started = harness.start_webrtc_realtime("v=offer\r\n").await?;
+    let call_request = harness.call_capture.single_request();
+    let session_id = call_request
+        .headers
+        .get("x-session-id")
+        .context("call session ID")?
+        .to_str()?;
+    assert_ne!(session_id, harness.thread_id);
     assert_eq!(
         started,
         StartedWebrtcRealtime {
             started: ThreadRealtimeStartedNotification {
                 thread_id: harness.thread_id.clone(),
-                realtime_session_id: Some(harness.thread_id.clone()),
+                realtime_session_id: Some(session_id.to_string()),
                 version: RealtimeConversationVersion::V1,
             },
             sdp: ThreadRealtimeSdpNotification {

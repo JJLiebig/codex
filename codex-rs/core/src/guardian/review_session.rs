@@ -278,7 +278,19 @@ async fn run_review_on_session(
     match run_before_review_deadline(
         deadline,
         params.external_cancel.as_ref(),
-        Box::pin(ensure_guardian_node_repl_policy(review_session, params)),
+        Box::pin(async {
+            review_session
+                .session
+                .update_settings(crate::session::session::SessionSettingsUpdate {
+                    step_settings: crate::session::step_settings::StepSettingsUpdate {
+                        request_country: Some(params.parent_context.request_country.clone()),
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                })
+                .await?;
+            ensure_guardian_node_repl_policy(review_session, params).await
+        }),
     )
     .await
     {
@@ -824,7 +836,10 @@ impl codex_guardian_reviewer::ReviewerRuntime for GuardianReviewSession {
     async fn submit_turn(&self, request: TurnInputRequest) -> anyhow::Result<TurnInputSubmission> {
         Ok(self
             .io
-            .submit_turn_input(request, TurnInputMode::StartIfIdle)
+            .submit_turn_input(
+                crate::codex_thread::resolve_client_turn_input(request).await?,
+                TurnInputMode::StartIfIdle,
+            )
             .await?)
     }
 

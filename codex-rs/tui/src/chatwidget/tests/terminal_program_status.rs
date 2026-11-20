@@ -103,6 +103,7 @@ async fn mcp_startup_preserves_program_status_outside_a_turn() {
             chat.on_mcp_server_status_updated(McpServerStatusUpdatedNotification {
                 thread_id: None,
                 name: "background".to_string(),
+                environment_id: None,
                 status,
                 error: None,
                 failure_reason: None,
@@ -120,6 +121,7 @@ async fn mcp_startup_does_not_hide_foreground_work() {
     chat.on_mcp_server_status_updated(McpServerStatusUpdatedNotification {
         thread_id: None,
         name: "background".to_string(),
+        environment_id: None,
         status: McpServerStartupState::Starting,
         error: None,
         failure_reason: None,

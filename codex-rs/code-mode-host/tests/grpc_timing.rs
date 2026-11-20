@@ -39,6 +39,7 @@ async fn execution_timing_includes_javascript_but_excludes_delayed_reads() -> Re
     let mut client = CodeModeHostClient::connect(host.endpoint).await?;
     let mut events = client
         .open_session(grpc::OpenSessionRequest {
+            heartbeat_interval_s: 0,
             max_pending_delegate_calls: None,
             cell_execution_limits: None,
             output_truncation: None,
@@ -57,6 +58,7 @@ async fn execution_timing_includes_javascript_but_excludes_delayed_reads() -> Re
         let observed = Instant::now();
         let mut execution = client
             .execute(grpc::ExecuteRequest {
+                catalog_revision: None,
                 session_id: opened.session_id.clone(),
                 execution_id: format!("execution-{index}"),
                 tool_call_id: format!("call-{index}"),

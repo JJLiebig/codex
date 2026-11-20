@@ -1,11 +1,13 @@
 use codex_protocol::ThreadId;
 use codex_protocol::protocol::ThreadHistoryMode;
 use codex_rollout::RolloutItem;
+use futures::future::BoxFuture;
 use std::any::Any;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 
 use crate::AddThreadAttachmentOutcome;
 use crate::AddThreadAttachmentParams;
@@ -48,6 +50,7 @@ use crate::StoredProject;
 use crate::StoredProjectsPage;
 use crate::StoredThread;
 use crate::StoredThreadHistory;
+use crate::StoredThreadSearchResult;
 use crate::StoredThreadSection;
 use crate::StoredThreadSectionsPage;
 use crate::ThreadAttachmentOwnerPage;
@@ -65,6 +68,14 @@ use crate::UpdatedProject;
 
 /// Future returned by [`ThreadStore`] operations.
 pub type ThreadStoreFuture<'a, T> = Pin<Box<dyn Future<Output = ThreadStoreResult<T>> + Send + 'a>>;
+
+/// Request lifetime and optional progress sink for a thread search.
+pub struct ThreadSearchObserver {
+    /// Verified matches discovered before the authoritative page is complete.
+    pub progress: Option<mpsc::Sender<Vec<StoredThreadSearchResult>>>,
+    /// Resolves when the requester no longer needs the result.
+    pub cancelled: BoxFuture<'static, ()>,
+}
 
 /// Data a [`ThreadStore`] has already loaded while preparing a thread for resume.
 ///
@@ -145,6 +156,11 @@ impl PendingDaybreakPreference {
 pub trait ThreadStore: Any + Send + Sync {
     /// Return this store as [`Any`] for implementation-owned escape hatches.
     fn as_any(&self) -> &dyn Any;
+
+    /// Returns the authority for session aliases when this backend supports them.
+    fn model_ids(&self) -> Option<std::sync::Arc<dyn codex_state::SessionModelIdStore>> {
+        None
+    }
 
     /// Returns the history mode to use when history does not carry a persisted mode.
     ///
@@ -542,6 +558,11 @@ pub trait ThreadStore: Any + Send + Sync {
         })
     }
 
+    /// Whether this live thread writes canonical realtime frames and handoff receipts.
+    fn realtime_frames_enabled(&self, _thread_id: ThreadId) -> ThreadStoreFuture<'_, bool> {
+        Box::pin(async { Ok(false) })
+    }
+
     /// Whether paginated threads can hydrate durable history through turn and item lists.
     fn supports_paginated_history_lists(&self) -> bool {
         false
@@ -556,6 +577,23 @@ pub trait ThreadStore: Any + Send + Sync {
             Err(ThreadStoreError::Unsupported {
                 operation: "thread/search",
             })
+        })
+    }
+
+    /// Searches threads with cancellation and optional progress where supported.
+    fn search_threads_observed(
+        &self,
+        params: SearchThreadsParams,
+        observer: ThreadSearchObserver,
+    ) -> ThreadStoreFuture<'_, ThreadSearchPage> {
+        Box::pin(async move {
+            tokio::select! {
+                biased;
+                () = observer.cancelled => Err(ThreadStoreError::Internal {
+                    message: "thread search cancelled".to_string(),
+                }),
+                result = self.search_threads(params) => result,
+            }
         })
     }
 
@@ -585,6 +623,22 @@ pub trait ThreadStore: Any + Send + Sync {
         Box::pin(async {
             Err(ThreadStoreError::Unsupported {
                 operation: "list_items",
+            })
+        })
+    }
+
+    /// Reads a bounded immutable snapshot of the independent realtime stream.
+    fn list_realtime(
+        &self,
+        _params: crate::ListRealtimeParams,
+    ) -> ThreadStoreFuture<'_, crate::RealtimePage> {
+        Box::pin(async {
+            Ok(crate::RealtimePage {
+                data: Vec::new(),
+                next_cursor: None,
+                snapshot_end: 0,
+                projected_through_item_index: 0,
+                coverage: codex_app_server_protocol::ThreadRealtimeCoverage::Unsupported,
             })
         })
     }

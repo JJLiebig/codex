@@ -932,11 +932,12 @@ async fn unattended_modals_survive_unfinished_terminal_input() -> Result<()> {
     crossterm::event::buffer_input(b"\rya")?;
     app.render_thread_snapshot(
         &mut tui,
-        &app_server,
+        &mut app_server,
         thread_id,
         snapshot,
         /*resume_restored_queue*/ false,
-    )?;
+    )
+    .await?;
     assert!(app.chat_widget.has_active_modal());
     let before = tui.terminal.previous_buffer().clone();
     let cursor = tui.terminal.last_known_cursor_pos;
@@ -1053,6 +1054,7 @@ async fn auto_declined_mcp_elicitations_do_not_leave_startup_quarantine_armed() 
             let request = ServerRequest::McpServerElicitationRequest {
                 request_id: AppServerRequestId::Integer(10),
                 params: McpServerElicitationRequestParams {
+                    environment_id: None,
                     thread_id: thread_id.to_string(),
                     turn_id: Some("turn-auth".to_string()),
                     server_name: "payments".to_string(),
@@ -1544,6 +1546,7 @@ async fn startup_thread_started_discards_another_threads_buffered_events() {
     let other_thread_id = ThreadId::new();
     app.enqueue_primary_thread_notification(ServerNotification::McpServerStatusUpdated(
         McpServerStatusUpdatedNotification {
+            environment_id: None,
             thread_id: Some(other_thread_id.to_string()),
             name: "other".to_string(),
             status: McpServerStartupState::Starting,
@@ -1758,6 +1761,7 @@ async fn send_failed_mcp_startup(
         app_server,
         codex_app_server_client::AppServerEvent::ServerNotification(Box::new(
             ServerNotification::McpServerStatusUpdated(McpServerStatusUpdatedNotification {
+                environment_id: None,
                 thread_id: Some(thread_id.to_string()),
                 name: "fixture".to_string(),
                 status: McpServerStartupState::Failed,
@@ -1927,12 +1931,12 @@ async fn ignore_same_thread_resume_allows_retrying_read_only_view() -> Result<()
             history_mode: None,
         })
     );
-    let app_server =
+    let mut app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
     let mut tui = crate::tui::test_support::make_test_tui()?;
     app.render_thread_snapshot(
         &mut tui,
-        &app_server,
+        &mut app_server,
         thread_id,
         ThreadEventSnapshot {
             delegated_turns: Vec::new(),
@@ -1943,7 +1947,8 @@ async fn ignore_same_thread_resume_allows_retrying_read_only_view() -> Result<()
             input_state: None,
         },
         /*resume_restored_queue*/ false,
-    )?;
+    )
+    .await?;
     assert!(app.chat_widget.is_external_writer_view());
     assert!(!app.chat_widget.is_task_running_for_test());
     Ok(())

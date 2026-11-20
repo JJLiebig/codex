@@ -5,6 +5,7 @@ use super::AppServerStartedThread;
 use super::HistoryHydrationScope;
 use super::ResumeModelSettings;
 use super::ThreadHistorySupport;
+use super::ThreadParamsMode;
 use super::ThreadSettingsOwner;
 use super::bootstrap_request_error;
 use super::is_history_pagination_unsupported;
@@ -12,11 +13,13 @@ use super::started_thread_from_resume_response;
 use super::thread_resume_params_from_config;
 use super::thread_session_state_from_thread_response;
 use crate::legacy_core::config::Config;
+use codex_app_server_client::AppServerRequestHandle;
 use codex_app_server_client::TypedRequestError;
 use codex_app_server_protocol::AskForApproval;
 use codex_app_server_protocol::ClientRequest;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadHistoryMode;
+use codex_app_server_protocol::ThreadResumeParams;
 use codex_app_server_protocol::ThreadResumeResponse;
 use codex_app_server_protocol::ThreadTurnsListParams;
 use codex_app_server_protocol::ThreadTurnsListResponse;
@@ -76,9 +79,9 @@ impl AppServerSession {
                 "Showing up to 100 recent prompts and final replies. Intermediate messages and tool activity are unavailable.",
             );
         }
-        let session = thread_session_state_from_thread_response(
+        let mut session = thread_session_state_from_thread_response(
             &thread.id,
-            crate::windows_sandbox::host_from_environments(thread.environments.as_deref()),
+            thread.environments.as_deref(),
             thread.forked_from_id.clone(),
             thread.name.clone(),
             thread.path.clone(),
@@ -98,6 +101,7 @@ impl AppServerSession {
         .await
         .map(|session| session.with_completion_wait_status(&thread.status))
         .map_err(color_eyre::eyre::Report::msg)?;
+        session.read_only_history = true;
         self.freeze_viewed_receipt(thread_id);
         Ok((
             AppServerStartedThread {
@@ -148,6 +152,67 @@ impl AppServerSession {
             crate::resume_permissions::ResumePermissions::default(),
         ))
         .await
+    }
+
+    /// Prepare a saved Cloud task without displacing the displayed attachment on failure.
+    pub(crate) async fn resume_thread_for_navigation(
+        &mut self,
+        local_settings: &crate::local_settings::LocalSettings,
+        config: Config,
+        thread_id: ThreadId,
+        model_settings: ResumeModelSettings,
+        permission_overrides: crate::resume_permissions::ResumePermissions,
+    ) -> Result<AppServerStartedThread> {
+        let (ThreadParamsMode::Cloud, AppServerRequestHandle::Cloud(handle)) =
+            (self.thread_params_mode(), self.request_handle())
+        else {
+            return Box::pin(self.resume_thread_with_permission_overrides(
+                local_settings,
+                config,
+                thread_id,
+                model_settings,
+                permission_overrides,
+            ))
+            .await;
+        };
+        let (mut response, scoped) = handle
+            .prepare_thread_resume(
+                self.next_request_id(),
+                ThreadResumeParams {
+                    thread_id: thread_id.to_string(),
+                    exclude_turns: true,
+                    ..ThreadResumeParams::default()
+                },
+            )
+            .await
+            .map_err(|err| {
+                bootstrap_request_error("thread/resume failed during TUI bootstrap", err)
+            })?;
+        let mut history = self.request_view();
+        history.request_handle = AppServerRequestHandle::Cloud(scoped.clone());
+        history
+            .hydrate_initial_thread_history(
+                &mut response.thread,
+                response.turns_backwards_cursor.clone(),
+                response.items_backwards_cursor.clone(),
+                Some(&config),
+                Some(local_settings),
+                HistoryHydrationScope::Initial,
+            )
+            .await?;
+        let mut started =
+            started_thread_from_resume_response(response, local_settings, ThreadParamsMode::Cloud)
+                .await?;
+        scoped.commit_prepared_resume().await.map_err(|err| {
+            bootstrap_request_error("thread/resume failed during TUI bootstrap", err)
+        })?;
+        self.unread_revisions.remove(&thread_id);
+        self.history_pagination.extend(history.history_pagination);
+        if self.task_tools_available(thread_id) {
+            self.remember_task_tool_thread(thread_id);
+            started.task_tools_available = true;
+        }
+        Ok(started)
     }
 
     pub(crate) async fn resume_thread_with_permission_overrides(
@@ -227,7 +292,7 @@ impl AppServerSession {
             })
             .await;
         drop(rollout_maintenance_guard);
-        let mut response: ThreadResumeResponse = match resume_response {
+        let response: ThreadResumeResponse = match resume_response {
             Ok(response) => response,
             Err(TypedRequestError::Server { source, .. })
                 if params.exclude_turns && is_history_pagination_unsupported(&source) =>
@@ -249,6 +314,24 @@ impl AppServerSession {
                 ));
             }
         };
+        self.finish_thread_resume(
+            local_settings,
+            &config,
+            thread_id,
+            response,
+            HistoryHydrationScope::Initial,
+        )
+        .await
+    }
+
+    pub(crate) async fn finish_thread_resume(
+        &mut self,
+        local_settings: &crate::local_settings::LocalSettings,
+        config: &Config,
+        thread_id: ThreadId,
+        mut response: ThreadResumeResponse,
+        scope: HistoryHydrationScope<'_>,
+    ) -> Result<AppServerStartedThread> {
         if let Some(subscribed) = &mut self.attachment_subscribed {
             *subscribed = true;
         }
@@ -256,9 +339,9 @@ impl AppServerSession {
             &mut response.thread,
             response.turns_backwards_cursor.clone(),
             response.items_backwards_cursor.clone(),
-            Some(&config),
+            Some(config),
             Some(local_settings),
-            HistoryHydrationScope::Initial,
+            scope,
         )
         .await?;
         let fork_parent_title = self
