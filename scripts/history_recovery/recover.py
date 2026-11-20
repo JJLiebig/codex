@@ -14,7 +14,7 @@ import sys
 import time
 
 
-MANIFEST_SHA256 = "a5bd50a93666810cd9ec40c72d220f1fef105335f3adbf2448e0a54c569d1dee"
+MANIFEST_SHA256 = "cd2a6e523ee7e9138e032e8399d22dc0bbcf401488ba16497e20198caf273bd4"
 TARGET_PROFILE = "upstream-alpha6-windows"
 UNIX_TARGET_PROFILE = "fork-0.166.0-unix"
 TARGET_PROFILES = (TARGET_PROFILE, UNIX_TARGET_PROFILE)
@@ -38,7 +38,11 @@ def manifest(target_profile=TARGET_PROFILE):
     if hashlib.sha256(raw).hexdigest() != MANIFEST_SHA256:
         raise Refused("pinned manifest bytes changed")
     result = json.loads(raw)
-    for entry in result["canonical"] + result["historical"]:
+    for entry in (
+        result["canonical"]
+        + result["historical"]
+        + [result["managed_windows_migration"]]
+    ):
         sql = entry["sql"].encode()
         blob = b"blob " + str(len(sql)).encode() + b"\0" + sql
         if (
@@ -99,7 +103,7 @@ def expected_schema(entries):
         return schema(db)
 
 
-def classify(db, target):
+def classify(db, target, *, managed_windows=False):
     rows = db.execute(
         "SELECT version,description,installed_on,success,checksum,execution_time "
         "FROM _sqlx_migrations ORDER BY version"
@@ -108,6 +112,8 @@ def classify(db, target):
     if not rows or versions != list(range(1, len(rows) + 1)) or len(rows) > 9:
         raise Refused("unknown, missing, or future migration versions")
     canonical, historical = target["canonical"], target["historical"]
+    if managed_windows:
+        canonical = canonical + [target["managed_windows_migration"]]
     entries = canonical[: len(rows)]
     state = "healthy" if len(rows) < 8 else "canonical"
     if len(rows) >= 8 and rows[7][4] in [
@@ -115,7 +121,7 @@ def classify(db, target):
     ]:
         state = "attribution-only" if len(rows) == 8 else "mixed"
         entries = canonical[:7] + historical[: len(rows) - 7]
-    elif len(rows) == 9:
+    elif len(rows) > len(canonical):
         raise Refused("unknown migration 9")
     for row, entry in zip(rows, entries):
         if (
@@ -132,9 +138,12 @@ def classify(db, target):
     expected = expected_schema(entries)
     # The sole tolerated extra column is the preserved, known nullable attr column.
     if state == "canonical" and actual != expected:
-        expected = expected_schema(canonical[:7] + historical[:1] + canonical[7:])
+        expected = expected_schema(entries[:7] + historical[:1] + entries[7:])
     if actual != expected:
         raise Refused("schema does not match the known migration chain")
+    if state == "canonical" and len(entries) == 9:
+        # The current runtime accepts either known line-ending hash for each row.
+        return state, []
     normalize = [
         row[0]
         for row, entry in zip(rows, entries)

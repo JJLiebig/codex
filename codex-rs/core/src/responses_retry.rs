@@ -120,7 +120,7 @@ pub(crate) async fn handle_response_stream_error(
             ?retry_delay,
             "stream connection failed; waiting to retry"
         );
-        sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", err)
+        sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", &err)
             .await;
         retry_state.connection_retries = retry_state.connection_retries.saturating_add(1);
         codex_client::record_retry!(retry_state.connection_retries, retry_delay, operation);
@@ -171,7 +171,7 @@ pub(crate) async fn handle_response_stream_error(
             sess.notify_stream_error(
                 turn_context,
                 format!("Reconnecting... {retry_count}/{max_retries}"),
-                err,
+                &err,
             )
             .await;
         }
@@ -181,6 +181,19 @@ pub(crate) async fn handle_response_stream_error(
         let delay = retry_at.saturating_duration_since(now);
         codex_client::record_retry!(retry_count, delay, operation);
         tokio::time::sleep_until(retry_at).await;
+        return Ok(());
+    }
+
+    if matches!(request, ResponsesStreamRequest::Sampling)
+        && crate::codex_plus_plus::model_capacity_retry::retry_exhausted_transport(
+            &mut retry_state.retries,
+            max_retries,
+            &err,
+            sess,
+            turn_context,
+        )
+        .await
+    {
         return Ok(());
     }
 

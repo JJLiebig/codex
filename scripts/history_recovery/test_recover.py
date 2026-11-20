@@ -259,6 +259,46 @@ class RecoveryTests(unittest.TestCase):
                 self.assertEqual(self.path.read_bytes(), before)
                 db.close()
 
+    def test_managed_windows_recognizes_known_migration_nine_without_repair(self):
+        entry = self.target["managed_windows_migration"]
+        for newline, retained_attribution in (("lf", False), ("crlf", True)):
+            with (
+                self.subTest(newline=newline),
+                tempfile.TemporaryDirectory() as folder,
+            ):
+                self.root = Path(folder)
+                self.path = self.root / "thread_history_1.sqlite"
+                db = self.fixture(
+                    "mixed" if retained_attribution else "canonical", newline="lf"
+                )
+                if retained_attribution:
+                    self.apply()
+                db.executescript(entry["sql"])
+                db.execute(
+                    "INSERT INTO _sqlx_migrations VALUES (9,?,CURRENT_TIMESTAMP,1,?,1)",
+                    (recovery.description(entry), bytes.fromhex(entry[newline])),
+                )
+                before = self.path.read_bytes()
+                with closing(recovery.connect(self.path, "ro")) as reader:
+                    self.assertEqual(
+                        recovery.classify(reader, self.target, managed_windows=True),
+                        ("canonical", []),
+                    )
+                with self.assertRaisesRegex(recovery.Refused, "unknown migration 9"):
+                    self.apply("canonical")
+                self.assertEqual(self.path.read_bytes(), before)
+                db.execute("UPDATE _sqlx_migrations SET checksum=x'00' WHERE version=9")
+                with self.assertRaisesRegex(recovery.Refused, "ledger entry"):
+                    recovery.classify(db, self.target, managed_windows=True)
+                db.execute(
+                    "UPDATE _sqlx_migrations SET checksum=? WHERE version=9",
+                    (bytes.fromhex(entry[newline]),),
+                )
+                db.execute("DROP INDEX idx_thread_realtime_observed")
+                with self.assertRaisesRegex(recovery.Refused, "schema does not match"):
+                    recovery.classify(db, self.target, managed_windows=True)
+                db.close()
+
     def test_rollback_after_mutation_keeps_verified_backup(self):
         db = self.fixture()
         before = recovery.fingerprint(db)

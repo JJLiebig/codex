@@ -390,7 +390,7 @@ async fn run_compact_task_inner_impl(
                 sess.notify_stream_error(
                     turn_context.as_ref(),
                     format!("Reconnecting... {retries}/{max_retries}"),
-                    e,
+                    &e,
                 )
                 .await;
                 let retry_at = retry_after
