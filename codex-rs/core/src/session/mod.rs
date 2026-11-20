@@ -6069,7 +6069,7 @@ impl Session {
         &self,
         turn_context: &TurnContext,
         message: impl Into<String>,
-        codex_error: CodexErr,
+        codex_error: &CodexErr,
     ) {
         let additional_details = codex_error.to_string();
         let codex_error_info = CodexErrorInfo::ResponseStreamDisconnected {

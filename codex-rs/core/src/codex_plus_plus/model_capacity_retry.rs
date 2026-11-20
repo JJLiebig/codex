@@ -13,6 +13,8 @@ use codex_protocol::error::CodexErrorDetails;
 use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::WarningEvent;
+use http::StatusCode;
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -61,6 +63,59 @@ pub(crate) async fn handle_sampling_error(
         )
         .await
     }
+}
+
+/// Extend a failed interactive sampling request past its fast retry budget.
+pub(crate) async fn retry_exhausted_transport(
+    retries: &mut u64,
+    fast_retry_limit: u64,
+    err: &CodexErr,
+    sess: &Session,
+    turn_context: &TurnContext,
+) -> bool {
+    if fast_retry_limit == 0
+        || turn_context.session_source.is_non_root_agent()
+        || matches!(turn_context.session_source, SessionSource::Exec)
+    {
+        return false;
+    }
+
+    let observed_disconnect = match err.details() {
+        CodexErrorDetails::Stream(message) => {
+            message == "Transport error: network error: error decoding response body"
+        }
+        CodexErrorDetails::UnexpectedStatus(response) => {
+            response.status == StatusCode::SERVICE_UNAVAILABLE
+                && response
+                    .body
+                    .starts_with("upstream connect error or disconnect/reset before headers")
+        }
+        _ => false,
+    };
+    if !observed_disconnect {
+        return false;
+    }
+
+    let retry_index = usize::try_from(*retries - fast_retry_limit).unwrap_or(usize::MAX);
+    let Some((delay, _)) = RETRY_SCHEDULE.get(retry_index) else {
+        return false;
+    };
+    *retries += 1;
+    let retry_count = retry_index + 1;
+    let now = Instant::now();
+    let retry_at = err
+        .retry_after()
+        .map_or(now + *delay, |advice| advice.deadline().max(now + *delay));
+    let wait = retry_at.saturating_duration_since(now);
+    warn!(
+        retry_count,
+        ?wait,
+        "response transport unavailable; backing off"
+    );
+    sess.notify_stream_error(turn_context, "Reconnecting... waiting for network", err)
+        .await;
+    tokio::time::sleep_until(retry_at).await;
+    true
 }
 
 pub(crate) async fn handle(
