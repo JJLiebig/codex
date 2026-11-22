@@ -19,6 +19,7 @@ use crate::bwrap::BwrapOptions;
 use crate::bwrap::WSL_INTEROP_DIR;
 use crate::bwrap::WSLG_DISTRO_ROOT;
 use crate::bwrap::create_bwrap_command_args;
+use crate::codex_plus_plus::namespace_lifetime::MONITOR_PIDFD_OPTION;
 use crate::launcher::exec_bwrap;
 use crate::launcher::initialize_bwrap_launcher;
 use crate::launcher::preferred_bwrap_supports_argv0;
@@ -131,6 +132,10 @@ pub struct LinuxSandboxCommand {
     #[arg(long = "inherit-pid-namespace", hide = true)]
     pub inherit_pid_namespace: bool,
 
+    /// Internal: pidfd for the bubblewrap monitor, passed by the outer stage.
+    #[arg(long = MONITOR_PIDFD_OPTION, hide = true)]
+    monitor_pidfd: Option<std::os::fd::RawFd>,
+
     /// Full command args to run under the Linux sandbox helper.
     #[arg(trailing_var_arg = true)]
     pub command: Vec<String>,
@@ -159,6 +164,7 @@ pub fn run_main() -> ! {
         verify_fd_mounts,
         no_proc,
         inherit_pid_namespace,
+        monitor_pidfd,
         command,
     } = LinuxSandboxCommand::parse();
     let allow_network_for_proxy = managed_network.is_some();
@@ -191,6 +197,7 @@ pub fn run_main() -> ! {
     // Inner stage: apply seccomp/no_new_privs after bubblewrap has already
     // established the filesystem view.
     if apply_seccomp_then_exec {
+        crate::codex_plus_plus::namespace_lifetime::bind_to_monitor(monitor_pidfd);
         if let Err(err) = crate::fd_mount::verify_fd_mounts(&verify_fd_mounts) {
             panic!("failed to verify descriptor-backed bubblewrap mount: {err}");
         }
@@ -539,6 +546,10 @@ fn run_bwrap_with_proc_fallback(
         .unwrap_or_else(|err| panic!("failed to prepare transparent TCP namespace: {err}"));
     }
     apply_inner_command_argv0(&mut bwrap_args.args);
+    crate::codex_plus_plus::namespace_lifetime::pass_monitor_pidfd(
+        &mut bwrap_args.args,
+        &mut bwrap_args.preserved_files,
+    );
     exec_bwrap(bwrap_args.args, bwrap_args.preserved_files, transparent_tcp);
 }
 
