@@ -23,8 +23,18 @@ enum Ending {
     OwnerExit,
 }
 
+/// Linux before 5.3 and some seccomp profiles lack pidfd_open. The launcher still works there,
+/// but these tests need pidfds to watch and clean up what they start.
+fn pidfds_unavailable() -> bool {
+    rustix::process::pidfd_open(rustix::process::getpid(), PidfdFlags::empty()).is_err()
+}
+
 #[tokio::test]
 async fn sandboxed_tree_ends_with_its_launcher() -> io::Result<()> {
+    if pidfds_unavailable() {
+        eprintln!("skipping sandbox lifetime test: pidfds are unavailable");
+        return Ok(());
+    }
     if should_skip_bwrap_tests().await {
         eprintln!("skipping bwrap test: bubblewrap is unavailable");
         return Ok(());
@@ -143,6 +153,10 @@ fn process_tree(launcher: i32) -> io::Result<Vec<OwnedFd>> {
 
 #[tokio::test]
 async fn inner_stage_does_not_start_after_its_monitor_exits() -> io::Result<()> {
+    if pidfds_unavailable() {
+        eprintln!("skipping monitor check test: pidfds are unavailable");
+        return Ok(());
+    }
     let mut monitor = std::process::Command::new("true").spawn()?;
     let monitor_pidfd = rustix::process::pidfd_open(
         Pid::from_raw(monitor.id().try_into().unwrap()).unwrap(),
