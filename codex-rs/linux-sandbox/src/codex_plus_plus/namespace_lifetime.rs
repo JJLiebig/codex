@@ -57,6 +57,12 @@ pub(crate) fn bind_to_monitor(monitor_pidfd: Option<RawFd>) {
     // SAFETY: the outer stage passes this descriptor to the inner stage alone. Dropping it before
     // the command starts keeps it out of the sandboxed command.
     let pidfd = unsafe { OwnedFd::from_raw_fd(fd) };
+    // exit_notify() reparents the monitor's children, sending their parent-death signal, and
+    // publishes its exit to pidfd pollers within one tasklist_lock section. kill(0, 0) takes that
+    // lock, so afterwards either the monitor saw the armed signal or the poll sees its exit.
+    unsafe {
+        libc::kill(/*pid*/ 0, /*sig*/ 0)
+    };
     let mut monitor = libc::pollfd {
         fd: pidfd.as_raw_fd(),
         events: libc::POLLIN,
