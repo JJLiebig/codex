@@ -41,6 +41,8 @@ use url::Url;
 mod bridge_lifecycle;
 #[path = "managed_tcp.rs"]
 mod managed_tcp;
+#[path = "codex_plus_plus/sandbox_lifetime_tests.rs"]
+mod sandbox_lifetime;
 #[path = "managed_proxy_unix_sockets_tests.rs"]
 mod unix_sockets;
 
