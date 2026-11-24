@@ -102,7 +102,6 @@ use codex_app_server_protocol::ReviewTarget;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequest;
 use codex_app_server_protocol::SkillMetadata;
-use codex_app_server_protocol::SkillsListResponse;
 use codex_app_server_protocol::ThreadGoal as AppThreadGoal;
 use codex_app_server_protocol::ThreadGoalStatus as AppThreadGoalStatus;
 use codex_app_server_protocol::ThreadItemPayload;
@@ -150,6 +149,7 @@ use codex_protocol::request_permissions::RequestPermissionsEvent;
 use codex_protocol::user_input::ByteRange;
 use codex_protocol::user_input::TextElement;
 use codex_utils_absolute_path::AbsolutePathBuf;
+use codex_utils_path_uri::PathConvention;
 use codex_utils_path_uri::PathUri;
 use crossterm::event::KeyCode;
 use crossterm::event::KeyEvent;
@@ -582,6 +582,7 @@ pub(crate) struct ChatWidget {
     status_account_display: Option<StatusAccountDisplay>,
     pub(crate) prompt_cache: crate::codex_plus_plus::prompt_cache::PromptCache,
     pub(crate) remote_connection: Option<RemoteConnectionStatus>,
+    pub(crate) app_server_path_convention: Option<PathConvention>,
     pub(crate) statusline_feature_enabled: bool,
     statusline_read: Option<statusline_reader::ActiveStatuslineRead>,
     pub(crate) statusline_disconnected: bool,
@@ -760,8 +761,9 @@ pub(crate) struct ChatWidget {
     feedback: codex_feedback::CodexFeedback,
     // Current session rollout path (if known)
     current_rollout_path: Option<PathBuf>,
-    // Current working directory (if known)
-    current_cwd: Option<PathBuf>,
+    // Working directory of the displayed session.
+    current_cwd: PathUri,
+    current_workspace_roots: Vec<PathUri>,
     primary_environment_cwd: Option<crate::session_state::EnvironmentCwd>,
     // App-server-backed command runner for status-line workspace metadata lookups.
     workspace_command_runner: Option<WorkspaceCommandRunner>,
@@ -1894,7 +1896,7 @@ impl ChatWidget {
 
     fn refresh_skills_for_current_cwd(&mut self, force_reload: bool) {
         self.submit_op(AppCommand::list_skills(
-            vec![self.config.cwd.to_path_buf()],
+            self.session_cwd().clone(),
             force_reload,
         ));
     }
@@ -1974,11 +1976,6 @@ impl ChatWidget {
             self.clear_active_stream_tail();
             self.request_redraw();
         }
-    }
-
-    fn on_list_skills(&mut self, ev: SkillsListResponse) {
-        self.set_skills_from_response(&ev);
-        self.refresh_plugin_mentions();
     }
 
     pub(crate) fn refresh_plugin_mentions(&mut self) {

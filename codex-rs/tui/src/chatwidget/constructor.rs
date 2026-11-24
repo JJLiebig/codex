@@ -69,7 +69,12 @@ impl ChatWidget {
         let header = Self::placeholder_session_header_cell(&config);
         let active_cell = Some(header);
 
-        let current_cwd = Some(config.cwd.to_path_buf());
+        let current_cwd = PathUri::from_abs_path(&config.cwd);
+        let current_workspace_roots = config
+            .workspace_roots
+            .iter()
+            .map(PathUri::from_abs_path)
+            .collect();
         let effective_service_tier = crate::service_tier_resolution::effective_service_tier(
             &config,
             &local_settings.notices,
@@ -153,6 +158,7 @@ impl ChatWidget {
             status_account_display,
             prompt_cache: Default::default(),
             remote_connection: None,
+            app_server_path_convention: None,
             statusline_feature_enabled: false,
             statusline_read: None,
             statusline_disconnected: false,
@@ -289,6 +295,7 @@ impl ChatWidget {
             feedback,
             current_rollout_path: None,
             current_cwd,
+            current_workspace_roots,
             primary_environment_cwd: None,
             workspace_command_runner,
             instruction_source_paths: Vec::new(),

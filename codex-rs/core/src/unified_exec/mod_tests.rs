@@ -70,14 +70,11 @@ fn test_exec_request(
     env: HashMap<String, String>,
 ) -> ExecRequest {
     let permission_profile = turn.permission_profile();
-    let network = None;
     let arg0 = None;
     ExecRequest::new(
         command,
         cwd,
         env,
-        network,
-        /*network_environment_id*/ None,
         ExecExpiration::DefaultTimeout,
         ExecCapturePolicy::ShellTool,
         SandboxType::None,
@@ -821,7 +818,7 @@ async fn completed_local_commands_preserve_exit_code(tty: bool) -> anyhow::Resul
                 cwd: cwd.clone(),
                 expiration: request.expiration,
                 capture_policy: request.capture_policy,
-                env: request.env,
+                env: shell_env(),
                 network: None,
                 network_environment_id: None,
                 sandbox_permissions: SandboxPermissions::UseDefault,
@@ -838,6 +835,7 @@ async fn completed_local_commands_preserve_exit_code(tty: bool) -> anyhow::Resul
             /*use_legacy_landlock*/ false,
         )
         .await?
+        .into_exec_request()
     } else {
         request
     };

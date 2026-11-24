@@ -1314,6 +1314,7 @@ async fn known_thread_started_preserves_session_without_reading_unmaterialized_r
             section_entered_at: None,
             project_id: None,
             daybreak_enabled: None,
+            daybreak_program_propagation_enrolled: None,
             history_mode: Default::default(),
             model_provider: "notification-provider".to_string(),
             model: None,
@@ -1323,7 +1324,7 @@ async fn known_thread_started_preserves_session_without_reading_unmaterialized_r
             recency_at: Some(2),
             status: codex_app_server_protocol::ThreadStatus::Idle,
             path: Some(temp_dir.path().join("not-yet-materialized.jsonl")),
-            cwd: session.cwd.clone(),
+            cwd: session.cwd.clone().into(),
             cli_version: "0.0.0".to_string(),
             source: codex_app_server_protocol::SessionSource::Unknown,
             can_accept_direct_input: None,
@@ -1509,8 +1510,9 @@ async fn remote_overview_startup_hides_disabled_older_server_notice() -> Result<
             .remote_connection
             .as_ref()
             .expect("remote status")
-            .version,
-        "v2.0.0"
+            .version
+            .as_deref(),
+        Some("v2.0.0")
     );
     app.local_settings.tui.show_server_version_notice = true;
     app.refresh_server_version_overview_notice("2.1.0");

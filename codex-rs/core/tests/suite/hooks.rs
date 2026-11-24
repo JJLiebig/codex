@@ -367,7 +367,7 @@ else:
     Ok(())
 }
 
-fn write_user_prompt_submit_hook(
+pub(super) fn write_user_prompt_submit_hook(
     home: &Path,
     blocked_prompt: &str,
     additional_context: &str,

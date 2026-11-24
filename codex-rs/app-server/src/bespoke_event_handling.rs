@@ -495,7 +495,7 @@ pub(crate) async fn apply_bespoke_event_handling(
                 if matches!(
                     &item.content,
                     codex_protocol::realtime::RealtimeItemContent::TurnInputAccepted { .. }
-                        | codex_protocol::realtime::RealtimeItemContent::SessionEndInputSaved { .. }
+                        | codex_protocol::realtime::RealtimeItemContent::SessionInputSaved { .. }
                 ) => {}
             RealtimeEvent::HistoryItemStarted(item) => {
                 outgoing
@@ -1330,7 +1330,13 @@ pub(crate) async fn apply_bespoke_event_handling(
             let (mut config_snapshot, selected_service_tier) =
                 conversation.resume_config_snapshot().await;
             config_snapshot.service_tier = selected_service_tier;
-            let thread_settings = thread_settings_from_config_snapshot(&config_snapshot);
+            let thread_settings = match thread_settings_from_config_snapshot(&config_snapshot) {
+                Ok(settings) => settings,
+                Err(error) => {
+                    tracing::warn!(%conversation_id, message = %error.message, "cannot publish thread settings");
+                    return;
+                }
+            };
             let changed = {
                 let mut state = thread_state.lock().await;
                 state.note_thread_settings(thread_settings.clone())

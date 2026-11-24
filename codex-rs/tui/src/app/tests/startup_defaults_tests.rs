@@ -717,15 +717,13 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
         )
         .await?;
         assert_eq!(started.session.model, selected_model);
+        let cwd = started.session.cwd.to_path_buf();
         assert!(
             !started
                 .session
                 .permission_profile
                 .file_system_sandbox_policy()
-                .can_write_local_path_with_cwd(
-                    started.session.cwd.as_path(),
-                    started.session.cwd.as_path()
-                )
+                .can_write_local_path_with_cwd(&cwd, &cwd)
         );
         let starts = recorded_params(&requests, "thread/start");
         assert_eq!(starts.len(), if remote { 1 } else { 2 });
@@ -774,8 +772,12 @@ async fn fresh_startup_reads_destination_and_cleared_model_uses_catalog() -> Res
     Ok(())
 }
 
-#[tokio::test]
-async fn fresh_startup_observes_config_edits_after_directory_trust() -> Result<()> {
+#[test]
+fn fresh_startup_observes_config_edits_after_directory_trust() -> Result<()> {
+    run_embedded_tui_scenario("tui-startup-after-trust", startup_after_directory_trust)
+}
+
+async fn startup_after_directory_trust() -> Result<()> {
     let home = tempdir()?;
     let destination = tempdir()?;
     std::fs::create_dir(destination.path().join(".git"))?;
@@ -834,8 +836,12 @@ async fn fresh_startup_observes_config_edits_after_directory_trust() -> Result<(
     Ok(())
 }
 
-#[tokio::test]
-async fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
+#[test]
+fn startup_reads_server_defaults_before_starting_thread() -> Result<()> {
+    run_embedded_tui_scenario("tui-startup-defaults", startup_with_server_defaults)
+}
+
+async fn startup_with_server_defaults() -> Result<()> {
     let client_home = tempdir()?;
     let server_home = tempdir()?;
     let projectless_cwd = tempdir()?;

@@ -157,6 +157,7 @@ impl SamplingExecution {
                 | ApiError::ContextWindowExceeded
                 | ApiError::ResponseIncomplete(_)
                 | ApiError::UsageLimitReached { .. }
+                | ApiError::SpendLimitExceeded(_)
                 | ApiError::QuotaExceeded
                 | ApiError::UsageNotIncluded
                 | ApiError::SessionBudgetExceeded

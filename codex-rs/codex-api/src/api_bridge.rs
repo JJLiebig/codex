@@ -34,6 +34,7 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
         | ApiError::ContentFilter
         | ApiError::ResponseIncomplete(_)
         | ApiError::ContextWindowExceeded
+        | ApiError::SpendLimitExceeded(_)
         | ApiError::QuotaExceeded
         | ApiError::UsageNotIncluded
         | ApiError::UsageLimitReached { .. }
@@ -61,6 +62,9 @@ pub fn map_api_error(err: ApiError) -> CodexErr {
 fn map_api_error_details(err: ApiError) -> CodexErr {
     match err {
         ApiError::ContextWindowExceeded => CodexErr::ContextWindowExceeded,
+        ApiError::SpendLimitExceeded(scope) => {
+            CodexErrorDetails::APISpendLimitExceeded(scope).into()
+        }
         ApiError::QuotaExceeded => CodexErr::QuotaExceeded,
         ApiError::UsageNotIncluded => CodexErr::UsageNotIncluded,
         ApiError::UsageLimitReached {
@@ -279,8 +283,6 @@ fn map_api_error_details(err: ApiError) -> CodexErr {
                                 Some(
                                     "insufficient_quota"
                                         | "credit_balance_exhausted"
-                                        | "organization_spend_limit_exceeded"
-                                        | "project_spend_limit_exceeded"
                                         | "organization_usage_limit_exceeded"
                                 )
                             )

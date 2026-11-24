@@ -2294,6 +2294,7 @@ async fn assert_daybreak_catalog_and_account_gates(provider_id: &str) {
     chat.config.model_provider_id = provider_id.into();
     let mut model = crate::test_support::TEST_MODEL_PRESETS[0].clone();
     model.available_access_programs = Some(codex_protocol::openai_models::ModelAccessPrograms {
+        daybreak_availability: Default::default(),
         cyber: vec![codex_protocol::turn_input::CyberAccessProgram::Standard],
     });
     chat.model_catalog = std::sync::Arc::new(ModelCatalog::new(vec![model.clone()]));
@@ -3407,6 +3408,11 @@ async fn slash_pwd_and_cwd_alias_display_current_working_directory_from_composer
     let mut output = Vec::new();
     for (command, side) in [("/pwd", false), ("/cwd", true), ("/pwd x", false)] {
         let (mut chat, mut rx, mut op_rx) = make_chatwidget_manual(/*model_override*/ None).await;
+        if side {
+            chat.current_cwd =
+                PathUri::try_from(LegacyAppPathString::from_string(r"D:\workspace\remote"))
+                    .expect("absolute server path");
+        }
         chat.set_side_conversation_active(side);
         chat.bottom_pane.set_task_running(!side);
         chat.bottom_pane
@@ -3418,7 +3424,7 @@ async fn slash_pwd_and_cwd_alias_display_current_working_directory_from_composer
     }
     insta::assert_snapshot!(output.join(""), @r"
 • Current working directory: /tmp/project
-• Current working directory: /tmp/project
+• Current working directory: D:\workspace\remote
 ■ Usage: /pwd
 ");
 }

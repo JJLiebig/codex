@@ -507,7 +507,7 @@ enum SandboxSubcommand {
 #[cfg(target_os = "macos")]
 type HostSandboxArgs = codex_cli::SeatbeltCommand;
 #[cfg(target_os = "linux")]
-type HostSandboxArgs = codex_cli::LandlockCommand;
+type HostSandboxArgs = codex_cli::LinuxSandboxCommand;
 #[cfg(target_os = "windows")]
 type HostSandboxArgs = codex_cli::WindowsCommand;
 
@@ -1081,6 +1081,17 @@ fn main() -> anyhow::Result<()> {
     codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        if std::env::args_os().nth(1).as_deref()
+            == Some(std::ffi::OsStr::new("--codex-run-as-sandbox-launcher"))
+        {
+            anyhow::ensure!(
+                std::env::args_os().len() == 2,
+                "--codex-run-as-sandbox-launcher does not accept additional arguments"
+            );
+            return codex_cli::shared_sandbox_launcher::run(arg0_paths.codex_linux_sandbox_exe)
+                .await;
+        }
         // Finish polling the large subcommand dispatcher before polling interactive TUI events.
         if let Some(tui) = Box::pin(dispatch_cli(arg0_paths, remote_control_disabled)).await? {
             tui.await?;
@@ -1897,7 +1908,7 @@ async fn dispatch_cli(
             )
             .await?;
             #[cfg(target_os = "linux")]
-            codex_cli::run_command_under_landlock(
+            codex_cli::run_command_under_linux_sandbox(
                 sandbox_cli,
                 arg0_paths.codex_linux_sandbox_exe.clone(),
                 loader_overrides,
@@ -3775,6 +3786,17 @@ enabled = true
             err.to_string(),
             "--force requires a session UUID; names must be confirmed interactively"
         );
+    }
+
+    #[test]
+    fn sandbox_runs_launcher_executable() {
+        let cli = MultitoolCli::try_parse_from(["codex", "sandbox", "launcher", "--help"])
+            .expect("parse sandbox executable");
+        let Some(Subcommand::Sandbox(command)) = cli.subcommand else {
+            panic!("expected sandbox command");
+        };
+        assert!(command.subcommand.is_none());
+        assert_eq!(command.host.command, vec!["launcher", "--help"]);
     }
 
     #[test]
