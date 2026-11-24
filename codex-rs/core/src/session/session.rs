@@ -82,6 +82,8 @@ pub(crate) struct Session {
     pub(crate) parent_observer_event_tx: OnceLock<Sender<Event>>,
     pub(super) agent_status: watch::Sender<AgentStatus>,
     pub(super) state: Mutex<SessionState>,
+    /// Serializes initial prefix publication until its reference context is installed.
+    pub(super) initial_context_publication: Semaphore,
     /// Orders accepted settings commits and their persisted events with compaction checkpoints.
     /// Keep this separate from `state` so storage I/O does not block runtime state access.
     pub(super) thread_settings_persistence: Semaphore,
@@ -628,10 +630,12 @@ async fn warm_plugins_and_skills_for_session_init(
 
 impl Session {
     pub(crate) fn turn_starts_closed(&self) -> bool {
-        self.services
-            .local_agent_runtime
-            .suspension_root()
-            .is_some()
+        self.conversation.history_recovery_required()
+            || self
+                .services
+                .local_agent_runtime
+                .suspension_root()
+                .is_some()
             || self
                 .outcome_reporting
                 .as_ref()
@@ -1074,6 +1078,9 @@ impl Session {
                     Arc::default()
                 }
             });
+        let prevent_root_enrollment = thread_extension_init
+            .remove::<crate::agent::helper_daybreak::PreventRootEnrollment>()
+            .is_some();
         let mcp_thread_init = thread_extension_init.clone();
         let thread_extension_data = codex_extension_api::ExtensionData::new_with_init(
             thread_id.to_string(),
@@ -1093,6 +1100,11 @@ impl Session {
             InitialHistory::New | InitialHistory::Cleared
         ) && !session_source.is_non_root_agent()
             && config.features.enabled(Feature::DaybreakProgramPropagation)
+            && (!prevent_root_enrollment
+                || config
+                    .features
+                    .required_value(Feature::DaybreakProgramPropagation)
+                    == Some(true))
         {
             thread_extension_data.insert(crate::agent::helper_daybreak::Enrollment::Root);
         }
@@ -1289,11 +1301,18 @@ impl Session {
             })?;
         // Keep the large initialization future out of callers' stack frames.
         let session_result: anyhow::Result<Arc<Self>> = Box::pin(async {
-            if let InitialHistory::Resumed(resumed) = &mut initial_history
-                && let Some(history) = resume_context
-            {
-                resumed.history = history;
-                resumed.history_revision = None;
+            if let InitialHistory::Resumed(resumed) = &mut initial_history {
+                if let Some(history) = resume_context {
+                    resumed.history = history;
+                    resumed.history_revision = None;
+                }
+                let version = initial_multi_agent_version
+                    .unwrap_or_else(|| config.multi_agent_version_from_features());
+                crate::agent::sanitize_referenced_agent_fork(
+                    resumed.conversation_id,
+                    &mut resumed.history,
+                    version,
+                )?;
             }
             let super::model_ids::InitialModelIds {
                 item_id_generator,
@@ -2012,6 +2031,7 @@ impl Session {
                 parent_observer_event_tx: OnceLock::new(),
                 agent_status,
                 state: Mutex::new(state),
+                initial_context_publication: Semaphore::new(/*permits*/ 1),
                 thread_settings_persistence: Semaphore::new(/*permits*/ 1),
                 code_mode_message_tasks: CodeModeMessageTasks::default(),
                 managed_network_proxy_refresh_lock: Semaphore::new(/*permits*/ 1),

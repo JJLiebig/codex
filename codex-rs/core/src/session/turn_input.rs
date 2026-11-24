@@ -40,10 +40,6 @@ use codex_protocol::error::Result as CodexResult;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::AdditionalContextEntry;
 use codex_protocol::protocol::AdditionalContextKind;
-use codex_protocol::protocol::CodexErrorInfo;
-use codex_protocol::protocol::ErrorEvent;
-use codex_protocol::protocol::Event;
-use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::NonSteerableTurnKind;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
@@ -60,7 +56,6 @@ use codex_user_input::ResolvedUserInput;
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use uuid::Uuid;
 
 #[path = "turn_input_agent.rs"]
 mod agent;
@@ -251,19 +246,53 @@ impl PreparedTurnInputSettings {
     }
 }
 
-#[tracing::instrument(
-    name = "codex.turn_input",
-    level = "trace",
-    skip_all,
-    fields(conversation.id = %session.thread_id, turn.id)
-)]
 pub(super) async fn handle(
     session: &Arc<Session>,
     request: impl Into<WithTurnExtensionData<TurnInputRequest>>,
     mode: TurnInputMode,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
-    let request = request.into();
+    handle_inner(
+        session,
+        request.into(),
+        mode,
+        submission_id,
+        /*realtime_handoff_id*/ None,
+    )
+    .await
+}
+
+pub(super) async fn handle_realtime_handoff(
+    session: &Arc<Session>,
+    request: TurnInputRequest,
+    mode: TurnInputMode,
+    submission_id: String,
+    handoff_id: uuid::Uuid,
+) -> CodexResult<TurnInputSubmission> {
+    handle_inner(
+        session,
+        request.into(),
+        mode,
+        submission_id,
+        Some(handoff_id),
+    )
+    .await
+}
+
+#[tracing::instrument(
+    name = "codex.turn_input",
+    level = "trace",
+    skip_all,
+    fields(conversation.id = %session.thread_id, turn.id)
+)]
+async fn handle_inner(
+    session: &Arc<Session>,
+    request: WithTurnExtensionData<TurnInputRequest>,
+    mode: TurnInputMode,
+    submission_id: String,
+    realtime_handoff_id: Option<uuid::Uuid>,
+) -> CodexResult<TurnInputSubmission> {
+    session.conversation.check_history_recovery()?;
     if request.request.start.service_tier.is_some()
         && crate::agent::host::host_child_uses_shared_service_tier(session)
     {
@@ -293,7 +322,9 @@ pub(super) async fn handle(
             .map_err(|message| CodexErr::InvalidRequest(message.to_owned()))?;
     }
     let result = match mode {
-        TurnInputMode::StartOrSteer => start_or_steer(session, request, submission_id).await,
+        TurnInputMode::StartOrSteer => {
+            start_or_steer(session, request, submission_id, realtime_handoff_id).await
+        }
         TurnInputMode::StartIfIdle => {
             let kind = match &request.request.input {
                 SubmittedTurnInput::UserInput { content, .. } if !content.is_empty() => {
@@ -310,6 +341,7 @@ pub(super) async fn handle(
                 submission_id,
                 kind,
                 /*expected_previous_turn_id*/ None,
+                realtime_handoff_id,
             )
             .await
         }
@@ -337,11 +369,19 @@ pub(super) async fn handle(
                 submission_id,
                 TurnStartKind::Recovery,
                 Some(expected_previous_turn_id),
+                realtime_handoff_id,
             )
             .await
         }
         TurnInputMode::Steer { expected_turn_id } => {
-            steer(session, request, expected_turn_id, submission_id).await
+            steer(
+                session,
+                request,
+                expected_turn_id,
+                submission_id,
+                realtime_handoff_id,
+            )
+            .await
         }
     };
     // Link this request's trace to the accepted turn, which may have an older trace.
@@ -366,6 +406,7 @@ pub(super) async fn handle_recovery(
     start_options: TurnStartOptions,
     submission_id: String,
 ) -> CodexResult<TurnInputSubmission> {
+    session.conversation.check_history_recovery()?;
     let WithTurnExtensionData {
         request: thread_settings,
         turn_extension_init,
@@ -382,6 +423,7 @@ pub(super) async fn handle_recovery(
         submission_id,
         TurnStartKind::Recovery,
         /*expected_previous_turn_id*/ None,
+        /*realtime_handoff_id*/ None,
     )
     .await;
     if let Ok(TurnInputSubmission::Started { turn_id, .. }) = &result {
@@ -390,7 +432,10 @@ pub(super) async fn handle_recovery(
     result
 }
 
-fn user_input_metadata(request: &mut TurnInputRequest) -> UserInputMetadata {
+fn user_input_metadata(
+    request: &mut TurnInputRequest,
+    realtime_handoff_id: Option<uuid::Uuid>,
+) -> UserInputMetadata {
     const DICTATION_KEY: &str = "codex_app_used_dictation";
     // Capture provenance on this input before applying mutable turn metadata.
     let metadata = &mut request.responsesapi_client_metadata;
@@ -406,15 +451,17 @@ fn user_input_metadata(request: &mut TurnInputRequest) -> UserInputMetadata {
         used_dictation: patch.or(replacement).and_then(|value| value.parse().ok()),
         origin: UserInputOrigin::from_turn_trigger(request.start.turn_trigger.as_deref()),
         response_item_uuid: request.user_item_uuid,
+        realtime_handoff_id,
         extension_data: request.user_input_extension_data.clone(),
         ..Default::default()
     }
 }
 
-async fn start_or_steer(
+pub(super) async fn start_or_steer(
     session: &Arc<Session>,
     request: WithTurnExtensionData<TurnInputRequest>,
     submission_id: String,
+    realtime_handoff_id: Option<uuid::Uuid>,
 ) -> CodexResult<TurnInputSubmission> {
     if matches!(
         request.request.input,
@@ -426,7 +473,7 @@ async fn start_or_steer(
         mut request,
         turn_extension_init,
     } = request;
-    let input_metadata = user_input_metadata(&mut request);
+    let input_metadata = user_input_metadata(&mut request, realtime_handoff_id);
     let TurnInputRequest {
         mut input,
         thread_settings,
@@ -548,12 +595,13 @@ async fn start_if_idle(
     submission_id: String,
     kind: TurnStartKind,
     expected_previous_turn_id: Option<String>,
+    realtime_handoff_id: Option<uuid::Uuid>,
 ) -> CodexResult<TurnInputSubmission> {
     let WithTurnExtensionData {
         mut request,
         turn_extension_init,
     } = request;
-    let input_metadata = user_input_metadata(&mut request);
+    let input_metadata = user_input_metadata(&mut request, realtime_handoff_id);
     let TurnInputRequest {
         mut input,
         thread_settings,
@@ -727,12 +775,13 @@ async fn steer(
     request: WithTurnExtensionData<TurnInputRequest>,
     expected_turn_id: String,
     submission_id: String,
+    realtime_handoff_id: Option<uuid::Uuid>,
 ) -> CodexResult<TurnInputSubmission> {
     let WithTurnExtensionData {
         mut request,
         turn_extension_init,
     } = request;
-    let input_metadata = user_input_metadata(&mut request);
+    let input_metadata = user_input_metadata(&mut request, realtime_handoff_id);
     let TurnInputRequest {
         mut input,
         thread_settings,
@@ -907,60 +956,7 @@ impl Session {
             && TurnStartKind::Automatic.permits_mode(config.step_settings.collaboration_mode.mode)
     }
 
-    pub(crate) async fn route_realtime_text_input(
-        self: &Arc<Self>,
-        text: String,
-    ) -> Result<(), &'static str> {
-        let submission_id = Uuid::now_v7().to_string();
-        let submission = handle(
-            self,
-            TurnInputRequest::user_input(vec![ResolvedUserInput::text(text)]).on_start(
-                TurnStartOptions {
-                    turn_trigger: Some("realtime".to_string()),
-                    ..Default::default()
-                },
-            ),
-            TurnInputMode::StartOrSteer,
-            submission_id.clone(),
-        )
-        .await;
-        match submission {
-            Ok(TurnInputSubmission::Accepted) => {
-                unreachable!("realtime user input returns a turn outcome")
-            }
-            Ok(TurnInputSubmission::Started { .. } | TurnInputSubmission::Steered { .. }) => {}
-            Ok(TurnInputSubmission::NotSubmitted {
-                reason: NotSubmittedReason::ServerDraining,
-            }) => {
-                return Err("Server is draining; retry the turn after reconnecting");
-            }
-            Ok(TurnInputSubmission::NotSubmitted { reason }) => {
-                self.send_event_raw(Event {
-                    id: submission_id,
-                    msg: EventMsg::Error(ErrorEvent {
-                        misalignment: None,
-                        message: format!("failed to submit turn input: {reason:?}"),
-                        codex_error_info: Some(CodexErrorInfo::BadRequest),
-                        rejected_audio_file_ids: Vec::new(),
-                    }),
-                })
-                .await;
-            }
-            Err(error) => {
-                self.send_event_raw(Event {
-                    id: submission_id,
-                    msg: EventMsg::Error(error.to_error_event(/*message_prefix*/ None)),
-                })
-                .await;
-            }
-        }
-        Ok(())
-    }
-
-    pub(super) async fn clear_reserved_idle_turn(
-        &self,
-        turn_state: &Arc<tokio::sync::Mutex<TurnState>>,
-    ) {
+    async fn clear_reserved_idle_turn(&self, turn_state: &Arc<tokio::sync::Mutex<TurnState>>) {
         let mut active_turn_guard = self.active_turn.lock().await;
         if let Some(active_turn) = active_turn_guard.as_ref()
             && active_turn.task.is_none()
@@ -1084,6 +1080,8 @@ impl Session {
             }
         };
         pending_input.push(input);
+        self.bind_realtime_handoffs_to_turn(&pending_input, active_turn_id)
+            .await;
         self.input_queue
             .extend_pending_input_and_notify_for_turn_state(
                 active_turn.turn_state.as_ref(),

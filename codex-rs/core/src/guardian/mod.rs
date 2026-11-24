@@ -7,7 +7,6 @@ mod action_format;
 mod approval_request;
 mod coverage;
 mod decision;
-mod feedback;
 mod input_budget;
 mod permissions;
 #[path = "codex_plus_plus/pre_tool_use.rs"]

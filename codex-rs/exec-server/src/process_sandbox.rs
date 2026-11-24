@@ -7,10 +7,7 @@ use crate::process_telemetry::ProcessTelemetry;
 use codex_exec_server_protocol::JSONRPCErrorError;
 use codex_exec_server_protocol::ProcessStartErrorData;
 use codex_file_system::WindowsSandboxSelection;
-use codex_network_proxy::CHILD_ONLY_CA_ENV_KEYS;
-use codex_network_proxy::CUSTOM_CA_ENV_KEYS;
 use codex_network_proxy::ManagedNetworkSandboxContext;
-use codex_network_proxy::ManagedProxyRouting;
 use codex_network_proxy::NetworkPolicyAuditObserver;
 use codex_network_proxy::NetworkPolicyDecider;
 use codex_network_proxy::NetworkProxy;
@@ -18,15 +15,15 @@ use codex_network_proxy::NetworkProxyHandle;
 use codex_network_proxy::NetworkProxyState;
 use codex_network_proxy::RemoteCredentialBrokerCache;
 use codex_network_proxy::ShellStartupCredentials;
-use codex_network_proxy::is_managed_mitm_ca_trust_bundle_path;
 use codex_sandboxing::SandboxCommand;
+use codex_sandboxing::SandboxExecutables;
 use codex_sandboxing::SandboxManager;
 use codex_sandboxing::SandboxNetwork;
 use codex_sandboxing::SandboxTransformRequest;
 use codex_sandboxing::WrappedSandboxCommand;
+use codex_sandboxing::executor_managed_proxy_routing;
 #[cfg(windows)]
 use codex_shell_command::shell_detect::fallback_powershell_shell_for_windows_sandbox;
-use codex_utils_absolute_path::AbsolutePathBuf;
 use codex_utils_path_uri::PathUri;
 
 #[cfg(unix)]
@@ -37,6 +34,7 @@ use crate::protocol::ExecParams;
 use crate::rpc::internal_error;
 use crate::rpc::invalid_params;
 use crate::sandbox_selection::sandbox_selection;
+use crate::sandbox_selection::windows_sandbox_backend;
 
 #[tracing::instrument(
     name = "codex.exec_server.process_prepare_sandbox",
@@ -100,28 +98,6 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
             "sandbox runtime paths are not configured".to_string(),
         ))
     })?;
-    let mut runtime_readable_paths = Vec::new();
-    if cfg!(target_os = "linux") || (cfg!(unix) && params.arg0.is_some()) {
-        runtime_readable_paths.push(runtime_paths.codex_self_exe.clone());
-    }
-    if cfg!(target_os = "linux") {
-        runtime_readable_paths.extend(runtime_paths.codex_linux_sandbox_exe.iter().cloned());
-    }
-    let managed_mitm_ca_trust_bundle_path = if managed_network.is_some() {
-        CUSTOM_CA_ENV_KEYS
-            .into_iter()
-            .chain(CHILD_ONLY_CA_ENV_KEYS)
-            .find_map(|key| {
-                let path = env.get(key)?;
-                if !is_managed_mitm_ca_trust_bundle_path(path) {
-                    return None;
-                }
-                AbsolutePathBuf::from_absolute_path(path).ok()
-            })
-    } else {
-        None
-    };
-    runtime_readable_paths.extend(managed_mitm_ca_trust_bundle_path);
     let sandbox_manager = SandboxManager::new()
         .with_linux_sandbox_pid_namespace(runtime_paths.linux_sandbox_pid_namespace)
         .with_linux_sandbox_transparent_tcp(runtime_paths.linux_sandbox_transparent_tcp);
@@ -186,7 +162,6 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
             },
             permissions: &sandbox_context.permissions,
             workspace_roots: Some(&sandbox_context.workspace_roots),
-            runtime_readable_paths: Some(&runtime_readable_paths),
             selection,
             network: SandboxNetwork::new(
                 enforce_managed_network,
@@ -194,10 +169,10 @@ pub(crate) async fn prepare_exec_request_with_telemetry(
                 /*environment_id*/ None,
             ),
             sandbox_policy_cwd: &sandbox_context.cwd,
-            sandbox_exe: if cfg!(windows) {
-                Some(runtime_paths.codex_self_exe.as_path())
-            } else {
-                runtime_paths.codex_linux_sandbox_exe.as_deref()
+            executables: SandboxExecutables::Executor {
+                codex: &runtime_paths.codex_self_exe,
+                linux_sandbox: runtime_paths.codex_linux_sandbox_exe.as_ref(),
+                arg0: params.arg0.as_deref(),
             },
             use_legacy_landlock: sandbox_context.use_legacy_landlock,
             windows_sandbox_level,
@@ -241,27 +216,17 @@ async fn prepare_managed_network(
     let Some(launch) = &params.network_proxy else {
         return without_executor_proxy(env);
     };
-    #[cfg(windows)]
-    let routing = match params
-        .sandbox
-        .as_ref()
-        .map(|sandbox| sandbox.windows_sandbox_selection)
-    {
-        None => {
-            // Native Windows commands have no sandbox token SID for shared ingress.
-            let mut native_env = env;
-            codex_network_proxy::strip_managed_proxy_env(&mut native_env);
-            return without_executor_proxy(native_env);
-        }
-        Some(WindowsSandboxSelection::Mxc) => ManagedProxyRouting::DedicatedListeners,
-        Some(
-            WindowsSandboxSelection::Disabled
-            | WindowsSandboxSelection::RestrictedToken
-            | WindowsSandboxSelection::Elevated,
-        ) => ManagedProxyRouting::SharedIngress,
+    let routing = executor_managed_proxy_routing(
+        params
+            .sandbox
+            .as_ref()
+            .map(|sandbox| windows_sandbox_backend(sandbox.windows_sandbox_selection)),
+    );
+    let Some(routing) = routing else {
+        let mut native_env = env;
+        codex_network_proxy::strip_managed_proxy_env(&mut native_env);
+        return without_executor_proxy(native_env);
     };
-    #[cfg(not(windows))]
-    let routing = ManagedProxyRouting::SharedIngress;
     let mut state = NetworkProxyState::from_remote_launch_config(
         launch.clone(),
         codex_utils_path_uri::Platform::native(),

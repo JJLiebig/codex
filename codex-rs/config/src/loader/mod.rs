@@ -72,6 +72,7 @@ pub use local::LocalConfigLayers;
 pub use local::LocalTomlLayer;
 pub use local::LocalTomlLayerStack;
 pub use local::load_local_config_layers;
+pub use managed_requirements::load_guardian_policy_snapshot;
 pub use managed_requirements::load_managed_requirements_state;
 #[cfg(windows)]
 pub use windows::WindowsSystemConfigNamespaceProbe;
@@ -1369,6 +1370,24 @@ fn sanitize_project_config(
             && features.remove("shell_snapshot").is_some()
         {
             ignored_keys.push("features.shell_snapshot".to_string());
+        }
+        if let Some(guardian) = features
+            .get_mut("guardianv3")
+            .and_then(TomlValue::as_table_mut)
+        {
+            if guardian.remove("max_instruction_tokens").is_some() {
+                ignored_keys.push("features.guardianv3.max_instruction_tokens".to_string());
+            }
+            for (section, key) in [
+                ("housekeeper", "routing_instructions"),
+                ("reviewer", "retrieval_instructions"),
+            ] {
+                if let Some(settings) = guardian.get_mut(section).and_then(TomlValue::as_table_mut)
+                    && settings.remove(key).is_some()
+                {
+                    ignored_keys.push(format!("features.guardianv3.{section}.{key}"));
+                }
+            }
         }
         if let Some(multi_agent) = features
             .get_mut("multi_agent_v2")

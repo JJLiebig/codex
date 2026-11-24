@@ -1,4 +1,5 @@
 use super::SandboxCommand;
+use super::SandboxExecutables;
 use super::SandboxManager;
 use super::SandboxNetwork;
 use super::SandboxSelection;
@@ -116,7 +117,6 @@ fn unsandboxed_transform_preserves_foreign_cwd_and_unrestricted_file_system_poli
             },
             permissions: &permissions,
             workspace_roots: None,
-            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::None),
             network: SandboxNetwork::new(
                 /*enforce_managed_network*/ false,
@@ -124,7 +124,7 @@ fn unsandboxed_transform_preserves_foreign_cwd_and_unrestricted_file_system_poli
                 Some("remote"),
             ),
             sandbox_policy_cwd: &cwd_uri,
-            sandbox_exe: None,
+            executables: SandboxExecutables::Launcher(None),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -182,11 +182,10 @@ fn symlinked_workspace_reports_seatbelt_preparation_error() {
             },
             permissions: &permissions,
             workspace_roots: None,
-            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::MacosSeatbelt),
             network: Default::default(),
             sandbox_policy_cwd: &workspace_uri,
-            sandbox_exe: None,
+            executables: SandboxExecutables::Launcher(None),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -237,11 +236,10 @@ fn transform_additional_permissions_enable_network_for_external_sandbox() {
             },
             permissions: &permissions,
             workspace_roots: None,
-            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::None),
             network: Default::default(),
             sandbox_policy_cwd: &cwd_uri,
-            sandbox_exe: None,
+            executables: SandboxExecutables::Launcher(None),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })
@@ -326,11 +324,10 @@ fn transform_additional_permissions_preserves_denied_entries() {
             },
             permissions: &permissions,
             workspace_roots: Some(roots),
-            runtime_readable_paths: Some(&[]),
             selection: SandboxSelection::Explicit(SandboxType::None),
             network: Default::default(),
             sandbox_policy_cwd: &cwd_uri,
-            sandbox_exe: None,
+            executables: SandboxExecutables::Launcher(None),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::RestrictedToken,
         };
@@ -405,11 +402,10 @@ fn sandbox_transform_request(cwd: &PathUri, sandbox: SandboxType) -> SandboxTran
         },
         permissions: &PermissionProfile::Disabled,
         workspace_roots: None,
-        runtime_readable_paths: None,
         selection: SandboxSelection::Explicit(sandbox),
         network: Default::default(),
         sandbox_policy_cwd: cwd,
-        sandbox_exe: None,
+        executables: SandboxExecutables::Launcher(None),
         use_legacy_landlock: false,
         windows_sandbox_level: WindowsSandboxLevel::Disabled,
     }
@@ -440,81 +436,10 @@ fn transform_linux_seccomp_request(
     let cwd = PathUri::from_abs_path(&AbsolutePathBuf::current_dir().expect("current dir"));
     manager
         .transform(SandboxTransformRequest {
-            sandbox_exe: Some(codex_linux_sandbox_exe),
+            executables: SandboxExecutables::Launcher(Some(codex_linux_sandbox_exe)),
             ..sandbox_transform_request(&cwd, SandboxType::LinuxSeccomp)
         })
         .expect("transform")
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn wsl1_rejects_linux_bubblewrap_path() {
-    let restricted_policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-        path: FileSystemPath::Special {
-            value: FileSystemSpecialPath::Root,
-        },
-        access: FileSystemAccessMode::Read,
-        missing_path_behavior: None,
-    }]);
-
-    assert!(matches!(
-        super::ensure_linux_bubblewrap_is_supported(
-            &restricted_policy,
-            /*use_legacy_landlock*/ false,
-            /*allow_network_for_proxy*/ false,
-            /*is_wsl1*/ true,
-        ),
-        Err(super::SandboxTransformError::Wsl1UnsupportedForBubblewrap)
-    ));
-    assert!(matches!(
-        super::ensure_linux_bubblewrap_is_supported(
-            &FileSystemSandboxPolicy::unrestricted(),
-            /*use_legacy_landlock*/ false,
-            /*allow_network_for_proxy*/ true,
-            /*is_wsl1*/ true,
-        ),
-        Err(super::SandboxTransformError::Wsl1UnsupportedForBubblewrap)
-    ));
-    assert!(matches!(
-        super::ensure_linux_bubblewrap_is_supported(
-            &FileSystemSandboxPolicy::unrestricted(),
-            /*use_legacy_landlock*/ true,
-            /*allow_network_for_proxy*/ true,
-            /*is_wsl1*/ true,
-        ),
-        Err(super::SandboxTransformError::Wsl1UnsupportedForBubblewrap)
-    ));
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn wsl1_allows_non_bubblewrap_linux_paths() {
-    assert!(
-        super::ensure_linux_bubblewrap_is_supported(
-            &FileSystemSandboxPolicy::unrestricted(),
-            /*use_legacy_landlock*/ false,
-            /*allow_network_for_proxy*/ false,
-            /*is_wsl1*/ true,
-        )
-        .is_ok()
-    );
-
-    let restricted_policy = FileSystemSandboxPolicy::restricted(vec![FileSystemSandboxEntry {
-        path: FileSystemPath::Special {
-            value: FileSystemSpecialPath::Root,
-        },
-        access: FileSystemAccessMode::Read,
-        missing_path_behavior: None,
-    }]);
-    assert!(
-        super::ensure_linux_bubblewrap_is_supported(
-            &restricted_policy,
-            /*use_legacy_landlock*/ true,
-            /*allow_network_for_proxy*/ false,
-            /*is_wsl1*/ true,
-        )
-        .is_ok()
-    );
 }
 
 #[cfg(target_os = "linux")]
@@ -563,7 +488,7 @@ async fn inherited_terminal_preserves_native_linux_helper_and_uses_its_dispatch_
     use std::os::unix::fs::symlink;
 
     let dir = tempfile::tempdir()?;
-    let alias = OsStr::new(crate::landlock::CODEX_LINUX_SANDBOX_ARG0);
+    let alias = OsStr::new(crate::linux::CODEX_LINUX_SANDBOX_ARG0);
     let alias_path = dir.path().join(alias);
     for (helper, expected_arg0) in [
         (alias_path.clone(), alias_path.as_os_str()),
@@ -613,6 +538,121 @@ async fn inherited_terminal_preserves_native_linux_helper_and_uses_its_dispatch_
     Ok(())
 }
 
+#[tokio::test]
+async fn native_launch_preserves_borrowed_proxy_credentials() -> anyhow::Result<()> {
+    use codex_network_proxy::CREDENTIAL_BROKER_ACTIVE_ENV_KEY;
+    use codex_network_proxy::ManagedProxyRouting;
+    use codex_network_proxy::NetworkProxy;
+    use codex_network_proxy::NetworkProxyConfig;
+    use codex_network_proxy::NetworkProxyState;
+    use codex_network_proxy::RemoteNetworkProxyConfig;
+    use codex_network_proxy::RemoteNetworkProxyLaunchConfig;
+    use codex_utils_path_uri::Platform;
+
+    let config = RemoteNetworkProxyConfig::from_effective_config(&NetworkProxyConfig {
+        enabled: true,
+        enable_socks5: false,
+        ..Default::default()
+    })?;
+    let state = NetworkProxyState::from_remote_launch_config(
+        RemoteNetworkProxyLaunchConfig::new(config),
+        Platform::native(),
+        &Default::default(),
+        &HashMap::new(),
+    )?;
+    let proxy = NetworkProxy::builder()
+        .state(state.into())
+        .managed_proxy_routing(ManagedProxyRouting::SharedIngress)
+        .build()
+        .await?;
+    let handle = proxy.run().await?;
+    let dir = tempfile::tempdir()?;
+    let access_key = dir.path().join("access-key");
+    let secret_key = dir.path().join("secret-key");
+    std::fs::write(&access_key, "aws-test-access-key")?;
+    std::fs::write(&secret_key, "aws-test-secret-key")?;
+    let mut config = proxy.current_cfg().await?;
+    config.set_credential_broker_enabled(/*enabled*/ true);
+    config.mitm_hooks = serde_json::from_value(serde_json::json!([{
+        "host": "s3.amazonaws.com",
+        "match": {"schemes": ["https"], "ports": [443], "methods": ["GET"], "path_prefixes": ["/"]},
+        "actions": {"aws_sigv4": {
+            "placeholder_access_key_id": "A", "region": "us-east-1", "service": "s3",
+            "access_key_id": {"file": access_key}, "secret_access_key": {"file": secret_key}
+        }}
+    }]))?;
+    proxy
+        .replace_config_state(codex_network_proxy::build_config_state(
+            config,
+            Default::default(),
+            Platform::native(),
+        )?)
+        .await?;
+    let cwd = PathUri::from_abs_path(&AbsolutePathBuf::current_dir()?);
+    let environment_id = Some("native");
+    let token = format!("ghp_{}", "x".repeat(36));
+    let raw = HashMap::from([
+        ("GH_HOST".into(), "github.enterprise.example".into()),
+        ("GH_ENTERPRISE_TOKEN".into(), token.clone()),
+        (CREDENTIAL_BROKER_ACTIVE_ENV_KEY.into(), "1".into()),
+        (
+            "CODEX_NETWORK_PROXY_BROKERED_CREDENTIALS".into(),
+            "[]".into(),
+        ),
+    ]);
+    let prepared = proxy.prepare_for_optional_environment(raw.clone(), environment_id)?;
+    assert_ne!(prepared.env["GH_ENTERPRISE_TOKEN"], token);
+    assert_eq!(prepared.env["AWS_ACCESS_KEY_ID"], "A");
+
+    let mut stale = prepared.env.clone();
+    stale.insert("GH_HOST".into(), "https://bad.example/path".into());
+    stale.insert(
+        "CODEX_NETWORK_PROXY_BROKERED_CREDENTIALS".into(),
+        "[]".into(),
+    );
+    let mut powershell = prepared.env.clone();
+    proxy.restore_and_disable_brokered_credentials(&mut powershell, &mut []);
+    assert!(!powershell.contains_key(CREDENTIAL_BROKER_ACTIVE_ENV_KEY));
+    assert_eq!(powershell["GH_ENTERPRISE_TOKEN"], token);
+    assert_eq!(powershell["AWS_ACCESS_KEY_ID"], "A");
+
+    let context = Some(prepared.sandbox_context);
+    for (env, context, expected) in [
+        (&raw, None, &prepared.env),
+        (&stale, context.clone(), &stale),
+        (&powershell, context, &powershell),
+    ] {
+        let request = SandboxManager::new()
+            .transform(SandboxTransformRequest {
+                command: SandboxCommand {
+                    program: "echo".into(),
+                    args: vec![],
+                    cwd: cwd.clone(),
+                    env: env.clone(),
+                    managed_network: context,
+                    additional_permissions: None,
+                },
+                permissions: &PermissionProfile::Disabled,
+                workspace_roots: None,
+                selection: SandboxSelection::Explicit(SandboxType::None),
+                network: SandboxNetwork::new(
+                    /*enforce_managed_network*/ false,
+                    Some(&proxy),
+                    environment_id,
+                ),
+                sandbox_policy_cwd: &cwd,
+                executables: SandboxExecutables::Launcher(None),
+                use_legacy_landlock: false,
+                windows_sandbox_level: WindowsSandboxLevel::Disabled,
+            })?
+            .into_command_request()?;
+        assert!(request.network.is_some());
+        assert_eq!(request.network_environment_id.as_deref(), environment_id);
+        assert_eq!(&request.env, expected);
+    }
+    handle.shutdown().await
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn linux_helper_uses_effective_managed_policy() -> anyhow::Result<()> {
@@ -623,11 +663,10 @@ async fn linux_helper_uses_effective_managed_policy() -> anyhow::Result<()> {
 }
 
 #[cfg(unix)]
-async fn check_linux_managed_policy(transparent_tcp: bool) -> anyhow::Result<()> {
+async fn proxy_allowing_all_unix_sockets() -> anyhow::Result<codex_network_proxy::NetworkProxy> {
     use codex_network_proxy::ConfigReloader;
     use codex_network_proxy::ConfigReloaderFuture;
     use codex_network_proxy::ConfigState;
-    use codex_network_proxy::ManagedNetworkSandboxContext;
     use codex_network_proxy::NetworkProxy;
     use codex_network_proxy::NetworkProxyConfig;
     use codex_network_proxy::NetworkProxyConstraints;
@@ -659,14 +698,91 @@ async fn check_linux_managed_policy(transparent_tcp: bool) -> anyhow::Result<()>
         NetworkProxyConstraints::default(),
         codex_utils_path_uri::Platform::native(),
     )?;
-    let network = NetworkProxy::builder()
+    NetworkProxy::builder()
         .state(Arc::new(NetworkProxyState::with_reloader(
             state,
             Arc::new(TestConfigReloader),
         )))
         .managed_by_codex(/*managed_by_codex*/ false)
         .build()
-        .await?;
+        .await
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn seatbelt_uses_prepared_route_over_live_proxy() -> anyhow::Result<()> {
+    use codex_network_proxy::ManagedNetworkSandboxContext;
+    use std::net::TcpListener;
+    use std::os::unix::net::UnixListener;
+
+    let proxy = proxy_allowing_all_unix_sockets().await?;
+    let dir = tempfile::tempdir_in("/tmp")?;
+    let cwd = AbsolutePathBuf::from_absolute_path(canonicalize(dir.path())?)?;
+    let allowed = cwd.join("allowed.sock");
+    let unrelated = cwd.join("unrelated.sock");
+    let _allowed_listener = UnixListener::bind(&allowed)?;
+    let _unrelated_listener = UnixListener::bind(&unrelated)?;
+    let listener = TcpListener::bind(("127.0.0.1", 0))?;
+    let port = listener.local_addr()?.port();
+    let route = ManagedNetworkSandboxContext {
+        loopback_ports: vec![port],
+        allow_unix_sockets: vec![allowed.to_string_lossy().into_owned()],
+        ..Default::default()
+    };
+    let probe = r#"
+import socket, sys
+try:
+    socket.socket(socket.AF_UNIX).connect(sys.argv[1])
+except PermissionError:
+    pass
+else:
+    raise AssertionError("unrelated Unix socket was reachable")
+socket.socket(socket.AF_UNIX).connect(sys.argv[2])
+socket.create_connection(("127.0.0.1", int(sys.argv[3]))).close()
+"#;
+    let cwd = PathUri::from_abs_path(&cwd);
+    let launch = SandboxManager::new().transform(SandboxTransformRequest {
+        command: SandboxCommand {
+            program: "/usr/bin/python3".into(),
+            args: vec![
+                "-c".into(),
+                probe.into(),
+                unrelated.to_string_lossy().into_owned(),
+                allowed.to_string_lossy().into_owned(),
+                port.to_string(),
+            ],
+            cwd: cwd.clone(),
+            env: HashMap::new(),
+            managed_network: Some(route),
+            additional_permissions: None,
+        },
+        permissions: &PermissionProfile::read_only(),
+        workspace_roots: Some(&[]),
+        selection: SandboxSelection::Explicit(SandboxType::MacosSeatbelt),
+        network: SandboxNetwork::new(
+            /*enforce_managed_network*/ true,
+            Some(&proxy),
+            /*environment_id*/ None,
+        ),
+        sandbox_policy_cwd: &cwd,
+        executables: SandboxExecutables::Launcher(None),
+        use_legacy_landlock: false,
+        windows_sandbox_level: WindowsSandboxLevel::Disabled,
+    })?;
+    let output = launch.into_direct_command()?.output()?;
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(())
+}
+
+#[cfg(unix)]
+async fn check_linux_managed_policy(transparent_tcp: bool) -> anyhow::Result<()> {
+    use codex_network_proxy::ManagedNetworkSandboxContext;
+
+    let network = proxy_allowing_all_unix_sockets().await?;
     let prepared =
         network.prepare_for_optional_environment(HashMap::new(), /*environment_id*/ None)?;
     let allow_all = prepared.sandbox_context;
@@ -727,7 +843,6 @@ async fn check_linux_managed_policy(transparent_tcp: bool) -> anyhow::Result<()>
             },
             permissions: &PermissionProfile::Disabled,
             workspace_roots: None,
-            runtime_readable_paths: None,
             selection: SandboxSelection::Explicit(SandboxType::LinuxSeccomp),
             network: SandboxNetwork::new(
                 enforce_managed_network,
@@ -735,7 +850,9 @@ async fn check_linux_managed_policy(transparent_tcp: bool) -> anyhow::Result<()>
                 /*environment_id*/ None,
             ),
             sandbox_policy_cwd: &cwd_uri,
-            sandbox_exe: Some(std::path::Path::new("/tmp/codex-linux-sandbox")),
+            executables: SandboxExecutables::Launcher(Some(std::path::Path::new(
+                "/tmp/codex-linux-sandbox",
+            ))),
             use_legacy_landlock: false,
             windows_sandbox_level: WindowsSandboxLevel::Disabled,
         })?;

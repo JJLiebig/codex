@@ -258,7 +258,8 @@ fn classify_error(error: &ApiError) -> WeeklyWindowPingOutcome {
         ApiError::ModelNotFound { status, .. } => WeeklyWindowPingOutcome::Rejected {
             status: status.map(|status| status.as_u16()),
         },
-        ApiError::QuotaExceeded
+        ApiError::SpendLimitExceeded(_)
+        | ApiError::QuotaExceeded
         | ApiError::UsageLimitReached { .. }
         | ApiError::UsageNotIncluded
         | ApiError::SessionBudgetExceeded

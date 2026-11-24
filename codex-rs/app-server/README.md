@@ -193,6 +193,15 @@ the choice unset. Ephemeral threads cannot save it.
 Use `thread/metadata/update` for later changes. This preference does not select
 `turn/start.cyberAccessProgram` or grant access to an access program.
 
+With `experimentalApi`, a client preparing a thread for later use can pass
+`daybreakProgramPropagationEnrolled: false` to `thread/start` to opt that root
+out of Daybreak propagation. A managed requirement to enable propagation takes
+precedence. Omitted, null, or true uses the configured enrollment rule.
+`thread.daybreakProgramPropagationEnrolled` reports actual enrollment for the
+live thread, including in the start response and `thread/started` notification.
+Stored metadata alone yields null. Reusing the same live session preserves its
+enrollment. Starting a new session from storage yields false.
+
 # Application network policy
 
 App-server loads application network policy at startup and existing explicit
@@ -430,9 +439,11 @@ version-gate published policy bundles.
 
 # Amazon Bedrock authentication
 
-If `model_providers.amazon-bedrock.aws.credential_export` is configured, Bedrock setup and
-Bedrock login return an error without changing configuration or saved credentials. Remove the
-exporter configuration before selecting another credential source. `aws.credential_export` and
+Bedrock setup and login accept an optional `providerId`: `amazon-bedrock` (Mantle) or
+`amazon-bedrock-runtime`. Omission or `null` selects Mantle for compatibility. If the selected
+provider has `aws.credential_export` configured, setup and login return an error without changing
+configuration or saved credentials. Remove the exporter configuration before selecting another
+credential source. `aws.credential_export` and
 `aws.profile` cannot be configured together.
 
 Application network restrictions apply to each AWS credential and region HTTP request and to
@@ -874,8 +885,8 @@ writes still require validation. Lower-precedence definitions can be overridden;
 required definitions are read-only. Both capabilities are false when user
 configuration is ignored. The flag does not establish credential validity or
 whether a setup flow that also selects a default provider will succeed.
-`account/bedrock/setup` targets `amazon-bedrock`; edits to `amazon-bedrock-runtime`
-must use that provider's configuration paths instead.
+`account/bedrock/setup` selects Mantle by default; pass `providerId: "amazon-bedrock-runtime"`
+to select Runtime. Direct edits must use the selected provider's configuration paths.
 
 Use `modelProvider/config/write` with a tagged `settings` patch. To create a
 custom gateway, send `type: "customGateway"`, `name`, and `baseUrl`. Omit

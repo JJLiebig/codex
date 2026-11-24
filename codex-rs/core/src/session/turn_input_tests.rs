@@ -19,6 +19,9 @@ use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::openai_models::ReasoningEffort;
 use codex_protocol::protocol::AskForApproval;
+use codex_protocol::protocol::CodexErrorInfo;
+use codex_protocol::protocol::ErrorEvent;
+use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::ThreadSettingsOverrides;
 use codex_protocol::protocol::TurnAbortReason;
@@ -29,6 +32,7 @@ use pretty_assertions::assert_eq;
 use test_case::test_case;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
 
 #[derive(Clone, Copy)]
 struct NeverEndingTask {
@@ -1155,7 +1159,7 @@ fn dictation_metadata_is_captured_per_input_and_removed_from_responses() {
             "false".to_owned(),
         )])));
     assert_eq!(
-        user_input_metadata(&mut request).used_dictation,
+        user_input_metadata(&mut request, /*realtime_handoff_id*/ None).used_dictation,
         Some(false)
     );
     assert_eq!(
@@ -1223,7 +1227,8 @@ async fn scored_prompt_keeps_its_submission_item_id() {
                 metadata,
                 codex_thread_store::PersistContext::Standard,
             )
-            .await;
+            .await
+            .expect("record user input");
     }
     let history = session.clone_history().await;
     let ids: Vec<_> = history

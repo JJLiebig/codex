@@ -28,5 +28,6 @@ pub async fn cloud_config_bundle_loader_for_selected_account(
         config.codex_home(),
         http_client_factory,
         requirements,
-    ))
+    )
+    .await)
 }

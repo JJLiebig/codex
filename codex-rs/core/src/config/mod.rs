@@ -85,6 +85,7 @@ use codex_features::FeatureOverrides;
 use codex_features::FeatureToml;
 use codex_features::Features;
 use codex_features::FeaturesToml;
+use codex_features::GuardianV3ConfigToml;
 use codex_features::MultiAgentV2ConfigToml;
 use codex_features::NetworkProxyConfigToml;
 use codex_features::RuntimeAuthMode;
@@ -761,6 +762,8 @@ pub struct Config {
     pub guardian_policy_template: Option<String>,
     /// Transcript encoding shared by Guardian review and scoring.
     pub guardian_transcript_mode: codex_protocol::TranscriptFormat,
+    /// GV3 settings captured when the app-server installs the extension.
+    pub guardian_v3: Option<Arc<GuardianV3ConfigToml>>,
     /// Frozen section policy for sync Guardian; absence keeps fixed budgeting.
     pub guardian_sync_elastic_budget: Option<codex_guardian_context::ElasticBudgetConfig>,
     /// Frozen section policy for async Guardian; absence keeps fixed budgeting.
@@ -2869,11 +2872,12 @@ pub struct ConfigOverrides {
     pub permission_profile: Option<PermissionProfile>,
     pub default_permissions: Option<String>,
     /// Permission profile ID recovered from persisted thread state. Explicit
-    /// permission overrides take precedence, and stale profile IDs fall back
-    /// to the configured default.
+    /// permission overrides take precedence. An unavailable saved profile
+    /// requires an explicit selection.
     pub persisted_permission_profile_id: Option<String>,
-    /// Unnamed permissions from a thread-owned rollout snapshot. These are
-    /// fallback state: explicit overrides and current requirements take priority.
+    /// Unnamed permissions from a thread-owned rollout snapshot, or canonical
+    /// read-only permissions recovered from older history. Explicit overrides
+    /// and current requirements take priority.
     pub persisted_permission_profile: Option<PermissionProfile>,
     pub model_provider: Option<String>,
     pub service_tier: Option<Option<String>>,
@@ -3254,6 +3258,44 @@ fn resolve_current_time_reminder_config(
             .and_then(|config| config.sleep_tool)
             .unwrap_or(default.sleep_tool),
     }))
+}
+
+fn resolve_guardian_v3_config(
+    feature: Option<FeatureToml<GuardianV3ConfigToml>>,
+) -> std::io::Result<Option<Arc<GuardianV3ConfigToml>>> {
+    let Some(FeatureToml::Config(settings)) = feature else {
+        return Ok(None);
+    };
+    if let Some(limit) = settings.max_instruction_tokens {
+        for (key, prompt) in [
+            (
+                "housekeeper.routing_instructions",
+                settings
+                    .housekeeper
+                    .as_ref()
+                    .and_then(|housekeeper| housekeeper.routing_instructions.as_deref()),
+            ),
+            (
+                "reviewer.retrieval_instructions",
+                settings
+                    .reviewer
+                    .as_ref()
+                    .and_then(|reviewer| reviewer.retrieval_instructions.as_deref()),
+            ),
+        ] {
+            let Some(prompt) = prompt else { continue };
+            let tokens = codex_utils_string::approx_token_count(prompt.trim());
+            if tokens > limit {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidData,
+                    format!(
+                        "features.guardianv3.{key} is {tokens} estimated tokens, exceeding max_instruction_tokens = {limit}"
+                    ),
+                ));
+            }
+        }
+    }
+    Ok(Some(Arc::new(settings)))
 }
 
 fn resolve_terminal_resize_reflow_config(config_toml: &ConfigToml) -> TerminalResizeReflowConfig {
@@ -3810,12 +3852,29 @@ impl Config {
             sandbox_mode,
         );
         let requirements_toml = config_layer_stack.requirements_toml();
+        let restore_persisted_profile = sandbox_mode.is_none()
+            && permission_profile.is_none()
+            && default_permissions_override.is_none()
+            && persisted_permission_profile_id.is_none();
+        let persisted_read_only = restore_persisted_profile
+            && persisted_permission_profile
+                .as_ref()
+                .is_some_and(|profile| *profile == PermissionProfile::read_only());
+        if persisted_read_only
+            && !permission_profile_is_allowed(
+                &config_layer_stack,
+                BUILT_IN_READ_ONLY_PROFILE,
+                &PermissionProfile::read_only(),
+            )
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "The saved read-only permission profile is disallowed by requirements. Select a permission profile explicitly to continue.",
+            ));
+        }
         let persisted_permission_profile = persisted_permission_profile.filter(|profile| {
-            sandbox_mode.is_none()
-                && permission_profile.is_none()
-                && default_permissions_override.is_none()
-                && persisted_permission_profile_id.is_none()
-                && requirements_toml.allowed_permission_profiles.is_none()
+            restore_persisted_profile
+                && (persisted_read_only || requirements_toml.allowed_permission_profiles.is_none())
                 // Executor-owned enforcement and materialized grants are not portable
                 // thread defaults. Reject the original mode before preserving denials.
                 && !matches!(profile, PermissionProfile::External { .. })
@@ -3952,7 +4011,7 @@ impl Config {
         };
         dedupe_absolute_paths(&mut workspace_roots);
         let (
-            configured_network_proxy_config,
+            mut configured_network_proxy_config,
             mut permission_profile,
             mut file_system_sandbox_policy,
             mut active_permission_profile,
@@ -4093,6 +4152,21 @@ impl Config {
             )
         };
         if let Some(saved) = persisted_permission_profile {
+            // Canonical read-only recovery can remove writes without replacing a
+            // narrower read allowlist from the current configuration.
+            let saved = if persisted_read_only
+                && (!file_system_sandbox_policy.has_full_disk_read_access()
+                    || matches!(permission_profile, PermissionProfile::External { .. }))
+            {
+                permission_profile.intersect_with_read_only().ok_or_else(|| {
+                    std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "Could not restore the saved read-only permission profile under external enforcement. Select a permission profile explicitly to continue.",
+                    )
+                })?
+            } else {
+                saved
+            };
             let (mut saved_file_system, saved_network) = saved.to_runtime_permissions();
             saved_file_system.preserve_deny_read_restrictions_from(&file_system_sandbox_policy);
             let restored = PermissionProfile::from_runtime_permissions_with_enforcement(
@@ -4106,6 +4180,9 @@ impl Config {
             ) {
                 permission_profile = restored;
                 file_system_sandbox_policy = saved_file_system;
+                if persisted_read_only {
+                    configured_network_proxy_config = NetworkProxyConfig::default();
+                }
                 active_permission_profile = None;
                 profile_workspace_roots.clear();
             }
@@ -4897,6 +4974,7 @@ impl Config {
             guardian_extra_policy,
             guardian_policy_template: None,
             guardian_transcript_mode,
+            guardian_v3: resolve_guardian_v3_config(cfg.features.and_then(|features| features.guardianv3))?,
             guardian_sync_elastic_budget,
             guardian_async_elastic_budget,
             guardian_conversation_history_prompt,
@@ -5328,7 +5406,7 @@ fn resolve_effective_permission_selection<'a>(
     let profiles = merge_managed_permission_profiles(configured_profiles, requirements_toml)?;
     validate_user_permission_profile_names(profiles.as_ref())?;
     validate_required_permission_profile_catalog(requirements_toml, profiles.as_ref())?;
-    let valid_persisted_profile_id = persisted_profile_id.and_then(|(profile_id, context)| {
+    if let Some((profile_id, context)) = persisted_profile_id {
         compile_permission_profile(
             profiles.as_ref(),
             profile_id,
@@ -5336,11 +5414,17 @@ fn resolve_effective_permission_selection<'a>(
             /*workspace_write*/ None,
             &mut Vec::new(),
         )
-        .is_ok()
-        .then_some(profile_id)
-    });
+        .map_err(|err| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                format!(
+                    "Could not load saved permission profile `{profile_id}`: {err}. Select a permission profile explicitly to continue."
+                ),
+            )
+        })?;
+    }
     let selected_profile_id = resolve_default_permissions(
-        default_permissions_override.or(valid_persisted_profile_id),
+        default_permissions_override.or(persisted_profile_id.map(|(profile_id, _)| profile_id)),
         configured_default_profile_id,
         requirements_toml,
         startup_warnings,
@@ -5350,7 +5434,7 @@ fn resolve_effective_permission_selection<'a>(
         profiles,
         selected_profile_id,
         persisted_profile_id_was_provided: default_permissions_override.is_none()
-            && valid_persisted_profile_id.is_some(),
+            && persisted_profile_id.is_some(),
         requirements_force_profile_selection: requirements_toml
             .allowed_permission_profiles
             .is_some(),
