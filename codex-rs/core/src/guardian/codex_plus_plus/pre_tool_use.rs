@@ -28,6 +28,7 @@ pub(crate) fn review(
         let turn = context.turn();
         let decision = codex_guardian_reviewer::ReviewRequest {
             host: ReviewRuntime {
+                attached_reviewer: None,
                 session: Arc::clone(&session),
                 history_reset,
                 context: context.clone(),
