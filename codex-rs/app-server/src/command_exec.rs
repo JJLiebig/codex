@@ -284,7 +284,7 @@ impl CommandExecManager {
                 cwd: cwd.as_path(),
                 env,
                 arg0,
-                sandbox: exec_request.sandbox,
+                sandbox: exec_request.as_ref().sandbox(),
                 windows_sandbox: None,
                 tty: false,
                 stdin_open: stream_stdin,
