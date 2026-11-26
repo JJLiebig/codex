@@ -14,6 +14,7 @@ use codex_login::CodexAuth;
 use codex_login::refresh_auth_from_storage;
 use codex_protocol::auth::RefreshTokenFailedError;
 use codex_protocol::auth::RefreshTokenFailedReason;
+use codex_protocol::protocol::RateLimitReachedType;
 use codex_protocol::protocol::RateLimitSnapshot;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -33,6 +34,8 @@ pub(crate) mod report;
 pub(crate) struct AccountUsage {
     pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
     pub(crate) available_resets: Option<i64>,
+    pub(crate) credits_usable: bool,
+    pub(crate) included_usage_denied: bool,
     pub(crate) primary_window_minutes: Option<i64>,
     pub(crate) five_hour_reset_at: Option<i64>,
     pub(crate) five_hour_remaining_percent: Option<u8>,
@@ -228,13 +231,31 @@ pub(crate) fn login_required(err: &anyhow::Error) -> bool {
 }
 
 fn account_usage(response: &RateLimitsWithResetCredits) -> AccountUsage {
-    let mut usage = response
+    let codex_snapshot = response
         .rate_limits
         .iter()
-        .find(|snapshot| snapshot.limit_id.as_deref() == Some("codex"))
+        .find(|snapshot| snapshot.limit_id.as_deref() == Some("codex"));
+    let mut usage = codex_snapshot
         .or_else(|| response.rate_limits.first())
         .map(account_usage_from_snapshot)
         .unwrap_or_default();
+    usage.included_usage_denied = response.ordinary_usage_allowed == Some(false);
+    usage.credits_usable = codex_snapshot.is_some_and(|snapshot| {
+        snapshot
+            .credits
+            .as_ref()
+            .is_some_and(|credits| credits.has_credits || credits.unlimited)
+            && snapshot.spend_control_reached != Some(true)
+            && !matches!(
+                snapshot.rate_limit_reached_type,
+                Some(
+                    RateLimitReachedType::WorkspaceOwnerCreditsDepleted
+                        | RateLimitReachedType::WorkspaceMemberCreditsDepleted
+                        | RateLimitReachedType::WorkspaceOwnerUsageLimitReached
+                        | RateLimitReachedType::WorkspaceMemberUsageLimitReached
+                )
+            )
+    });
     usage.available_resets = response
         .rate_limit_reset_credits
         .as_ref()
@@ -261,6 +282,8 @@ fn account_usage_from_snapshot(snapshot: &RateLimitSnapshot) -> AccountUsage {
     AccountUsage {
         plan_type: snapshot.plan_type,
         available_resets: None,
+        credits_usable: false,
+        included_usage_denied: false,
         primary_window_minutes: five_hour.and_then(|window| window.window_minutes),
         five_hour_reset_at: five_hour.and_then(|window| window.resets_at),
         five_hour_remaining_percent: five_hour.map(|window| remaining_percent(window.used_percent)),

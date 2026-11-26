@@ -19,6 +19,8 @@ fn picker_candidate(id: &str, is_current: bool) -> account_picker::AccountPicker
         email: format!("{id}@example.com"),
         plan_type: None,
         available_resets: None,
+        credits_usable: false,
+        included_usage_denied: false,
         primary_window_label: "5h".to_string(),
         five_hour_reset: None,
         five_hour_usage_left_percent: Some(100),
@@ -166,6 +168,126 @@ fn automatic_default_ignores_accounts_without_loaded_usage() {
     assert_eq!(
         automatic_default_index(&candidates[..1], &picker_candidates[..1]),
         None
+    );
+}
+
+#[test]
+fn automatic_default_uses_credits_only_after_included_usage() {
+    let mut accounts = [
+        account_candidate("acct_exhausted", /*automation_enabled*/ true),
+        account_candidate("acct_credits", /*automation_enabled*/ true),
+        account_candidate("acct_included", /*automation_enabled*/ true),
+    ];
+    let exhausted = account_usage::AccountUsage {
+        five_hour_remaining_percent: Some(0),
+        five_hour_exhausted: true,
+        // The quota-reset count cannot fund requests.
+        available_resets: Some(2),
+        ..Default::default()
+    };
+    let credits = account_usage::AccountUsage {
+        credits_usable: true,
+        ..exhausted
+    };
+    accounts[1].blocked = true;
+    let picker_candidates = [
+        account_picker_candidate(
+            &accounts[0],
+            Some(&exhausted),
+            /*in_use*/ false,
+            /*is_current*/ false,
+        ),
+        account_picker_candidate(
+            &accounts[1],
+            Some(&credits),
+            /*in_use*/ true,
+            /*is_current*/ true,
+        ),
+        picker_candidate("acct_included", /*is_current*/ false),
+    ];
+
+    assert_eq!(
+        automatic_default_index(&accounts, &picker_candidates),
+        Some(2)
+    );
+    assert_eq!(
+        automatic_default_index(&accounts[..2], &picker_candidates[..2]),
+        Some(1)
+    );
+    accounts[1].automation_enabled = false;
+    assert_eq!(
+        automatic_default_index(&accounts[..2], &picker_candidates[..2]),
+        Some(0)
+    );
+}
+
+#[test]
+fn automatic_default_accepts_credits_without_included_windows() {
+    let accounts = [
+        account_candidate("acct_credits_only", /*automation_enabled*/ true),
+        account_candidate("acct_included", /*automation_enabled*/ true),
+    ];
+    let credits_only = account_usage::AccountUsage {
+        credits_usable: true,
+        ..Default::default()
+    };
+    let picker_candidates = [
+        account_picker_candidate(
+            &accounts[0],
+            Some(&credits_only),
+            /*in_use*/ false,
+            /*is_current*/ false,
+        ),
+        account_picker_candidate(
+            &accounts[1],
+            Some(&account_usage::AccountUsage {
+                five_hour_remaining_percent: Some(1),
+                ..Default::default()
+            }),
+            /*in_use*/ true,
+            /*is_current*/ true,
+        ),
+    ];
+
+    assert_eq!(
+        automatic_default_index(&accounts, &picker_candidates),
+        Some(1)
+    );
+    assert_eq!(
+        automatic_default_index(&accounts[..1], &picker_candidates[..1]),
+        Some(0)
+    );
+}
+
+#[test]
+fn automatic_default_treats_provider_denial_as_credit_only() {
+    let accounts = [
+        account_candidate("acct_denied", /*automation_enabled*/ true),
+        account_candidate("acct_included", /*automation_enabled*/ true),
+    ];
+    let denied = account_usage::AccountUsage {
+        five_hour_remaining_percent: Some(85),
+        included_usage_denied: true,
+        credits_usable: true,
+        ..Default::default()
+    };
+    let picker_candidates = [
+        account_picker_candidate(
+            &accounts[0],
+            Some(&denied),
+            /*in_use*/ false,
+            /*is_current*/ false,
+        ),
+        picker_candidate("acct_included", /*is_current*/ true),
+    ];
+
+    assert_eq!(
+        automatic_default_index(&accounts, &picker_candidates),
+        Some(1)
+    );
+    assert_eq!(
+        automatic_default_index(&accounts[..1], &picker_candidates[..1]),
+        Some(0)
     );
 }
 
