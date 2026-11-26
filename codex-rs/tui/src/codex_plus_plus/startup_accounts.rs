@@ -1,5 +1,6 @@
 //! Startup account selection for Codex++.
 
+use std::cmp::Reverse;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::path::Path;
@@ -116,12 +117,7 @@ pub(crate) async fn run_startup_account_picker(
     }
     let selectable_homes: HashMap<AccountId, PathBuf> =
         selectable_accounts.iter().cloned().collect();
-    let mut candidates: Vec<AccountCandidate> = store
-        .candidates()?
-        .into_iter()
-        .filter(|candidate| candidate.enabled && selectable_homes.contains_key(&candidate.id))
-        .collect();
-    if candidates.is_empty() {
+    if selectable_accounts.is_empty() {
         return continue_without_account(auto_account);
     }
 
@@ -138,6 +134,12 @@ pub(crate) async fn run_startup_account_picker(
         Ok::<_, std::io::Error>(login_required)
     })
     .await??;
+    // The usage probe reconciles persisted cooldowns before the picker ranks accounts.
+    let mut candidates: Vec<AccountCandidate> = store
+        .candidates()?
+        .into_iter()
+        .filter(|candidate| candidate.enabled && selectable_homes.contains_key(&candidate.id))
+        .collect();
     candidates.retain(|candidate| {
         !login_required.contains(&candidate.id)
             || (!auto_account
@@ -223,31 +225,46 @@ pub(super) fn sort_candidates_alphabetically(candidates: &mut [AccountCandidate]
     });
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+enum AutomaticUsagePriority {
+    Exhausted,
+    Credits,
+    Included,
+}
+
 fn automatic_default_index(
     candidates: &[AccountCandidate],
     picker_candidates: &[account_picker::AccountPickerCandidate],
 ) -> Option<usize> {
-    let automatic_indices = candidates
+    candidates
         .iter()
+        .zip(picker_candidates)
         .enumerate()
-        .filter(|(index, candidate)| {
-            candidate.automation_enabled
-                && (picker_candidates[*index]
-                    .five_hour_usage_left_percent
-                    .is_some()
-                    || picker_candidates[*index]
-                        .weekly_usage_left_percent
-                        .is_some())
+        .filter(|(_, (account, _))| account.automation_enabled)
+        .filter_map(|(index, (_, candidate))| {
+            let has_usage_window = candidate.five_hour_usage_left_percent.is_some()
+                || candidate.weekly_usage_left_percent.is_some();
+            let priority = match (
+                has_usage_window,
+                candidate.within_included_limits(),
+                candidate.credits_usable,
+            ) {
+                (true, true, _) => AutomaticUsagePriority::Included,
+                (_, _, true) => AutomaticUsagePriority::Credits,
+                (true, false, false) => AutomaticUsagePriority::Exhausted,
+                (false, _, false) => return None,
+            };
+            Some((
+                (
+                    priority,
+                    candidate.recommendation_tiebreakers(),
+                    Reverse(index),
+                ),
+                index,
+            ))
         })
-        .map(|(index, _)| index)
-        .collect::<Vec<_>>();
-    let automatic_candidates = automatic_indices
-        .iter()
-        .map(|index| picker_candidates[*index].clone())
-        .collect::<Vec<_>>();
-    (!automatic_indices.is_empty()).then(|| {
-        automatic_indices[account_picker::recommended_candidate_index(&automatic_candidates)]
-    })
+        .max_by_key(|(key, _)| *key)
+        .map(|(_, index)| index)
 }
 
 fn continue_without_account(auto_account: bool) -> color_eyre::Result<StartupAccountSelection> {
@@ -314,6 +331,7 @@ pub(super) fn account_picker_candidate(
         email: candidate.display_label.clone(),
         plan_type: usage.and_then(|usage| usage.plan_type),
         available_resets: usage.and_then(|usage| usage.available_resets),
+        credits_usable: usage.is_some_and(|usage| usage.credits_usable),
         primary_window_label: crate::chatwidget::limit_label_for_window(
             usage.and_then(|usage| usage.primary_window_minutes),
             /*is_secondary*/ false,

@@ -33,6 +33,7 @@ pub(crate) struct AccountPickerCandidate {
     pub(crate) email: String,
     pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
     pub(crate) available_resets: Option<i64>,
+    pub(crate) credits_usable: bool,
     pub(crate) primary_window_label: String,
     pub(crate) five_hour_reset: Option<String>,
     pub(crate) five_hour_usage_left_percent: Option<u8>,
@@ -45,6 +46,28 @@ pub(crate) struct AccountPickerCandidate {
     pub(crate) in_use: bool,
     pub(crate) is_current: bool,
     pub(crate) is_default: bool,
+}
+
+impl AccountPickerCandidate {
+    pub(crate) fn within_included_limits(&self) -> bool {
+        !self.blocked && !self.five_hour_exhausted && !self.weekly_exhausted
+    }
+
+    pub(crate) fn recommendation_tiebreakers(&self) -> (bool, bool, bool, u8) {
+        let usage_left_percent = [
+            self.five_hour_usage_left_percent,
+            self.weekly_usage_left_percent,
+        ]
+        .into_iter()
+        .flatten()
+        .min();
+        (
+            !self.in_use,
+            usage_left_percent.is_some(),
+            !self.is_current,
+            usage_left_percent.unwrap_or_default(),
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,20 +193,9 @@ pub(crate) fn recommended_candidate_index(candidates: &[AccountPickerCandidate])
         .iter()
         .enumerate()
         .max_by_key(|(index, candidate)| {
-            let usage_left_percent = [
-                candidate.five_hour_usage_left_percent,
-                candidate.weekly_usage_left_percent,
-            ]
-            .into_iter()
-            .flatten()
-            .min();
-            let has_usage_remaining = !candidate.five_hour_exhausted && !candidate.weekly_exhausted;
             (
-                !candidate.blocked && has_usage_remaining,
-                !candidate.in_use,
-                usage_left_percent.is_some(),
-                !candidate.is_current,
-                usage_left_percent.unwrap_or_default(),
+                candidate.within_included_limits(),
+                candidate.recommendation_tiebreakers(),
                 Reverse(*index),
             )
         })

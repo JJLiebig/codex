@@ -1,6 +1,7 @@
 use super::*;
 use crate::legacy_core::config::ConfigBuilder;
 use codex_protocol::auth::RefreshTokenFailedError;
+use codex_protocol::protocol::CreditsSnapshot;
 use codex_protocol::protocol::RateLimitWindow;
 use pretty_assertions::assert_eq;
 use wiremock::MockServer;
@@ -51,24 +52,28 @@ async fn refreshed_usage_reconciles_persisted_account_cooldown() {
             "reset_at": future,
         })
     };
-    for (rate_limit, blocked) in [
+    for (rate_limit, has_credits, blocked) in [
         (
             serde_json::json!({"allowed": true, "limit_reached": false, "primary_window": window(/*used_percent*/ 0, /*seconds*/ 18_000), "secondary_window": window(/*used_percent*/ 0, /*seconds*/ 604_800)}),
+            false,
             false,
         ),
         (
             serde_json::json!({"allowed": true, "limit_reached": false, "primary_window": window(/*used_percent*/ 0, /*seconds*/ 604_800)}),
             false,
+            false,
         ),
         (
             serde_json::json!({"allowed": false, "limit_reached": true, "primary_window": window(/*used_percent*/ 100, /*seconds*/ 18_000), "secondary_window": window(/*used_percent*/ 0, /*seconds*/ 604_800)}),
             true,
+            true,
         ),
         (
             serde_json::json!({"allowed": false, "limit_reached": true, "primary_window": window(/*used_percent*/ 0, /*seconds*/ 18_000), "secondary_window": window(/*used_percent*/ 100, /*seconds*/ 604_800)}),
+            false,
             true,
         ),
-        (serde_json::Value::Null, true),
+        (serde_json::Value::Null, false, true),
     ] {
         store
             .record_usage_limit_resets_at(&profile.id, future)
@@ -79,6 +84,7 @@ async fn refreshed_usage_reconciles_persisted_account_cooldown() {
                 serde_json::json!({
                     "plan_type": "pro",
                     "rate_limit": rate_limit,
+                    "credits": {"has_credits": has_credits, "unlimited": false},
                 }),
             ))
             .mount(&server)
@@ -92,11 +98,85 @@ async fn refreshed_usage_reconciles_persisted_account_cooldown() {
             &store,
         )
         .await;
-        assert_eq!(loaded.usage.len(), 1);
+        assert_eq!(loaded.usage[&profile.id].credits_usable, has_credits);
         let candidates = AccountStore::new(home.path().to_path_buf())
             .candidates()
             .unwrap();
         assert_eq!(candidates[0].blocked, blocked, "usage: {rate_limit}");
+    }
+}
+
+#[test]
+fn credit_fallback_requires_usable_codex_credits() {
+    use RateLimitReachedType::*;
+
+    for (limit_id, has_credits, unlimited, spend_control_reached, reached_type, expected) in [
+        ("codex", false, false, None, None, false),
+        ("codex", true, false, None, Some(RateLimitReached), true),
+        ("codex", false, true, Some(false), None, true),
+        ("codex", true, false, Some(true), None, false),
+        (
+            "codex",
+            true,
+            false,
+            None,
+            Some(WorkspaceOwnerCreditsDepleted),
+            false,
+        ),
+        (
+            "codex",
+            true,
+            false,
+            None,
+            Some(WorkspaceMemberCreditsDepleted),
+            false,
+        ),
+        (
+            "codex",
+            true,
+            false,
+            None,
+            Some(WorkspaceOwnerUsageLimitReached),
+            false,
+        ),
+        (
+            "codex",
+            true,
+            false,
+            None,
+            Some(WorkspaceMemberUsageLimitReached),
+            false,
+        ),
+        ("another_quota", true, false, None, None, false),
+    ] {
+        let response = RateLimitsWithResetCredits {
+            rate_limits: vec![RateLimitSnapshot {
+                limit_id: Some(limit_id.to_string()),
+                limit_name: None,
+                normal_model_slug: None,
+                primary: None,
+                secondary: None,
+                credits: Some(CreditsSnapshot {
+                    has_credits,
+                    unlimited,
+                    balance: None,
+                }),
+                individual_limit: None,
+                spend_control_reached,
+                plan_type: None,
+                rate_limit_reached_type: reached_type,
+            }],
+            rate_limit_reset_credits: None,
+            account_id: None,
+            user_id: None,
+            rate_limit_upsell: None,
+            ordinary_usage_allowed: Some(false),
+        };
+        assert_eq!(
+            account_usage(&response).credits_usable,
+            expected,
+            "{response:?}"
+        );
     }
 }
 
@@ -137,6 +217,7 @@ fn maps_five_hour_and_weekly_windows_to_picker_usage() {
         AccountUsage {
             plan_type: Some(codex_protocol::account::PlanType::Pro),
             available_resets: Some(2),
+            credits_usable: false,
             primary_window_minutes: Some(300),
             five_hour_reset_at: Some(1_749_950_000),
             five_hour_remaining_percent: Some(32),
@@ -174,6 +255,7 @@ fn maps_weekly_only_primary_window_to_weekly_picker_usage() {
         AccountUsage {
             plan_type: None,
             available_resets: None,
+            credits_usable: false,
             primary_window_minutes: None,
             five_hour_reset_at: None,
             five_hour_remaining_percent: None,
@@ -192,6 +274,7 @@ fn exhausted_until_uses_the_later_exhausted_window_reset() {
     let usage = AccountUsage {
         plan_type: None,
         available_resets: None,
+        credits_usable: false,
         primary_window_minutes: Some(300),
         five_hour_reset_at: Some(1_749_950_000),
         five_hour_remaining_percent: Some(0),
@@ -237,6 +320,7 @@ fn rounded_zero_remaining_does_not_mark_window_exhausted() {
         AccountUsage {
             plan_type: None,
             available_resets: None,
+            credits_usable: false,
             primary_window_minutes: Some(300),
             five_hour_reset_at: Some(1_749_950_000),
             five_hour_remaining_percent: Some(0),
