@@ -246,7 +246,7 @@ fn automatic_default_index(
                 || candidate.weekly_usage_left_percent.is_some();
             let priority = match (
                 has_usage_window,
-                candidate.within_included_limits(),
+                candidate.within_included_limits() && !candidate.included_usage_denied,
                 candidate.credits_usable,
             ) {
                 (true, true, _) => AutomaticUsagePriority::Included,
@@ -332,6 +332,7 @@ pub(super) fn account_picker_candidate(
         plan_type: usage.and_then(|usage| usage.plan_type),
         available_resets: usage.and_then(|usage| usage.available_resets),
         credits_usable: usage.is_some_and(|usage| usage.credits_usable),
+        included_usage_denied: usage.is_some_and(|usage| usage.included_usage_denied),
         primary_window_label: crate::chatwidget::limit_label_for_window(
             usage.and_then(|usage| usage.primary_window_minutes),
             /*is_secondary*/ false,

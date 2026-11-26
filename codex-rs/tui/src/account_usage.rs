@@ -35,6 +35,7 @@ pub(crate) struct AccountUsage {
     pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
     pub(crate) available_resets: Option<i64>,
     pub(crate) credits_usable: bool,
+    pub(crate) included_usage_denied: bool,
     pub(crate) primary_window_minutes: Option<i64>,
     pub(crate) five_hour_reset_at: Option<i64>,
     pub(crate) five_hour_remaining_percent: Option<u8>,
@@ -238,6 +239,7 @@ fn account_usage(response: &RateLimitsWithResetCredits) -> AccountUsage {
         .or_else(|| response.rate_limits.first())
         .map(account_usage_from_snapshot)
         .unwrap_or_default();
+    usage.included_usage_denied = response.ordinary_usage_allowed == Some(false);
     usage.credits_usable = codex_snapshot.is_some_and(|snapshot| {
         snapshot
             .credits
@@ -281,6 +283,7 @@ fn account_usage_from_snapshot(snapshot: &RateLimitSnapshot) -> AccountUsage {
         plan_type: snapshot.plan_type,
         available_resets: None,
         credits_usable: false,
+        included_usage_denied: false,
         primary_window_minutes: five_hour.and_then(|window| window.window_minutes),
         five_hour_reset_at: five_hour.and_then(|window| window.resets_at),
         five_hour_remaining_percent: five_hour.map(|window| remaining_percent(window.used_percent)),

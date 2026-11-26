@@ -34,6 +34,7 @@ pub(crate) struct AccountPickerCandidate {
     pub(crate) plan_type: Option<codex_protocol::account::PlanType>,
     pub(crate) available_resets: Option<i64>,
     pub(crate) credits_usable: bool,
+    pub(crate) included_usage_denied: bool,
     pub(crate) primary_window_label: String,
     pub(crate) five_hour_reset: Option<String>,
     pub(crate) five_hour_usage_left_percent: Option<u8>,

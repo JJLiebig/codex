@@ -20,6 +20,7 @@ fn picker_candidate(id: &str, is_current: bool) -> account_picker::AccountPicker
         plan_type: None,
         available_resets: None,
         credits_usable: false,
+        included_usage_denied: false,
         primary_window_label: "5h".to_string(),
         five_hour_reset: None,
         five_hour_usage_left_percent: Some(100),
@@ -246,6 +247,38 @@ fn automatic_default_accepts_credits_without_included_windows() {
             /*in_use*/ true,
             /*is_current*/ true,
         ),
+    ];
+
+    assert_eq!(
+        automatic_default_index(&accounts, &picker_candidates),
+        Some(1)
+    );
+    assert_eq!(
+        automatic_default_index(&accounts[..1], &picker_candidates[..1]),
+        Some(0)
+    );
+}
+
+#[test]
+fn automatic_default_treats_provider_denial_as_credit_only() {
+    let accounts = [
+        account_candidate("acct_denied", /*automation_enabled*/ true),
+        account_candidate("acct_included", /*automation_enabled*/ true),
+    ];
+    let denied = account_usage::AccountUsage {
+        five_hour_remaining_percent: Some(85),
+        included_usage_denied: true,
+        credits_usable: true,
+        ..Default::default()
+    };
+    let picker_candidates = [
+        account_picker_candidate(
+            &accounts[0],
+            Some(&denied),
+            /*in_use*/ false,
+            /*is_current*/ false,
+        ),
+        picker_candidate("acct_included", /*is_current*/ true),
     ];
 
     assert_eq!(

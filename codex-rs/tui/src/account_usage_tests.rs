@@ -73,6 +73,11 @@ async fn refreshed_usage_reconciles_persisted_account_cooldown() {
             false,
             true,
         ),
+        (
+            serde_json::json!({"allowed": false, "limit_reached": true, "primary_window": window(/*used_percent*/ 15, /*seconds*/ 18_000)}),
+            true,
+            true,
+        ),
         (serde_json::Value::Null, false, true),
     ] {
         store
@@ -98,7 +103,12 @@ async fn refreshed_usage_reconciles_persisted_account_cooldown() {
             &store,
         )
         .await;
-        assert_eq!(loaded.usage[&profile.id].credits_usable, has_credits);
+        let usage = &loaded.usage[&profile.id];
+        assert_eq!(usage.credits_usable, has_credits);
+        assert_eq!(
+            usage.included_usage_denied,
+            rate_limit["allowed"].as_bool() == Some(false)
+        );
         let candidates = AccountStore::new(home.path().to_path_buf())
             .candidates()
             .unwrap();
@@ -218,6 +228,7 @@ fn maps_five_hour_and_weekly_windows_to_picker_usage() {
             plan_type: Some(codex_protocol::account::PlanType::Pro),
             available_resets: Some(2),
             credits_usable: false,
+            included_usage_denied: false,
             primary_window_minutes: Some(300),
             five_hour_reset_at: Some(1_749_950_000),
             five_hour_remaining_percent: Some(32),
@@ -256,6 +267,7 @@ fn maps_weekly_only_primary_window_to_weekly_picker_usage() {
             plan_type: None,
             available_resets: None,
             credits_usable: false,
+            included_usage_denied: false,
             primary_window_minutes: None,
             five_hour_reset_at: None,
             five_hour_remaining_percent: None,
@@ -275,6 +287,7 @@ fn exhausted_until_uses_the_later_exhausted_window_reset() {
         plan_type: None,
         available_resets: None,
         credits_usable: false,
+        included_usage_denied: false,
         primary_window_minutes: Some(300),
         five_hour_reset_at: Some(1_749_950_000),
         five_hour_remaining_percent: Some(0),
@@ -321,6 +334,7 @@ fn rounded_zero_remaining_does_not_mark_window_exhausted() {
             plan_type: None,
             available_resets: None,
             credits_usable: false,
+            included_usage_denied: false,
             primary_window_minutes: Some(300),
             five_hour_reset_at: Some(1_749_950_000),
             five_hour_remaining_percent: Some(0),
