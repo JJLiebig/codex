@@ -420,3 +420,53 @@ fn prompt_settings_toggles_are_saved_together() {
         })
     );
 }
+
+#[tokio::test]
+async fn saving_other_settings_preserves_connected_server_opt_out() {
+    let server_home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        server_home.path().join("config.toml"),
+        "gpt_6_2_task_guidance = false\n",
+    )
+    .unwrap();
+    let server_config = crate::legacy_core::config::ConfigBuilder::default()
+        .codex_home(server_home.path().into())
+        .build()
+        .await
+        .unwrap();
+    let server = crate::start_embedded_app_server_for_picker(&server_config)
+        .await
+        .unwrap();
+    let mut app = crate::app::test_support::make_test_app().await;
+    assert!(codex_config::gpt_6_2_task_guidance(
+        &app.chat_widget.config_ref().config_layer_stack
+    ));
+    let (tx, mut rx) = unbounded_channel();
+    app.chat_widget.app_event_tx = AppEventSender::new(tx);
+    app.chat_widget
+        .open_codex_plus_plus_popup(
+            &server,
+            DcgStatus::Unsupported(DcgUnsupportedReason::Platform),
+        )
+        .await;
+    app.chat_widget
+        .bottom_pane
+        .handle_key_event(KeyEvent::from(KeyCode::End));
+    app.chat_widget
+        .bottom_pane
+        .handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+    app.chat_widget
+        .bottom_pane
+        .handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    let save = std::iter::from_fn(|| rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::PersistCodexPlusPlusSettings { .. }));
+    assert_matches!(
+        save,
+        Some(AppEvent::PersistCodexPlusPlusSettings {
+            disable_unnecessary_updates: false,
+            gpt_6_2_task_guidance: false,
+            ..
+        })
+    );
+}

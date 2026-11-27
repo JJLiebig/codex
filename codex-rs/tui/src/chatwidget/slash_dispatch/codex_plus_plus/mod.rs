@@ -25,6 +25,7 @@ use crossterm::event::KeyEvent;
 use ratatui::text::Line;
 
 use super::super::*;
+use crate::app_server_session::AppServerSession;
 use crate::bottom_pane::ListSelectionView;
 use crate::bottom_pane::SelectionToggle;
 use crate::codex_plus_plus::destructive_command_guard::DcgStatus;
@@ -33,7 +34,23 @@ use crate::keymap::ListKeymap;
 use crate::keymap::primary_binding;
 
 impl ChatWidget {
-    pub(crate) fn open_codex_plus_plus_popup(&mut self, dcg_status: DcgStatus) {
+    async fn open_codex_plus_plus_popup(
+        &mut self,
+        app_server: &AppServerSession,
+        dcg_status: DcgStatus,
+    ) {
+        let response = match crate::config_update::read_effective_config(
+            app_server.request_handle(),
+            self.config.cwd.display().to_string(),
+        )
+        .await
+        {
+            Ok(response) => response,
+            Err(err) => {
+                self.codex_plus_plus_settings_verification_failed(err.to_string());
+                return;
+            }
+        };
         let list_keymap = settings_list_keymap(self.bottom_pane.list_keymap());
         let params = codex_plus_plus_settings_params(
             self.config.automatic_account_selection,
@@ -42,7 +59,7 @@ impl ChatWidget {
             self.config.model_capacity_retry_mode,
             self.config.codex_plus_plus_tool_activity,
             codex_config::disable_unnecessary_updates(&self.config.config_layer_stack),
-            codex_config::gpt_6_2_task_guidance(&self.config.config_layer_stack),
+            crate::codex_plus_plus::task_guidance_setting(&response),
             self.weekly_start_supported,
             Some(dcg_status),
             &list_keymap,

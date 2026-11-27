@@ -15,10 +15,24 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
     let server = responses::start_mock_server().await;
     let codex_home = TempDir::new()?;
     let catalog_path = codex_home.path().join("models.json");
-    std::fs::write(
-        &catalog_path,
-        serde_json::to_vec(&codex_models_manager::bundled_models_response()?)?,
-    )?;
+    let mut catalog = codex_models_manager::bundled_models_response()?;
+    for (model, alias) in [
+        ("gpt-6.2-sol", "openai.gpt-6.2-sol"),
+        ("gpt-6.2-astra", "global.openai.gpt-6.2-astra"),
+        ("gpt-6.2-sol", "us.openai.gpt-6.2-sol"),
+    ] {
+        let mut entry = catalog
+            .models
+            .iter()
+            .find(|entry| entry.slug == model)
+            .unwrap()
+            .clone();
+        entry.slug = alias.into();
+        entry.use_responses_lite = false;
+        entry.tool_mode = None;
+        catalog.models.push(entry);
+    }
+    std::fs::write(&catalog_path, serde_json::to_vec(&catalog)?)?;
     MockResponsesConfig::new(&server.uri())
         .with_model("gpt-6.2-sol")
         .with_root_config(&format!(
@@ -64,6 +78,9 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
     for (thread_id, model, expected_count) in [
         (&standard.id, "gpt-6.2-sol", 1),
         (&standard.id, "gpt-6.1-sol", 0),
+        (&standard.id, "openai.gpt-6.2-sol", 1),
+        (&standard.id, "global.openai.gpt-6.2-astra", 1),
+        (&standard.id, "us.openai.gpt-6.2-sol", 1),
         (&incremental.id, "gpt-6.2-astra", 1),
         (&disabled.id, "gpt-6.2-sol", 0),
         (&custom.id, "gpt-6.2-sol", 0),

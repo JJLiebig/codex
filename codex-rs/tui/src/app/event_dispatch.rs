@@ -3384,7 +3384,9 @@ impl App {
             }
             AppEvent::DcgStatusDetected(request_id, status) => {
                 if DcgManager::is_current_status_detection(request_id) {
-                    self.chat_widget.finish_dcg_status_detection(status);
+                    self.chat_widget
+                        .finish_dcg_status_detection(app_server, status)
+                        .await;
                 }
             }
             AppEvent::OpenDcgInstallConfirmation => {
@@ -3414,7 +3416,9 @@ impl App {
             }
             AppEvent::DcgOperationCompleted { action, change } => {
                 DcgManager::finish_operation();
-                self.chat_widget.finish_dcg_action(action, change);
+                self.chat_widget
+                    .finish_dcg_action(app_server, action, change)
+                    .await;
             }
             AppEvent::OpenCodexPlusPlusAccounts => {
                 let statuses = self

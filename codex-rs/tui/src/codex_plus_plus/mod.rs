@@ -20,6 +20,7 @@ pub(crate) use account_identity_freshness::AccountIdentityFreshness;
 pub(crate) use account_identity_freshness::MAY_BE_STALE_NOTE as ACCOUNT_IDENTITY_MAY_BE_STALE_NOTE;
 pub(crate) use account_policy::persist_settings;
 pub(crate) use account_policy::refresh_settings;
+pub(crate) use account_policy::task_guidance_setting;
 pub use account_removal::choose_account_to_remove;
 use anyhow::Result;
 pub(crate) use auto_redeem_resets::settings as auto_redeem_resets_settings;
