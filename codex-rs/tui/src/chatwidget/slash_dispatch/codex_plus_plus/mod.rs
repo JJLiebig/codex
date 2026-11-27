@@ -241,7 +241,7 @@ fn codex_plus_plus_settings_params(
     ));
     items.push(settings_item(
         "GPT-6.2 task guidance",
-        "Adds guidance for GPT-6.2 Sol and Astra to understand the task, choose and check the approach, and verify the result.",
+        "Understand the task, choose and check the approach, and verify the result.",
         Arc::clone(&selection.gpt_6_2_task_guidance),
         selection.clone(),
         weekly_supported,
