@@ -51,6 +51,7 @@ pub(super) fn settings_item(
             vec![Box::new(move |tx: &AppEventSender| {
                 tx.send(AppEvent::PersistCodexPlusPlusSettings {
                     disable_unnecessary_updates: selection.quiet_updates.load(Ordering::Relaxed),
+                    gpt_6_2_task_guidance: selection.gpt_6_2_task_guidance.load(Ordering::Relaxed),
                     automatic_account_selection: selected(
                         &selection.automatic,
                         AutomaticOn,
@@ -167,9 +168,13 @@ impl ChatWidget {
         self.show_dcg_view(params);
     }
 
-    pub(crate) fn finish_dcg_status_detection(&mut self, status: DcgStatus) {
+    pub(crate) async fn finish_dcg_status_detection(
+        &mut self,
+        app_server: &AppServerSession,
+        status: DcgStatus,
+    ) {
         if self.bottom_pane.dismiss_active_view_if_id(STATUS_VIEW_ID) {
-            self.open_codex_plus_plus_popup(status);
+            self.open_codex_plus_plus_popup(app_server, status).await;
         }
     }
 
@@ -181,7 +186,12 @@ impl ChatWidget {
         self.show_dcg_view(progress_params(action));
     }
 
-    pub(crate) fn finish_dcg_action(&mut self, action: DcgAction, change: Option<DcgChange>) {
+    pub(crate) async fn finish_dcg_action(
+        &mut self,
+        app_server: &AppServerSession,
+        action: DcgAction,
+        change: Option<DcgChange>,
+    ) {
         if !self.bottom_pane.dismiss_active_view_if_id(PROGRESS_VIEW_ID) {
             self.bottom_pane.dismiss_view_by_id(PROGRESS_VIEW_ID);
             return;
@@ -194,7 +204,8 @@ impl ChatWidget {
                         .to_string(),
                     /*hint*/ None,
                 );
-                self.open_codex_plus_plus_popup(change.status);
+                self.open_codex_plus_plus_popup(app_server, change.status)
+                    .await;
             }
             _ => self.show_dcg_view(failure_params()),
         }

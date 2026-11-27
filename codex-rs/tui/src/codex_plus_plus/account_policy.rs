@@ -3,6 +3,7 @@
 use crate::app::App;
 use crate::app_server_session::AppServerSession;
 use crate::legacy_core::config::Config;
+use codex_app_server_protocol::ConfigReadResponse;
 use codex_config::AutoRedeemResets;
 use codex_config::ModelCapacityRetryMode;
 use codex_config::ToolActivityPresentation;
@@ -19,6 +20,7 @@ pub(crate) async fn persist_settings(
     model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
     tool_activity: ToolActivityPresentation,
     disable_unnecessary_updates: bool,
+    gpt_6_2_task_guidance: bool,
 ) {
     let automatic = match automatic_account_selection {
         AutomaticAccountSelection::Enabled => "enabled",
@@ -70,6 +72,10 @@ pub(crate) async fn persist_settings(
     writes.push(crate::config_update::replace_config_value(
         "disable_unnecessary_updates",
         serde_json::json!(disable_unnecessary_updates),
+    ));
+    writes.push(crate::config_update::replace_config_value(
+        "gpt_6_2_task_guidance",
+        serde_json::json!(gpt_6_2_task_guidance),
     ));
     let write_error = crate::config_update::write_config_batch(app_server.request_handle(), writes)
         .await
@@ -149,6 +155,7 @@ pub(crate) async fn persist_settings(
         .get("disable_unnecessary_updates")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(true);
+    let effective_task_guidance = task_guidance_setting(&response);
     let effective_tool_activity = match response
         .config
         .additional
@@ -198,6 +205,7 @@ pub(crate) async fn persist_settings(
         && requested_auto_redeem.is_none_or(|requested| effective_auto_redeem == requested)
         && model_capacity_retry_mode.is_none_or(|capacity| effective_capacity == capacity)
         && effective_quiet_updates == disable_unnecessary_updates
+        && effective_task_guidance == gpt_6_2_task_guidance
         && effective_tool_activity == tool_activity
     {
         app.chat_widget.codex_plus_plus_settings_persisted(
@@ -215,6 +223,15 @@ pub(crate) async fn persist_settings(
                 effective_tool_activity,
             );
     }
+}
+
+pub(crate) fn task_guidance_setting(response: &ConfigReadResponse) -> bool {
+    response
+        .config
+        .additional
+        .get("gpt_6_2_task_guidance")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
 }
 
 pub(crate) async fn refresh_settings(app: &mut App) -> bool {

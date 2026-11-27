@@ -3343,6 +3343,7 @@ impl App {
             }
             AppEvent::PersistCodexPlusPlusSettings {
                 disable_unnecessary_updates,
+                gpt_6_2_task_guidance,
                 automatic_account_selection,
                 weekly_usage_window_auto_start,
                 auto_redeem_resets,
@@ -3358,6 +3359,7 @@ impl App {
                     Some(model_capacity_retry_mode),
                     tool_activity,
                     disable_unnecessary_updates,
+                    gpt_6_2_task_guidance,
                 )
                 .await;
                 self.chat_widget.reconcile_compact_tool_activity_status();
@@ -3382,7 +3384,9 @@ impl App {
             }
             AppEvent::DcgStatusDetected(request_id, status) => {
                 if DcgManager::is_current_status_detection(request_id) {
-                    self.chat_widget.finish_dcg_status_detection(status);
+                    self.chat_widget
+                        .finish_dcg_status_detection(app_server, status)
+                        .await;
                 }
             }
             AppEvent::OpenDcgInstallConfirmation => {
@@ -3412,7 +3416,9 @@ impl App {
             }
             AppEvent::DcgOperationCompleted { action, change } => {
                 DcgManager::finish_operation();
-                self.chat_widget.finish_dcg_action(action, change);
+                self.chat_widget
+                    .finish_dcg_action(app_server, action, change)
+                    .await;
             }
             AppEvent::OpenCodexPlusPlusAccounts => {
                 let statuses = self

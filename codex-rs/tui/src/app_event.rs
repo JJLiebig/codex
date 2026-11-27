@@ -1766,6 +1766,7 @@ pub(crate) enum AppEvent {
     /// Persist all Codex++ global settings selected in `/codexplusplus`.
     PersistCodexPlusPlusSettings {
         disable_unnecessary_updates: bool,
+        gpt_6_2_task_guidance: bool,
         automatic_account_selection: AutomaticAccountSelection,
         weekly_usage_window_auto_start: Option<WeeklyUsageWindowAutoStart>,
         auto_redeem_resets: Option<codex_config::AutoRedeemResets>,

@@ -72,6 +72,7 @@ async fn settings_reload_external_changes_and_expiry_opt_out_survives_save() {
         /*model_capacity_retry_mode*/ None,
         activity,
         /*disable_unnecessary_updates*/ true,
+        /*gpt_6_2_task_guidance*/ false,
     )
     .await;
     let config = crate::legacy_core::config::ConfigBuilder::default()
@@ -83,4 +84,7 @@ async fn settings_reload_external_changes_and_expiry_opt_out_survives_save() {
         crate::codex_plus_plus::auto_redeem_resets_settings(&config.config_layer_stack),
         None
     );
+    assert!(!codex_config::gpt_6_2_task_guidance(
+        &config.config_layer_stack
+    ));
 }

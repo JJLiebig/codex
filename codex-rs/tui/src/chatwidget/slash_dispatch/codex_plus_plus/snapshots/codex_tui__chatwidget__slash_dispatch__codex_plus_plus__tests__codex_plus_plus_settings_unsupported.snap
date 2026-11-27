@@ -13,12 +13,12 @@ expression: "render_settings(AutomaticAccountSelection::Disabled,\nWeeklyUsageWi
   3. [ ] Compact tool activity                       Keep routine tool details in
                                                      Ctrl+T instead of the main
                                                      conversation.
-  4. [*] Disable unnecessary updates to save tokens  Report meaningful progress
+  4. [*] GPT-6.2 task guidance                       Understand the task, choose and
+                                                     check the approach, and verify
+                                                     the result.
+  5. [*] Disable unnecessary updates to save tokens  Report meaningful progress
                                                      instead of timed status
                                                      updates.
-
-
-
 
 
 

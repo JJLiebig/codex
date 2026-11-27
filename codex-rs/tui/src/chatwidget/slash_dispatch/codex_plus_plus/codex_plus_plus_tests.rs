@@ -33,6 +33,7 @@ fn settings_view(
                 capacity,
                 ToolActivityPresentation::Full,
                 /*current_quiet_updates*/ true,
+                /*current_gpt_6_2_task_guidance*/ true,
                 weekly_supported,
                 None,
                 &keymap,
@@ -104,6 +105,7 @@ async fn custom_provider_keeps_maintenance_controls_snapshot() {
             ModelCapacityRetryMode::Bounded,
             ToolActivityPresentation::Full,
             /*current_quiet_updates*/ true,
+            /*current_gpt_6_2_task_guidance*/ true,
             crate::codex_plus_plus::preflight_native_account_maintenance(&config).is_ok(),
             /*dcg_status*/ None,
             &keymap,
@@ -142,6 +144,7 @@ fn unsupported_settings_save_only_the_visible_settings() {
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
             tool_activity: ToolActivityPresentation::Full,
             disable_unnecessary_updates: true,
+            gpt_6_2_task_guidance: true,
         })
     );
 }
@@ -193,6 +196,7 @@ fn redemption_rows_describe_configured_thresholds() {
         CapacityBounded,
         ActivityFull,
         /*current_quiet_updates*/ true,
+        /*current_gpt_6_2_task_guidance*/ true,
         /*weekly_supported*/ true,
         /*dcg_status*/ None,
         &settings_list_keymap(RuntimeKeymap::defaults().list),
@@ -233,6 +237,7 @@ fn weekly_setting_saves_full_selection() {
             model_capacity_retry_mode: ModelCapacityRetryMode::Bounded,
             tool_activity: ToolActivityPresentation::Full,
             disable_unnecessary_updates: true,
+            gpt_6_2_task_guidance: true,
         })
     );
 }
@@ -264,6 +269,7 @@ fn capacity_setting_saves_indefinite_mode() {
             model_capacity_retry_mode: ModelCapacityRetryMode::Indefinite,
             tool_activity: ToolActivityPresentation::Full,
             disable_unnecessary_updates: true,
+            gpt_6_2_task_guidance: true,
         })
     );
 }
@@ -398,15 +404,68 @@ fn persistence_messages_snapshot() {
 }
 
 #[test]
-fn quiet_updates_toggle_is_saved() {
+fn prompt_settings_toggles_are_saved_together() {
     let (mut view, mut rx) = settings_view(AutomaticOn, WeeklyOn, CapacityBounded);
     view.handle_key_event(KeyEvent::from(KeyCode::End));
+    view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+    view.handle_key_event(KeyEvent::from(KeyCode::Up));
     view.handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
     view.handle_key_event(KeyEvent::from(KeyCode::Enter));
     assert_matches!(
         rx.try_recv(),
         Ok(AppEvent::PersistCodexPlusPlusSettings {
             disable_unnecessary_updates: false,
+            gpt_6_2_task_guidance: false,
+            ..
+        })
+    );
+}
+
+#[tokio::test]
+async fn saving_other_settings_preserves_connected_server_opt_out() {
+    let server_home = tempfile::tempdir().unwrap();
+    std::fs::write(
+        server_home.path().join("config.toml"),
+        "gpt_6_2_task_guidance = false\n",
+    )
+    .unwrap();
+    let server_config = crate::legacy_core::config::ConfigBuilder::default()
+        .codex_home(server_home.path().into())
+        .build()
+        .await
+        .unwrap();
+    let server = crate::start_embedded_app_server_for_picker(&server_config)
+        .await
+        .unwrap();
+    let mut app = crate::app::test_support::make_test_app().await;
+    assert!(codex_config::gpt_6_2_task_guidance(
+        &app.chat_widget.config_ref().config_layer_stack
+    ));
+    let (tx, mut rx) = unbounded_channel();
+    app.chat_widget.app_event_tx = AppEventSender::new(tx);
+    app.chat_widget
+        .open_codex_plus_plus_popup(
+            &server,
+            DcgStatus::Unsupported(DcgUnsupportedReason::Platform),
+        )
+        .await;
+    app.chat_widget
+        .bottom_pane
+        .handle_key_event(KeyEvent::from(KeyCode::End));
+    app.chat_widget
+        .bottom_pane
+        .handle_key_event(KeyEvent::from(KeyCode::Char(' ')));
+    app.chat_widget
+        .bottom_pane
+        .handle_key_event(KeyEvent::from(KeyCode::Enter));
+
+    let save = std::iter::from_fn(|| rx.try_recv().ok())
+        .find(|event| matches!(event, AppEvent::PersistCodexPlusPlusSettings { .. }));
+    assert_matches!(
+        save,
+        Some(AppEvent::PersistCodexPlusPlusSettings {
+            disable_unnecessary_updates: false,
+            gpt_6_2_task_guidance: false,
             ..
         })
     );
