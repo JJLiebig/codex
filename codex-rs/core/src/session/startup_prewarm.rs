@@ -29,7 +29,6 @@ use codex_otel::STARTUP_PREWARM_AGE_AT_FIRST_TURN_METRIC;
 use codex_otel::STARTUP_PREWARM_DURATION_METRIC;
 use codex_otel::SessionTelemetry;
 use codex_protocol::error::Result as CodexResult;
-use codex_protocol::models::BaseInstructions;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::ImageReference;
@@ -438,7 +437,7 @@ async fn schedule_startup_prewarm_inner(
             } else {
                 (Arc::clone(&startup_turn_context), None)
             };
-            let base_instructions = instructions.await.text;
+            let base_instructions = instructions.await;
             let built_tools_started_at = Instant::now();
             let step_context = session
                 .capture_step_context(prompt_context, &startup_cancellation_token)
@@ -494,10 +493,7 @@ async fn schedule_startup_prewarm_inner(
     let startup_prompt = build_prompt(
         prompt_input,
         step_context.as_ref(),
-        BaseInstructions {
-            text: base_instructions,
-            provenance: None,
-        },
+        base_instructions,
         session
             .current_window_uses_incremental_tools(&step_context)
             .await,

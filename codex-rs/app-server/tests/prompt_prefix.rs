@@ -4,6 +4,8 @@
 
 #[path = "prompt_prefix/resume_tests.rs"]
 mod resume_tests;
+#[path = "prompt_prefix/task_guidance_tests.rs"]
+mod task_guidance_tests;
 
 use anyhow::Context;
 use anyhow::Result;

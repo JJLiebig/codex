@@ -19,6 +19,7 @@ pub(crate) async fn persist_settings(
     model_capacity_retry_mode: Option<ModelCapacityRetryMode>,
     tool_activity: ToolActivityPresentation,
     disable_unnecessary_updates: bool,
+    gpt_6_2_task_guidance: bool,
 ) {
     let automatic = match automatic_account_selection {
         AutomaticAccountSelection::Enabled => "enabled",
@@ -70,6 +71,10 @@ pub(crate) async fn persist_settings(
     writes.push(crate::config_update::replace_config_value(
         "disable_unnecessary_updates",
         serde_json::json!(disable_unnecessary_updates),
+    ));
+    writes.push(crate::config_update::replace_config_value(
+        "gpt_6_2_task_guidance",
+        serde_json::json!(gpt_6_2_task_guidance),
     ));
     let write_error = crate::config_update::write_config_batch(app_server.request_handle(), writes)
         .await
@@ -198,6 +203,8 @@ pub(crate) async fn persist_settings(
         && requested_auto_redeem.is_none_or(|requested| effective_auto_redeem == requested)
         && model_capacity_retry_mode.is_none_or(|capacity| effective_capacity == capacity)
         && effective_quiet_updates == disable_unnecessary_updates
+        && codex_config::gpt_6_2_task_guidance(&app.config.config_layer_stack)
+            == gpt_6_2_task_guidance
         && effective_tool_activity == tool_activity
     {
         app.chat_widget.codex_plus_plus_settings_persisted(

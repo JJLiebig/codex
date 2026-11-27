@@ -9109,6 +9109,10 @@
       ],
       "description": "Goal-related settings."
     },
+    "gpt_6_2_task_guidance": {
+      "description": "Add task guidance to model-supplied GPT-6.2 Sol and Astra prompts.",
+      "type": "boolean"
+    },
     "hide_agent_reasoning": {
       "default": false,
       "description": "When set to `true`, `AgentReasoning` events will be hidden from the UI/output. Defaults to `false`.",

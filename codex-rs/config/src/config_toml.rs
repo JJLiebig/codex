@@ -321,6 +321,8 @@ pub struct ConfigToml {
 
     /// Suppress time-driven progress updates; enabled by default.
     pub disable_unnecessary_updates: Option<bool>,
+    /// Add task guidance to model-supplied GPT-6.2 Sol and Astra prompts.
+    pub gpt_6_2_task_guidance: Option<bool>,
     /// How Codex++ presents routine tool activity in the main TUI conversation.
     pub codex_plus_plus_tool_activity: Option<ToolActivityPresentation>,
     /// Whether the global Destructive Command Guard introduction was shown.

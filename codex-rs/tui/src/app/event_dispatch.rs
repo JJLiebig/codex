@@ -3343,6 +3343,7 @@ impl App {
             }
             AppEvent::PersistCodexPlusPlusSettings {
                 disable_unnecessary_updates,
+                gpt_6_2_task_guidance,
                 automatic_account_selection,
                 weekly_usage_window_auto_start,
                 auto_redeem_resets,
@@ -3358,6 +3359,7 @@ impl App {
                     Some(model_capacity_retry_mode),
                     tool_activity,
                     disable_unnecessary_updates,
+                    gpt_6_2_task_guidance,
                 )
                 .await;
                 self.chat_widget.reconcile_compact_tool_activity_status();

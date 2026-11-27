@@ -42,6 +42,7 @@ impl ChatWidget {
             self.config.model_capacity_retry_mode,
             self.config.codex_plus_plus_tool_activity,
             codex_config::disable_unnecessary_updates(&self.config.config_layer_stack),
+            codex_config::gpt_6_2_task_guidance(&self.config.config_layer_stack),
             self.weekly_start_supported,
             Some(dcg_status),
             &list_keymap,
@@ -109,6 +110,7 @@ struct SettingsSelection {
     capacity_indefinite: Arc<AtomicBool>,
     compact_tool_activity: Arc<AtomicBool>,
     quiet_updates: Arc<AtomicBool>,
+    gpt_6_2_task_guidance: Arc<AtomicBool>,
 }
 
 impl SettingsSelection {
@@ -145,6 +147,7 @@ fn codex_plus_plus_settings_params(
     current_capacity: ModelCapacityRetryMode,
     current_tool_activity: ToolActivityPresentation,
     current_quiet_updates: bool,
+    current_gpt_6_2_task_guidance: bool,
     weekly_supported: bool,
     dcg_status: Option<DcgStatus>,
     list_keymap: &ListKeymap,
@@ -172,6 +175,7 @@ fn codex_plus_plus_settings_params(
         capacity_indefinite: Arc::new(AtomicBool::new(current_capacity == CapacityIndefinite)),
         compact_tool_activity: Arc::new(AtomicBool::new(current_tool_activity == ActivityCompact)),
         quiet_updates: Arc::new(AtomicBool::new(current_quiet_updates)),
+        gpt_6_2_task_guidance: Arc::new(AtomicBool::new(current_gpt_6_2_task_guidance)),
     };
     let mut items = vec![settings_item(
         "Automatic account selection",
@@ -236,6 +240,13 @@ fn codex_plus_plus_settings_params(
         weekly_supported,
     ));
     items.push(settings_item(
+        "GPT-6.2 task guidance",
+        "Adds guidance for GPT-6.2 Sol and Astra to understand the task, choose and check the approach, and verify the result.",
+        Arc::clone(&selection.gpt_6_2_task_guidance),
+        selection.clone(),
+        weekly_supported,
+    ));
+    items.push(settings_item(
         "Disable unnecessary updates to save tokens",
         "Report meaningful progress instead of timed status updates.",
         Arc::clone(&selection.quiet_updates),
@@ -284,6 +295,7 @@ fn settings_save_action(
         };
         tx.send(AppEvent::PersistCodexPlusPlusSettings {
             disable_unnecessary_updates: selection.quiet_updates.load(Ordering::Relaxed),
+            gpt_6_2_task_guidance: selection.gpt_6_2_task_guidance.load(Ordering::Relaxed),
             automatic_account_selection: automatic,
             weekly_usage_window_auto_start: save_weekly.then(|| {
                 if selection.weekly.load(Ordering::Relaxed) {

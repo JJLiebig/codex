@@ -72,6 +72,7 @@ async fn settings_reload_external_changes_and_expiry_opt_out_survives_save() {
         /*model_capacity_retry_mode*/ None,
         activity,
         /*disable_unnecessary_updates*/ true,
+        /*gpt_6_2_task_guidance*/ true,
     )
     .await;
     let config = crate::legacy_core::config::ConfigBuilder::default()
