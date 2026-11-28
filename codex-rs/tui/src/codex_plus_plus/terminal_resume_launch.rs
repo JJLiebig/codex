@@ -156,6 +156,8 @@ impl Launch {
                 | "sandbox_mode"
                 | "default_permissions"
                 | "service_tier" => continue,
+                "automatic_account_selection"
+                    if matches!(value.as_str(), Some("enabled" | "disabled")) => {}
                 "web_search" if matches!(value.as_str(), Some("disabled" | "cached" | "live")) => {}
                 "tui.resume_cwd" if matches!(value.as_str(), Some("current" | "session")) => {}
                 _ if value.is_bool()

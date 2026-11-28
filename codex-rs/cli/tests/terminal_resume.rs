@@ -138,6 +138,8 @@ trust_level = "trusted"
         r#"service_tier="flex""#,
         "-c",
         "features.shell_snapshot=false",
+        "-c",
+        r#"automatic_account_selection="disabled""#,
         "--cd",
         workspace.to_str().context("workspace path")?,
         "private launch prompt",
@@ -164,8 +166,16 @@ trust_level = "trusted"
         "restore".to_owned(),
         "--config".to_owned(),
         "features.shell_snapshot=false".to_owned(),
+        "--config".to_owned(),
+        r#"automatic_account_selection="disabled""#.to_owned(),
     ];
-    assert_eq!(recover_argv, expected);
+    let mut normalized_argv = recover_argv.clone();
+    for index in [0, 2] {
+        let path = Path::new(&recover_argv[index]);
+        ensure!(path.is_absolute());
+        normalized_argv[index] = path.canonicalize()?.display().to_string();
+    }
+    assert_eq!(normalized_argv, expected);
     assert_eq!(Path::new(&cwd).canonicalize()?, workspace);
     ensure!(terminal.output.contains(&format!(":session={id}\x1b\\")));
     let shell_output = tool_result
