@@ -2,6 +2,8 @@
 
 use std::collections::HashMap;
 use std::fs;
+#[cfg(target_os = "linux")]
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 use std::time::Duration;
 
@@ -46,6 +48,7 @@ cli_auth_credentials_store = "file"
 chatgpt_base_url = "{}/backend-api"
 analytics.enabled = false
 tui.disable_paste_burst = true
+tui.status_line = ["thread-name"]
 windows.sandbox = "unelevated"
 shell_environment_policy.ignore_default_excludes = true
 [model_providers.fixture]
@@ -61,7 +64,10 @@ trust_level = "trusted"
             serde_json::to_string(&workspace)?,
         ),
     )?;
-    fs::write(home.join("restore.config.toml"), "web_search = 'disabled'")?;
+    fs::write(
+        home.join("restore.config.toml"),
+        "web_search = 'disabled'\nmodel = 'gpt-5.4'\nmodel_reasoning_effort = 'medium'\n",
+    )?;
     // Dotenv must not reintroduce a pane credential after native startup has taken it.
     fs::write(
         home.join(".env"),
@@ -166,6 +172,20 @@ trust_level = "trusted"
     ensure!(shell_output.to_string().contains("private"));
     ensure!(!shell_output.to_string().contains("exposed"));
     ensure!(!terminal.output.contains(TOKEN));
+    #[cfg(target_os = "linux")]
+    if fs::metadata("/proc/self")?.uid() != 0 {
+        let pid = terminal
+            .output
+            .split_once("\x1b]7577;pid=")
+            .and_then(|(_, report)| report.split(':').next())
+            .context("resume process ID")?
+            .parse::<u32>()?;
+        ensure!(
+            fs::File::open(format!("/proc/{pid}/environ"))
+                .is_err_and(|err| err.kind() == std::io::ErrorKind::PermissionDenied),
+            "the pane credential must be inaccessible through the reporter's initial environment"
+        );
+    }
     let rollout = codex_rollout::find_thread_path_by_id_str(
         &home,
         &id.to_string(),
@@ -198,6 +218,11 @@ trust_level = "trusted"
                 })
                 && !screen.contains("ORIGINAL_PRIMARY")
         })
+        .await?;
+    assert_eq!(terminal.records(TOKEN)?.len(), 1);
+    terminal.submit("/rename Saved draft").await?;
+    terminal
+        .wait_for(|_, screen| screen.contains("Saved draft") && !screen.contains("/rename"))
         .await?;
     assert_eq!(terminal.records(TOKEN)?.len(), 1);
     terminal.submit("new primary prompt").await?;

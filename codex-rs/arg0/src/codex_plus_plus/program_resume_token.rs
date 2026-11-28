@@ -10,6 +10,12 @@ pub(super) fn capture() {
         let token = std::env::var(ENV_VAR).ok();
         // SAFETY: arg0 dispatch runs on the startup thread before any other threads exist.
         unsafe { std::env::remove_var(ENV_VAR) };
+        // Linux retains the initial environment in procfs after unsetenv. Some restricted
+        // tools share the host PID namespace, so protect this process before spawning any.
+        #[cfg(target_os = "linux")]
+        if token.is_some() && codex_process_hardening::disable_process_dumping().is_err() {
+            return None;
+        }
         token.filter(|token| {
             (22..=64).contains(&token.len())
                 && token

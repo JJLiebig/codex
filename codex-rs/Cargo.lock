@@ -2425,6 +2425,7 @@ dependencies = [
  "codex-exec-server",
  "codex-install-context",
  "codex-linux-sandbox",
+ "codex-process-hardening",
  "codex-sandboxing",
  "codex-utils-absolute-path",
  "codex-utils-cargo-bin",

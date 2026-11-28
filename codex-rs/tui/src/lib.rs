@@ -68,6 +68,7 @@ use codex_login::default_client::set_default_client_residency_requirement;
 use codex_login::enforce_login_restrictions;
 use codex_login::is_workload_identity_selected;
 pub use codex_plus_plus::choose_account_to_remove;
+pub use codex_plus_plus::terminal_resume::apply_home as apply_terminal_resume_home;
 use codex_protocol::ThreadId;
 use codex_protocol::auth::AuthMode;
 use codex_protocol::config_types::AltScreenMode;

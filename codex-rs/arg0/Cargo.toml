@@ -31,6 +31,9 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 codex-windows-sandbox = { workspace = true }
 pathdiff = { workspace = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+codex-process-hardening = { workspace = true }
+
 [dev-dependencies]
 codex-utils-cargo-bin = { workspace = true }
 pretty_assertions = { workspace = true }

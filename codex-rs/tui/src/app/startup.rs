@@ -716,10 +716,13 @@ impl App {
                 if let Some(history_mode) = target_session.history_mode {
                     app_server.remember_thread_history_mode(target_session.thread_id, history_mode);
                 }
-                let model_settings = config_persistence::resume_model_settings_for_overrides(
-                    &config,
-                    &harness_overrides,
-                );
+                let model_settings =
+                    crate::codex_plus_plus::terminal_resume::startup_model_settings(
+                        config_persistence::resume_model_settings_for_overrides(
+                            &config,
+                            &harness_overrides,
+                        ),
+                    );
                 let resumed = match startup_draft
                     .run_until(
                         tui,

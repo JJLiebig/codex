@@ -1,10 +1,48 @@
+use std::ffi::OsStr;
 use std::path::Path;
 use std::path::PathBuf;
+use std::sync::OnceLock;
+
+use codex_protocol::ThreadId;
 
 use crate::Cli;
+use crate::app_server_session::ResumeModelSettings;
+
+static RECOVERING: OnceLock<()> = OnceLock::new();
+
+pub fn apply_home() -> anyhow::Result<()> {
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() != Some(OsStr::new("--codex-resume-home")) {
+        return Ok(());
+    }
+    let home = args
+        .next()
+        .filter(|home| Path::new(home).is_absolute())
+        .ok_or_else(|| anyhow::anyhow!("Program resume requires an absolute Codex home"))?;
+    anyhow::ensure!(
+        args.next().as_deref() == Some(OsStr::new("resume"))
+            && args
+                .next()
+                .and_then(|id| ThreadId::from_string(id.to_str()?).ok())
+                .is_some(),
+        "Program resume requires an exact thread ID"
+    );
+    // SAFETY: the CLI calls this before arg0 loads dotenv or starts Tokio.
+    unsafe { std::env::set_var("CODEX_HOME", home) };
+    RECOVERING.get_or_init(|| ());
+    Ok(())
+}
+
+pub(crate) fn startup_model_settings(ordinary: ResumeModelSettings) -> ResumeModelSettings {
+    if RECOVERING.get().is_some() {
+        ResumeModelSettings::RestoreFromThread
+    } else {
+        ordinary
+    }
+}
 
 pub(super) struct Launch {
-    codex_home: PathBuf,
+    pub(super) sessions: PathBuf,
     pub(super) argv: Vec<String>,
     pub(super) options: Vec<String>,
 }
@@ -54,6 +92,7 @@ impl Launch {
             "resume".to_owned(),
         ];
         let mut options = Vec::new();
+        // Keep the account selection mode so the same picker and eligibility rules apply.
         for (selected, flag) in [
             (cli.auto_account, "--auto-account"),
             (cli.no_daemon, "--no-daemon"),
@@ -82,8 +121,6 @@ impl Launch {
                 | "approvals_reviewer"
                 | "sandbox_mode"
                 | "default_permissions"
-                | "sandbox_workspace_write"
-                | "sandbox_workspace_write.network_access"
                 | "service_tier" => continue,
                 "web_search" if matches!(value.as_str(), Some("disabled" | "cached" | "live")) => {}
                 "tui.resume_cwd" if matches!(value.as_str(), Some("current" | "session")) => {}
@@ -97,13 +134,9 @@ impl Launch {
             options.extend(["--config".to_owned(), format!("{key}={value}")]);
         }
         Some(Self {
-            codex_home,
+            sessions: codex_home.join(codex_rollout::SESSIONS_SUBDIR),
             argv,
             options,
         })
-    }
-
-    pub(super) fn owns_rollout(&self, path: &Path) -> bool {
-        path.starts_with(self.codex_home.join(codex_rollout::SESSIONS_SUBDIR))
     }
 }

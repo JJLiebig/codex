@@ -3,7 +3,6 @@
 pub(crate) mod history_upgrade;
 pub(crate) mod published_update;
 mod standalone_switch;
-pub(super) mod terminal_resume;
 mod upstream_switch;
 
 #[cfg(not(debug_assertions))]

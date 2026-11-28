@@ -128,9 +128,14 @@ class InstallCodexPlusPlusTest(unittest.TestCase):
                 "CODEX_PLUS_PLUS_SHIM_DIR",
                 (shim_dir / "codex.ps1").read_text(encoding="utf-8-sig"),
             )
-            command = (
-                "if not defined OSC7577_TOKEN exit /b 92&"
-                "echo %CODEX_PLUS_PLUS_SHIM_DIR%&echo argument with spaces&exit /b 23"
+            target_probe = root / "target-probe.cmd"
+            target_probe.write_text(
+                "@echo off\n"
+                f'if not "%OSC7577_TOKEN%"=="{PANE_TOKEN}" exit /b 92\n'
+                "echo %CODEX_PLUS_PLUS_SHIM_DIR%\n"
+                "echo %*\n"
+                "exit /b 23\n",
+                encoding="ascii",
             )
             pending = shim_dir / ".codex-plus-plus-pending.json"
             probe = root / "pending.ps1"
@@ -156,7 +161,14 @@ class InstallCodexPlusPlusTest(unittest.TestCase):
                         encoding="utf-8",
                     )
                     launched = subprocess.run(
-                        [*launcher, "/d", "/s", "/c", command],
+                        [
+                            *launcher,
+                            "/d",
+                            "/s",
+                            "/c",
+                            f"{target_probe.name} argument with spaces",
+                        ],
+                        cwd=root,
                         capture_output=True,
                         check=False,
                         text=True,
