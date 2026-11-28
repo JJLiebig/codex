@@ -25,6 +25,8 @@ on:
       - 'codex-rs/codex-mcp/**'
       - 'codex-rs/config/**'
       - 'codex-rs/core/**'
+      - 'codex-rs/features/src/feature_configs.rs'
+      - 'codex-rs/features/src/lib.rs'
       - 'codex-rs/install-context/**'
       - 'codex-rs/linux-sandbox/**'
       - 'codex-rs/login/**'
@@ -129,15 +131,20 @@ jobs:
         # On Windows, rustc fixtures need MSVC's link.exe on the native shell's PATH.
         run: >-
           just test --locked --cargo-profile ci-test --lib --bin codex
-          -p codex-app-server -p codex-cli -p codex-core -p codex-install-context
+          -p codex-app-server -p codex-cli -p codex-config -p codex-core -p codex-install-context
           -p codex-login -p codex-mcp -p codex-model-provider -p codex-protocol
           -p codex-shell-command -p codex-state -p codex-tui -p codex-utils-pty
           ${{ runner.os == 'Windows' && '-p codex-windows-sandbox' || '' }}
           -E 'test(codex_plus_plus::)
           | test(thread_status::completion_wait::tests::)
+          | test(=doctor::updates::tests::update_action_labels_use_the_planned_distribution)
           | test(=doctor::updates::tests::windows_store_updates_compare_all_four_production_build_components)
           | test(=doctor::updates::tests::update_details_use_the_shared_fork_release_cache)
           | test(login::device_code_login::tests::)
+          | test(=config_toml::tests::weekly_auto_start_defaults_enabled_and_accepts_override)
+          | test(=config_toml::tests::auto_redeem_accepts_independent_triggers_and_rejects_zero_thresholds)
+          | test(=config_toml::tests::model_capacity_retry_defaults_bounded_and_accepts_override)
+          | test(=config_toml::tests::tool_activity_defaults_full_and_parses_compact)
           | test(guardian::action_format::tests::)
           | test(session::config_lock::tests::)
           | test(=session::turn::tests::failed_realtime_receipt_preserves_sibling_input_before_sampling)
@@ -155,11 +162,13 @@ jobs:
           | test(app::tests::usage_reset_resume_tests::)
           | test(account_usage::report::tests::)
           | test(=account_usage::tests::credit_fallback_requires_usable_codex_credits)
+          | test(=chatwidget::tests::program_status::unanswered_async_question_blocks_while_turn_runs_until_answered)
           | test(chatwidget::tests::terminal_program_status::)
           | test(=chatwidget::tests::status_and_layout::background_completion_wait_restores_working_until_completion_or_cancel)
           | test(terminal_program_status::herdr_session::tests::)
           | test(updates_cache::tests::)
           | test(=tests::windows_tests::pipe_processes_do_not_inherit_parent_console)
+          | test(=unified_exec::tests::current_user_runner_isolates_console_and_preserves_descendants)
           | test(unified_exec::tests::current_user_lifecycle_tests::)'
 
       - name: Test Linux sandbox process cleanup
