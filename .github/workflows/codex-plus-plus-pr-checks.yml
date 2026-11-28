@@ -8,7 +8,9 @@ on:
       - '.github/actions/setup-ci/**'
       - '.github/actions/setup-msvc-env/**'
       - '.github/actions/setup-rusty-v8/**'
+      - '.github/scripts/run_bazel.py'
       - '.github/scripts/rusty_v8_bazel.py'
+      - '.github/scripts/rusty_v8_module_bazel.py'
       - '.github/scripts/setup-dev-drive.ps1'
       - 'third_party/v8/*release_manifests.sha256'
       - 'justfile'
@@ -92,6 +94,7 @@ jobs:
       - name: Report the commit under test
         run: git rev-parse HEAD
 
+      # The Windows shim fixtures compare paths and need a temp directory without an 8.3 alias.
       - uses: ./.github/actions/setup-ci
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
@@ -101,10 +104,14 @@ jobs:
           node-version: '26.12.1'
           package-manager-cache: false
 
-      - name: Test the installer and release acquisition
-        # Windows fixtures invoke PowerShell 5.1 and need its own archive module.
-        shell: bash
-        run: python -m unittest discover -v -s scripts/install -p 'test_install_codex_plus_plus*.py'
+      - name: Test the Windows installer
+        if: runner.os == 'Windows'
+        # cmd keeps the native tar and PowerShell 5.1 module search paths.
+        shell: cmd
+        run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus.py
+      - name: Test the Unix installer and release acquisition
+        if: runner.os != 'Windows'
+        run: python -m unittest discover -v -s scripts/install -p "test_install_codex_plus_plus*.py"
       - name: Test npm launchers
         run: node --test codex-cli/tests/codex_plus_plus/launcher.test.js codex-cli/tests/codex_plus_plus/windows_upstream_launcher.test.js
 
@@ -125,6 +132,27 @@ jobs:
       - uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
+
+      - name: Build the Windows command runner for lifecycle tests
+        if: runner.os == 'Windows'
+        working-directory: codex-rs
+        run: cargo build --locked --profile ci-test -p codex-windows-sandbox --bin codex-command-runner
+
+      # Exact-head dispatch can select a revision from before terminal resume was added.
+      - name: Test saved conversation recovery in the CLI and TUI
+        if: hashFiles('codex-rs/cli/src/codex_plus_plus/terminal_resume.rs') != ''
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-cli --test terminal_resume
+      - name: Test npm wrapper credentials and signal forwarding
+        if: runner.os != 'Windows' && hashFiles('codex-rs/cli/src/codex_plus_plus/terminal_resume.rs') != ''
+        env:
+          CODEX_TEST_BINARY: ${{ env.CARGO_TARGET_DIR }}/ci-test/codex
+        run: node --test codex-cli/tests/exit-status.test.mjs
+
+      - name: Test Windows release acquisition
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus_latest.py
 
       - name: Test fork-owned Rust modules
         shell: bash
@@ -156,6 +184,8 @@ jobs:
             | test(app::prompt_cache::tests::)
             | test(app::tests::usage_reset_resume_tests::)
             | test(account_usage::report::tests::)
+            | test(=account_usage::tests::credit_fallback_requires_usable_codex_credits)
+            | test(chatwidget::tests::terminal_program_status::)
             | test(terminal_program_status::herdr_session::tests::)
             | test(updates_cache::tests::)
             | test(unified_exec::tests::current_user_lifecycle_tests::)'
@@ -169,14 +199,9 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-cli --test history_upgrade
-
-      # Exact-head dispatch can select a revision from before terminal resume was added.
-      - name: Test saved conversation recovery in the CLI and TUI
-        if: hashFiles('codex-rs/cli/src/codex_plus_plus/terminal_resume.rs') != ''
+      - name: Test fork background completion and server retries
         working-directory: codex-rs
-        run: just test --locked --cargo-profile ci-test -p codex-cli --test terminal_resume
-      - name: Test npm wrapper credentials and signal forwarding
-        if: runner.os != 'Windows' && hashFiles('codex-rs/cli/src/codex_plus_plus/terminal_resume.rs') != ''
-        env:
-          CODEX_TEST_BINARY: ${{ env.CARGO_TARGET_DIR }}/ci-test/codex
-        run: node --test codex-cli/tests/exit-status.test.mjs
+        run: just test --locked --cargo-profile ci-test -p codex-core --test all -E 'test(suite::background_completion::) | test(suite::server_overloaded::)'
+      - name: Test active-model guidance in app-server requests
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-app-server --test prompt_prefix -E 'test(task_guidance_tests::)'
