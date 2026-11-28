@@ -1,4 +1,5 @@
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::ContentItemKind;
 use codex_protocol::models::ResponseItem;
 
 use crate::context::BaseInstructionsFragment;
@@ -68,42 +69,45 @@ pub(crate) fn adapt_input(
         if role != "developer" {
             continue;
         }
-        let [ContentItem::InputText { text }] = content.as_mut_slice() else {
-            continue;
-        };
-        let kind = internal_chat_message_metadata_passthrough
+        let kinds = internal_chat_message_metadata_passthrough
             .as_ref()
-            .and_then(|metadata| metadata.content_item_kinds.as_deref())
-            .and_then(|kinds| match kinds {
-                [kind] => Some(kind.as_str()),
-                _ => None,
-            });
-        match kind {
-            Some(BaseInstructionsFragment::KIND) => {
-                if !text.is_empty() {
-                    *text = instructions(text);
-                }
-            }
-            Some(MODEL_INSTRUCTIONS_KIND) => {
-                if text.starts_with(MODEL_INSTRUCTIONS_OPEN)
-                    && text.ends_with(MODEL_INSTRUCTIONS_SUFFIX)
-                    && let Some(prefix_start) = text.find(MODEL_INSTRUCTIONS_PREFIX)
-                {
-                    let body_start = prefix_start + MODEL_INSTRUCTIONS_PREFIX.len();
-                    let body_end = text.len() - MODEL_INSTRUCTIONS_SUFFIX.len();
-                    let body = &text[body_start..body_end];
-                    if !body.is_empty() {
-                        let adapted = instructions(body);
-                        *text = format!(
-                            "{}{adapted}{MODEL_INSTRUCTIONS_SUFFIX}",
-                            &text[..body_start]
-                        );
+            .and_then(|metadata| metadata.content_item_kinds.as_deref());
+        for (index, part) in content.iter_mut().enumerate() {
+            let ContentItem::InputText { text } = part else {
+                continue;
+            };
+            let kind = kinds
+                .and_then(|kinds| kinds.get(index))
+                .map(ContentItemKind::as_str);
+            match kind {
+                Some(BaseInstructionsFragment::KIND) => {
+                    if !text.is_empty() {
+                        *text = instructions(text);
                     }
                 }
+                Some(MODEL_INSTRUCTIONS_KIND) => {
+                    if text.starts_with(MODEL_INSTRUCTIONS_OPEN)
+                        && text.ends_with(MODEL_INSTRUCTIONS_SUFFIX)
+                        && let Some(prefix_start) = text.find(MODEL_INSTRUCTIONS_PREFIX)
+                    {
+                        let body_start = prefix_start + MODEL_INSTRUCTIONS_PREFIX.len();
+                        let body_end = text.len() - MODEL_INSTRUCTIONS_SUFFIX.len();
+                        let body = &text[body_start..body_end];
+                        if !body.is_empty() {
+                            let adapted = instructions(body);
+                            *text = format!(
+                                "{}{adapted}{MODEL_INSTRUCTIONS_SUFFIX}",
+                                &text[..body_start]
+                            );
+                        }
+                    }
+                }
+                Some(MODEL_SWITCH_KIND) => adapt_model_switch_text(text),
+                None if ModelSwitchInstructions::matches_text(text) => {
+                    adapt_model_switch_text(text);
+                }
+                _ => {}
             }
-            Some(MODEL_SWITCH_KIND) => adapt_model_switch_text(text),
-            None if ModelSwitchInstructions::matches_text(text) => adapt_model_switch_text(text),
-            _ => {}
         }
     }
 

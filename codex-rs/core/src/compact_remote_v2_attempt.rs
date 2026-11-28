@@ -180,7 +180,7 @@ pub(super) async fn run_remote_compact_v2_attempt(
             .any(|item| matches!(item, ResponseItem::AdditionalTools { .. }));
     let tool_router = &step_context.tool_router;
     let mut prompt = Arc::new(Prompt {
-        input,
+        input: crate::codex_plus_plus::quiet_updates::adapt_input(input, step_context),
         tools: if tools_in_history {
             tool_router
                 .model_visible_specs()

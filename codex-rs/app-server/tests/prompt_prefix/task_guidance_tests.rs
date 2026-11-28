@@ -48,7 +48,9 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
         .await?;
     let standard = app
         .start_thread(ThreadStartParams {
+            model: Some("gpt-6.1-sol".into()),
             config: Some([("features.incremental_tools".into(), json!(false))].into()),
+            developer_instructions: Some("Keep sibling developer guidance.".into()),
             ..Default::default()
         })
         .await?
@@ -145,13 +147,22 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
                 "this disclosure takes precedence over brevity and writing-style preferences."
             ));
         }
-        if thread_id == &incremental.id || model == "openai.gpt-6.2-sol" {
+        if thread_id == &incremental.id
+            || (thread_id == &standard.id && matches!(model, "gpt-6.2-sol" | "openai.gpt-6.2-sol"))
+        {
             let developer_texts: Vec<_> = input
                 .iter()
                 .filter(|item| item["role"] == "developer")
-                .filter_map(|item| item["content"][0]["text"].as_str())
+                .flat_map(|item| item["content"].as_array().into_iter().flatten())
+                .filter_map(|part| part["text"].as_str())
                 .collect();
             let combined = developer_texts.join("\n");
+            if thread_id == &standard.id {
+                assert!(
+                    combined.contains("Keep sibling developer guidance."),
+                    "sibling developer instructions should be preserved for {model}"
+                );
+            }
             assert!(
                 !combined.contains(
                     "Prefer sending consistent, frequent communication to the user during your turn."
