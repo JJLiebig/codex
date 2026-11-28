@@ -74,24 +74,46 @@ impl Launch {
         let codex_home = codex_utils_home_dir::find_codex_home()
             .ok()?
             .into_path_buf();
-        let managed_releases = codex_home.join("packages/codex-plus-plus/releases");
-        let executable = if let Ok(releases) = managed_releases.canonicalize()
-            && let Ok(relative) = executable.strip_prefix(releases)
-        {
-            // The current generation can be pruned. Resume through the same installation's shim.
-            let dir = PathBuf::from(std::env::var_os("CODEX_PLUS_PLUS_SHIM_DIR")?);
-            let generation = relative.components().nth(1)?.as_os_str();
-            let shim = dir.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
-            if !dir.is_absolute()
-                || !dir
-                    .join(".codex-plus-plus-leases")
-                    .join(generation)
-                    .is_dir()
-                || !shim.is_file()
-            {
+        let managed_shim = std::env::var_os("CODEX_PLUS_PLUS_SHIM_DIR").and_then(|dir| {
+            let dir = PathBuf::from(dir);
+            if !dir.is_absolute() {
                 return None;
             }
+            let generation = executable.ancestors().nth(2)?.file_name()?;
+            // Unix exec keeps the PID recorded by the shim, and Windows exposes the
+            // selected bin directory through a junction. Neither uses the session home.
+            #[cfg(unix)]
+            let matches_launch = dir
+                .join(".codex-plus-plus-leases")
+                .join(generation)
+                .join(format!("sh.{}", std::process::id()))
+                .is_file();
+            #[cfg(windows)]
+            let matches_launch = dir
+                .join(".codex-plus-plus-generations")
+                .join(generation)
+                .join("codex.exe")
+                .canonicalize()
+                .is_ok_and(|path| path == executable);
+            #[cfg(not(any(unix, windows)))]
+            let matches_launch = false;
+            let shim = dir.join(if cfg!(windows) { "codex.cmd" } else { "codex" });
+            (matches_launch && shim.is_file()).then_some(shim)
+        });
+        let release_store = Path::new("packages/codex-plus-plus/releases");
+        let executable = if let Some(shim) = managed_shim {
             shim
+        } else if executable
+            .ancestors()
+            .nth(4)
+            .is_some_and(|path| path.ends_with(release_store))
+            || codex_home
+                .join(release_store)
+                .canonicalize()
+                .is_ok_and(|releases| executable.starts_with(releases))
+        {
+            // Release generations can be pruned. Recovery needs a verified stable shim.
+            return None;
         } else {
             executable.to_path_buf()
         };
