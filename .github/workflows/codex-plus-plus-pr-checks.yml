@@ -31,6 +31,7 @@ on:
       - 'codex-rs/login/**'
       - 'codex-rs/model-provider/**'
       - 'codex-rs/protocol/**'
+      - 'codex-rs/sandboxing/src/spawn.rs'
       - 'codex-rs/shell-command/**'
       - 'codex-rs/state/**'
       - 'codex-rs/tui/**'
@@ -209,6 +210,7 @@ jobs:
             | test(=chatwidget::tests::status_and_layout::background_completion_wait_restores_working_until_completion_or_cancel)
             | test(terminal_program_status::herdr_session::tests::)
             | test(updates_cache::tests::)
+            | test(=tests::windows_tests::pipe_processes_do_not_inherit_parent_console)
             | test(unified_exec::tests::current_user_lifecycle_tests::)'
           just test --locked --cargo-profile ci-test "${packages[@]}" --lib --bin codex -E "$fork_tests"
 
