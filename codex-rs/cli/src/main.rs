@@ -131,6 +131,9 @@ use codex_terminal_detection::TerminalName;
     override_usage = "codex [OPTIONS] [PROMPT]\n       codex [OPTIONS] <COMMAND> [ARGS]"
 )]
 struct MultitoolCli {
+    #[arg(long, hide = true)]
+    codex_resume_home: Option<PathBuf>,
+
     #[clap(flatten)]
     pub config_overrides: CliConfigOverrides,
 
@@ -1078,6 +1081,7 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
+    codex_plus_plus::terminal_resume::apply_home()?;
     codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
@@ -1105,6 +1109,7 @@ async fn dispatch_cli(
     remote_control_disabled: bool,
 ) -> anyhow::Result<Option<impl Future<Output = anyhow::Result<()>>>> {
     let MultitoolCli {
+        codex_resume_home: _,
         config_overrides: mut root_config_overrides,
         feature_toggles,
         remote,
@@ -3019,8 +3024,7 @@ enabled = true
             mut interactive,
             config_overrides: mut root_overrides,
             subcommand,
-            feature_toggles: _,
-            remote: _,
+            ..
         } = cli;
         interactive
             .shared
@@ -3056,8 +3060,7 @@ enabled = true
             mut interactive,
             config_overrides: mut root_overrides,
             subcommand,
-            feature_toggles: _,
-            remote: _,
+            ..
         } = cli;
         interactive
             .shared
@@ -3100,8 +3103,7 @@ enabled = true
             interactive,
             config_overrides: root_overrides,
             subcommand,
-            feature_toggles: _,
-            remote: _,
+            ..
         } = cli;
 
         let Subcommand::Archive(SessionArchiveCommand {

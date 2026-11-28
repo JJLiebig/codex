@@ -574,6 +574,11 @@ impl App {
                 );
                 self.primary_session_configured = Some(started.session.clone());
                 crate::terminal_program_status::set_primary_session(Some(&started.session));
+                crate::codex_plus_plus::terminal_resume::update(
+                    &self.app_server_target,
+                    &started.session,
+                )
+                .await;
             }
             if started.blocks_direct_input {
                 self.agent_navigation.mark_parent_owned(id);
@@ -621,6 +626,7 @@ impl App {
             self.active_thread_rx = None;
             self.primary_thread_id = None;
             crate::terminal_program_status::set_primary_session(/*session*/ None);
+            crate::codex_plus_plus::terminal_resume::clear();
             self.primary_session_configured = None;
             let init = self.chatwidget_init_for_forked_or_resumed_thread(
                 tui,

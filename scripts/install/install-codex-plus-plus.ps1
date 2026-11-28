@@ -407,16 +407,19 @@ if ($ShimDir.Equals($releasesRoot, [System.StringComparison]::OrdinalIgnoreCase)
 $cmdContent = @"
 @echo off
 setlocal DisableDelayedExpansion
+set "CODEX_PLUS_PLUS_IDENTITY_FILE=%~dp0.codex-plus-plus-leases\.identity.%RANDOM%%RANDOM%%RANDOM%"
+setlocal
+set "OSC7577_TOKEN="
 if exist "%~dp0.codex-plus-plus-pending.json" (
   set "CODEX_PLUS_PLUS_FINISH_ONLY=1"
   "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0codex.ps1"
   if errorlevel 1 exit /b 1
   set "CODEX_PLUS_PLUS_FINISH_ONLY="
 )
-for %%I in ("%~dp0.") do set "CODEX_PLUS_PLUS_SHIM_DIR=%%~fI"
-set "CODEX_PLUS_PLUS_IDENTITY_FILE=%~dp0.codex-plus-plus-leases\.identity.%RANDOM%%RANDOM%%RANDOM%"
 set "CODEX_PLUS_PLUS_PARENT_IDENTITY=1"
 "%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -InputFormat None -ExecutionPolicy Bypass -File "%~dp0codex.ps1" >"%CODEX_PLUS_PLUS_IDENTITY_FILE%"
+endlocal
+for %%I in ("%~dp0.") do set "CODEX_PLUS_PLUS_SHIM_DIR=%%~fI"
 set "CODEX_PLUS_PLUS_PARENT_IDENTITY="
 set "CODEX_PLUS_PLUS_IDENTITY="
 set /p "CODEX_PLUS_PLUS_IDENTITY="<"%CODEX_PLUS_PLUS_IDENTITY_FILE%"
@@ -531,12 +534,19 @@ if (`$env:CODEX_PLUS_PLUS_PARENT_IDENTITY -ne '1') {
     `$pendingPath = Join-Path `$PSScriptRoot '.codex-plus-plus-pending.json'
     if (Test-Path -LiteralPath `$pendingPath) {
         `$pending = Get-Content -LiteralPath `$pendingPath -Raw | ConvertFrom-Json
-        & (Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File `$pending.Installer -ShimDir `$PSScriptRoot -ResumeUpgrade
+        `$resumeToken = `$env:OSC7577_TOKEN
+        try {
+            `$env:OSC7577_TOKEN = `$null
+            & (Join-Path `$env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -ExecutionPolicy Bypass -File `$pending.Installer -ShimDir `$PSScriptRoot -ResumeUpgrade
+        } finally {
+            `$env:OSC7577_TOKEN = `$resumeToken
+        }
         if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }
     }
     if (`$env:CODEX_PLUS_PLUS_FINISH_ONLY -eq '1') { exit 0 }
 }
 if (`$env:CODEX_PLUS_PLUS_PARENT_IDENTITY -eq '1') {
+    `$env:OSC7577_TOKEN = `$null
     Add-Type -TypeDefinition @'
 using System;
 using System.Diagnostics;

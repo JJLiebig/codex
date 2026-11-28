@@ -1169,6 +1169,7 @@ impl App {
         self.active_thread_rx = None;
         self.primary_thread_id = None;
         crate::terminal_program_status::set_primary_session(/*session*/ None);
+        crate::codex_plus_plus::terminal_resume::clear();
         self.last_subagent_backfill_attempt = None;
         self.primary_session_configured = None;
         self.pending_primary_events.clear();

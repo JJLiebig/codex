@@ -1149,6 +1149,9 @@ pub async fn run_main(
     loader_overrides: LoaderOverrides,
     explicit_remote_endpoint: Option<RemoteAppServerEndpoint>,
 ) -> std::io::Result<AppExitInfo> {
+    if explicit_remote_endpoint.is_none() {
+        codex_plus_plus::terminal_resume::initialize(&cli);
+    }
     system_motion::initialize().await;
     startup_recovery::scope(async move {
         // Startup retains a large future for the whole session. Keep it off callers' stacks,

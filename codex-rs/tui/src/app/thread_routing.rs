@@ -1217,6 +1217,16 @@ impl App {
                 });
             }
         }
+        if self.primary_thread_id == Some(thread_id)
+            && let Some(session) = &self.primary_session_configured
+        {
+            crate::codex_plus_plus::terminal_resume::observe(
+                &self.app_server_target,
+                session,
+                &notification,
+            )
+            .await;
+        }
         let inferred_session = if let ServerNotification::ThreadStarted(started) = &notification
             && self.primary_session_configured.is_some()
         {
@@ -1634,6 +1644,7 @@ impl App {
         }
         self.primary_thread_id = Some(thread_id);
         crate::terminal_program_status::set_primary_session(Some(&session));
+        crate::codex_plus_plus::terminal_resume::update(&self.app_server_target, &session).await;
         if self.local_settings.workspace_enabled(&self.config)
             && matches!(
                 presentation,

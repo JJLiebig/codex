@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
 import tempfile
@@ -11,6 +13,7 @@ import unittest
 
 INSTALL_SCRIPT = Path(__file__).with_name("install-codex-plus-plus.ps1")
 SHELL_INSTALL_SCRIPT = Path(__file__).with_name("install-codex-plus-plus.sh")
+PANE_TOKEN = "dummy-terminal-resume-token"
 
 
 @unittest.skipUnless(os.name == "nt", "Windows installer test")
@@ -126,7 +129,16 @@ class InstallCodexPlusPlusTest(unittest.TestCase):
                 (shim_dir / "codex.ps1").read_text(encoding="utf-8-sig"),
             )
             command = (
+                "if not defined OSC7577_TOKEN exit /b 92&"
                 "echo %CODEX_PLUS_PLUS_SHIM_DIR%&echo argument with spaces&exit /b 23"
+            )
+            pending = shim_dir / ".codex-plus-plus-pending.json"
+            probe = root / "pending.ps1"
+            probe.write_text(
+                "param($ShimDir, [switch]$ResumeUpgrade)\n"
+                "if (Test-Path Env:OSC7577_TOKEN) { exit 91 }\n"
+                "Remove-Item -LiteralPath (Join-Path $ShimDir '.codex-plus-plus-pending.json')\n",
+                encoding="utf-8",
             )
             launchers = (
                 [str(shim_dir / "codex.cmd")],
@@ -139,11 +151,16 @@ class InstallCodexPlusPlusTest(unittest.TestCase):
             )
             for launcher in launchers:
                 with self.subTest(launcher=launcher[0]):
+                    pending.write_text(
+                        json.dumps({"Installer": str(probe)}),
+                        encoding="utf-8",
+                    )
                     launched = subprocess.run(
                         [*launcher, "/d", "/s", "/c", command],
                         capture_output=True,
                         check=False,
                         text=True,
+                        env={**os.environ, "OSC7577_TOKEN": PANE_TOKEN},
                     )
                     self.assertEqual(launched.returncode, 23, launched.stderr)
                     self.assertEqual(
@@ -295,11 +312,28 @@ class InstallCodexPlusPlusShellTest(unittest.TestCase):
                 "CODEX_PLUS_PLUS_SHIM_DIR",
                 shim.read_text(encoding="utf-8"),
             )
+            helpers = root / "helpers"
+            helpers.mkdir()
+            ps = shutil.which("ps")
+            assert ps is not None
+            helper = helpers / "ps"
+            helper.write_text(
+                "#!/bin/sh\n"
+                '[ "${OSC7577_TOKEN+x}" != x ] || exit 91\n'
+                f'exec {shlex.quote(ps)} "$@"\n',
+                encoding="utf-8",
+            )
+            helper.chmod(0o755)
             launched = subprocess.run(
                 [str(alias), "provenance", "argument with spaces", "23"],
                 capture_output=True,
                 check=False,
                 text=True,
+                env={
+                    **os.environ,
+                    "PATH": f"{helpers}{os.pathsep}{os.environ.get('PATH', os.defpath)}",
+                    "OSC7577_TOKEN": PANE_TOKEN,
+                },
             )
 
             self.assertEqual(launched.returncode, 23, launched.stderr)
@@ -472,6 +506,7 @@ def create_posix_package(package_dir: Path) -> Path:
     target.write_text(
         "#!/bin/sh\n"
         'if [ "${1-}" = provenance ]; then\n'
+        f'  [ "${{OSC7577_TOKEN-}}" = {PANE_TOKEN} ] || exit 92\n'
         '  printf \'%s\\n\' "$CODEX_PLUS_PLUS_SHIM_DIR" "${2-}"\n'
         '  exit "${3-}"\n'
         "fi\n"

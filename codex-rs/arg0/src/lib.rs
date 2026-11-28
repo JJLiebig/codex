@@ -22,6 +22,9 @@ use codex_windows_sandbox::CODEX_WINDOWS_SANDBOX_ARG1;
 use std::os::unix::fs::symlink;
 use tempfile::TempDir;
 
+#[path = "codex_plus_plus/program_resume_token.rs"]
+pub mod program_resume_token;
+
 const APPLY_PATCH_ARG0: &str = "apply_patch";
 const MISSPELLED_APPLY_PATCH_ARG0: &str = "applypatch";
 const LOCK_FILENAME: &str = ".lock";
@@ -63,6 +66,7 @@ impl Arg0PathEntryGuard {
 }
 
 pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
+    program_resume_token::capture();
     #[cfg(target_os = "linux")]
     codex_utils_pty::init_spawn_helper(std::env::args_os());
     // Determine if we were invoked via the special alias.
@@ -291,8 +295,7 @@ const ILLEGAL_ENV_VAR_PREFIX: &str = "CODEX_";
 
 /// Load env vars from ~/.codex/.env.
 ///
-/// Security: Do not allow `.env` files to create or modify any variables
-/// with names starting with `CODEX_`.
+/// Security: `.env` files cannot set `CODEX_` variables or the pane's resume credential.
 fn load_dotenv() {
     if let Ok(codex_home) = find_codex_home()
         && let dotenv_path = codex_home.join(".env")
@@ -303,7 +306,7 @@ fn load_dotenv() {
     }
 }
 
-/// Helper to set vars from a dotenvy iterator while filtering out `CODEX_` keys.
+/// Set vars from a dotenvy iterator while filtering process-owned keys.
 fn set_filtered<I>(iter: I)
 where
     I: IntoIterator<Item = Result<(String, String), dotenvy::Error>>,
@@ -315,7 +318,9 @@ where
             Err(dotenvy::Error::Io(err)) if err.kind() != std::io::ErrorKind::InvalidData => break,
             Err(_) => continue,
         };
-        if !key.to_ascii_uppercase().starts_with(ILLEGAL_ENV_VAR_PREFIX) {
+        if !key.to_ascii_uppercase().starts_with(ILLEGAL_ENV_VAR_PREFIX)
+            && !key.eq_ignore_ascii_case(program_resume_token::ENV_VAR)
+        {
             // It is safe to call set_var() because our process is
             // single-threaded at this point in its execution.
             unsafe { std::env::set_var(&key, &value) };

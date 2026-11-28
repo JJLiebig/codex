@@ -13,6 +13,7 @@ pub(crate) mod prompt_cache;
 mod release_status;
 pub(crate) mod runtime_version;
 mod startup_accounts;
+pub(crate) mod terminal_resume;
 mod weekly_window_scheduler;
 mod welcome;
 

@@ -281,6 +281,11 @@ quoted_leases_root=$(shell_quote "$leases_root")
   echo "releases_dir=$quoted_releases_dir"
   echo "leases_root=$quoted_leases_root"
   cat <<'EOF'
+# Pass the pane credential to Codex only, after choosing the generation.
+set +x
+unset codex_plus_plus_resume_token
+codex_plus_plus_resume_token=${OSC7577_TOKEN-}
+unset OSC7577_TOKEN
 while :; do
   generation=$(sed -n '1p' "$current_path" 2>/dev/null) || exit 1
   lease_dir="$leases_root/$generation"
@@ -296,6 +301,9 @@ while :; do
   fi
   break
 done
+if [ -n "$codex_plus_plus_resume_token" ]; then
+  export OSC7577_TOKEN="$codex_plus_plus_resume_token"
+fi
 exec "$releases_dir/$generation/bin/codex" "$@"
 EOF
 } > "$shim_tmp"

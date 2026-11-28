@@ -14,6 +14,10 @@ import {
 } from "./launcher.js";
 import { stageWindowsUpstreamExecutable } from "./codex_plus_plus/windows_upstream_launcher.js";
 
+// Hand the pane credential to native Codex without keeping it in Node's environment.
+const resumeToken = process.env.OSC7577_TOKEN;
+delete process.env.OSC7577_TOKEN;
+
 // __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -170,6 +174,9 @@ const env = {
   ...process.env,
   CODEX_MANAGED_PACKAGE_ROOT: codexPackageRoot,
 };
+if (resumeToken !== undefined) {
+  env.OSC7577_TOKEN = resumeToken;
+}
 delete env.CODEX_MANAGED_BY_NPM;
 delete env.CODEX_MANAGED_BY_BUN;
 delete env.CODEX_MANAGED_BY_PNPM;

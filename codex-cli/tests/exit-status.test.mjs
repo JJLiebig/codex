@@ -21,11 +21,23 @@ async function installWrapper(directory, executable) {
   const bin = path.join(directory, "vendor", target, "bin");
   await mkdir(bin, { recursive: true });
   await symlink(executable, path.join(bin, "codex"));
-  await mkdir(path.join(directory, "bin"));
-  await writeFile(path.join(directory, "package.json"), '{"type":"module"}');
-  const wrapper = path.join(directory, "bin", "codex.js");
-  await copyFile(new URL("../bin/codex.js", import.meta.url), wrapper);
-  return wrapper;
+  const scripts = path.join(directory, "bin");
+  await mkdir(path.join(scripts, "codex_plus_plus"), { recursive: true });
+  await writeFile(
+    path.join(directory, "package.json"),
+    '{"name":"@openai/codex","type":"module"}',
+  );
+  for (const name of [
+    "codex.js",
+    "launcher.js",
+    "codex_plus_plus/windows_upstream_launcher.js",
+  ]) {
+    await copyFile(
+      new URL(`../bin/${name}`, import.meta.url),
+      path.join(scripts, name),
+    );
+  }
+  return path.join(scripts, "codex.js");
 }
 
 test(
@@ -36,20 +48,32 @@ test(
     try {
       const wrapper = await installWrapper(directory, process.execPath);
       const preload = path.join(directory, "fallback.cjs");
-      await writeFile(preload, "process.execve = undefined;");
-      const child = spawn(process.execPath, [
-        "--require",
+      const token = "dummy-terminal-resume-token";
+      await writeFile(
         preload,
-        wrapper,
-        "-e",
-        `let signals = 0;
+        `process.execve = undefined;
+         process.on("exit", () => {
+           if (process.env.OSC7577_TOKEN) process.exitCode = 91;
+         });`,
+      );
+      const child = spawn(
+        process.execPath,
+        [
+          "--require",
+          preload,
+          wrapper,
+          "-e",
+          `if (process.env.OSC7577_TOKEN !== ${JSON.stringify(token)}) process.exit(92);
+         let signals = 0;
          process.on("SIGTERM", () => {
            if (++signals === 2) process.exit(17);
            console.log("received first SIGTERM");
          });
          setTimeout(() => process.exit(1), 5000);
          console.log("ready");`,
-      ]);
+        ],
+        { env: { ...process.env, OSC7577_TOKEN: token } },
+      );
       const acknowledgements = createInterface({ input: child.stdout });
       acknowledgements.on("line", () => child.kill("SIGTERM"));
       assert.deepEqual(await once(child, "exit"), [17, null]);

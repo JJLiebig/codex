@@ -1424,6 +1424,7 @@ See the Codex keymap documentation for supported actions and examples."
         backends.settings = backend_settings;
 
         let mut parked_side_completions = HashMap::<_, Vec<AppEvent>>::new();
+        let mut terminal_input_closed = false;
         let exit_reason_result = if let Some(exit_reason) = pre_loop_exit_reason {
             Ok(exit_reason)
         } else {
@@ -1768,6 +1769,7 @@ See the Codex keymap documentation for supported actions and examples."
                             Err(err) => break Err(err),
                             }
                         } else {
+                            terminal_input_closed = true;
                             tracing::warn!("terminal input stream closed; shutting down active thread");
                             app.handle_exit_mode(backends.session_at_mut(displayed_session), ExitMode::ShutdownFirst).await
                         }
@@ -1950,6 +1952,14 @@ See the Codex keymap documentation for supported actions and examples."
                 }
             }
         };
+        if !terminal_input_closed
+            && matches!(
+                exit_reason_result,
+                Ok(ExitReason::UserRequested | ExitReason::TurnInterrupted)
+            )
+        {
+            crate::codex_plus_plus::terminal_resume::clear();
+        }
         // Let the pending terminal poll unwind while the app server shuts down.
         tui.pause_events();
         // Skip pending inference on exit. Give the fallback writes a bounded chance
