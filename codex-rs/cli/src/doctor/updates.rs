@@ -23,7 +23,7 @@ use codex_install_context::codex_plus_plus::is_newer;
 use codex_tui::UpdateAction;
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use http::Method;
-#[cfg(any(target_os = "macos", target_os = "windows"))]
+#[cfg(any(test, target_os = "macos", target_os = "windows"))]
 use serde::Deserialize;
 #[cfg(target_os = "macos")]
 use url::Url;

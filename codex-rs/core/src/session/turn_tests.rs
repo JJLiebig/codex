@@ -59,8 +59,7 @@ async fn failed_realtime_receipt_preserves_sibling_input_before_sampling() {
                 /*realtime_handoff_id*/ None,
             ),
         ],
-        &mut McpStartupRequirements::default(),
-        /*prewarmed_client_session*/ None,
+        &mut TurnRunState::default(),
         CancellationToken::new(),
     )
     .await

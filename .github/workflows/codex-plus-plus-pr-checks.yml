@@ -140,11 +140,11 @@ jobs:
 
       # Exact-head dispatch can select a revision from before terminal resume was added.
       - name: Test saved conversation recovery in the CLI and TUI
-        if: hashFiles('codex-rs/cli/src/codex_plus_plus/terminal_resume.rs') != ''
+        if: hashFiles('codex-rs/tui/src/codex_plus_plus/terminal_resume.rs') != ''
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-cli --test terminal_resume
       - name: Test npm wrapper credentials and signal forwarding
-        if: runner.os != 'Windows' && hashFiles('codex-rs/cli/src/codex_plus_plus/terminal_resume.rs') != ''
+        if: runner.os != 'Windows' && hashFiles('codex-rs/tui/src/codex_plus_plus/terminal_resume.rs') != ''
         env:
           CODEX_TEST_BINARY: ${{ env.CARGO_TARGET_DIR }}/ci-test/codex
         run: node --test codex-cli/tests/exit-status.test.mjs
@@ -169,8 +169,11 @@ jobs:
           # Include fork-owned files registered under ordinary Rust module names.
           fork_tests='test(codex_plus_plus::)
             | test(thread_status::completion_wait::tests::)
+            | test(=doctor::updates::tests::windows_store_updates_compare_all_four_production_build_components)
             | test(login::device_code_login::tests::)
             | test(guardian::action_format::tests::)
+            | test(session::config_lock::tests::)
+            | test(=session::turn::tests::failed_realtime_receipt_preserves_sibling_input_before_sampling)
             | test(unified_exec::process::process_completion::tests::)
             | test(storage_telemetry::guarded::tests::)
             | test(account::account_bridge::tests::)

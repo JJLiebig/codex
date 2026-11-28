@@ -304,6 +304,7 @@ mod tests {
             Some("Locked subagent developer instructions.".to_string());
         config.token_budget = Some(crate::config::TokenBudgetConfig {
             use_history_notes_extension: false,
+            context_window_as_tool_output: true,
             reminder_threshold_tokens: Some(16_000),
             reminder_message_template: "Locked reminder: {n_remaining} tokens.".to_string(),
             guidance_message: Some("Locked context-window guidance.".to_string()),
@@ -316,7 +317,8 @@ mod tests {
             .expect("token_budget should be enableable in tests");
         config.rollout_budget = Some(crate::config::RolloutBudgetConfig {
             enforce_limit: true,
-            limit_tokens: 100_000,
+            limit_budget: 100_000.0,
+            reminder_at_context_start: false,
             reminder_at_remaining_tokens: vec![50_000, 25_000, 10_000],
             sampling_token_weight: 1.0,
             prefill_token_weight: 0.25,
@@ -412,6 +414,7 @@ mod tests {
             Some(FeatureToml::Config(TokenBudgetConfigToml {
                 enabled: Some(true),
                 use_history_notes_extension: Some(false),
+                context_window_as_tool_output: Some(true),
                 reminder_threshold_tokens: Some(16_000),
                 reminder_message_template: Some(
                     "Locked reminder: {n_remaining} tokens.".to_string()
@@ -427,7 +430,9 @@ mod tests {
             Some(FeatureToml::Config(RolloutBudgetConfigToml {
                 enforce_limit: Some(true),
                 enabled: Some(true),
-                limit_tokens: Some(100_000),
+                limit_tokens: None,
+                limit_budget: Some(100_000.0),
+                reminder_at_context_start: Some(false),
                 reminder_at_remaining_tokens: Some(vec![50_000, 25_000, 10_000]),
                 sampling_token_weight: Some(1.0),
                 prefill_token_weight: Some(0.25),
