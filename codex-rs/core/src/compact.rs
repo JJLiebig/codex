@@ -343,7 +343,7 @@ async fn run_compact_task_inner_impl(
             fallback_instructions.clone()
         };
         let prompt = Prompt {
-            input: turn_input,
+            input: crate::codex_plus_plus::quiet_updates::adapt_input(turn_input, &step_context),
             base_instructions,
             prompt_cache_ttl: turn_context.prompt_cache_ttl,
             cyber_access_program: turn_context.cyber_access_program,

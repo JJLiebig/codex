@@ -2119,12 +2119,11 @@ pub(crate) fn build_prompt(
     incremental_tools: bool,
 ) -> Prompt {
     let turn_context = &step_context.turn;
+    let input = crate::codex_plus_plus::quiet_updates::adapt_input(input, step_context);
+    let input =
+        crate::codex_plus_plus::task_guidance::prepend(input, step_context, &base_instructions);
     Prompt {
-        input: crate::codex_plus_plus::task_guidance::prepend(
-            input,
-            step_context,
-            &base_instructions,
-        ),
+        input,
         tools: if incremental_tools {
             // Hosted tools still require top-level Responses configuration.
             step_context

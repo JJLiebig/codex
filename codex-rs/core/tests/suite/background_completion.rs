@@ -794,7 +794,7 @@ async fn background_completion_batches_exits_before_final_answer() -> Result<()>
 #[test_case(Some(false); "quiet progress can be disabled")]
 #[tokio::test]
 async fn background_completion_progress_instructions(setting: Option<bool>) -> Result<()> {
-    let original = "Keep useful guidance. Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration. Keep custom suffix.\nThe user appreciates consistent, frequent communication during your turn, and should not be left without a commentary update for more than 60 seconds during ongoing work. Keep trailing guidance.";
+    let original = "Keep useful guidance. Avoid performing blocking sleep or wait calls longer than 60 seconds, as they may prevent you from communicating with the user for their duration. Keep custom suffix.\nThe user appreciates consistent, frequent communication during your turn, and should not be left without a commentary update for more than 60 seconds during ongoing work. Prefer sending consistent, frequent communication to the user during your turn. When the user asks you to wait or monitor through completion or if it's needed for a longer horizon task, you can sleep for as long as is required (generally 60 seconds by default) between checks. Keep trailing guidance.";
     let harness =
         TestCodexHarness::with_auto_env_builder(test_codex().with_config(move |config| {
             config.base_instructions = Some(original.into());
@@ -826,10 +826,11 @@ async fn background_completion_progress_instructions(setting: Option<bool>) -> R
     if setting == Some(false) {
         assert_eq!(instructions, original);
     } else {
-        assert!(instructions.contains("Keep useful guidance."));
-        assert!(instructions.contains("Keep custom suffix."));
+        assert!(instructions.contains("Keep useful guidance.  Keep custom suffix."));
         assert!(instructions.contains("Keep trailing guidance."));
         assert!(!instructions.contains("60 seconds"));
+        assert!(!instructions.contains("frequent communication"));
+        assert!(!instructions.contains("  Keep trailing guidance."));
         assert!(
             instructions
                 .contains("Do not send updates or check status merely because time passed.")

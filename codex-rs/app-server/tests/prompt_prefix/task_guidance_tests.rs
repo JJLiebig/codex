@@ -48,7 +48,9 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
         .await?;
     let standard = app
         .start_thread(ThreadStartParams {
+            model: Some("gpt-6.1-sol".into()),
             config: Some([("features.incremental_tools".into(), json!(false))].into()),
+            developer_instructions: Some("Keep sibling developer guidance.".into()),
             ..Default::default()
         })
         .await?
@@ -82,6 +84,8 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
         (&standard.id, "global.openai.gpt-6.2-astra", 1),
         (&standard.id, "us.openai.gpt-6.2-sol", 1),
         (&incremental.id, "gpt-6.2-astra", 1),
+        (&incremental.id, "gpt-6.1-sol", 0),
+        (&incremental.id, "gpt-6.2-sol", 1),
         (&disabled.id, "gpt-6.2-sol", 0),
         (&custom.id, "gpt-6.2-sol", 0),
     ] {
@@ -109,22 +113,88 @@ async fn task_guidance_follows_the_active_model_and_setting() -> Result<()> {
         let request = response.single_request();
         assert_eq!(request.body_json()["model"], model);
         let input = request.input();
-        let guidance_items: Vec<_> = input
+        let user_index = input
             .iter()
-            .filter(|item| {
-                item["content"][0]["text"].as_str().is_some_and(|text| {
-                    text.starts_with("Before settling on an approach or making changes")
-                })
+            .position(|item| {
+                item["role"] == "user"
+                    && item["content"][0]["text"] == "Check the outgoing task guidance."
+            })
+            .expect("user prompt item");
+        let guidance_positions: Vec<_> = input
+            .iter()
+            .enumerate()
+            .filter_map(|(index, item)| {
+                item["content"][0]["text"]
+                    .as_str()
+                    .is_some_and(|text| {
+                        text.starts_with("Before settling on an approach or making changes")
+                    })
+                    .then_some((index, item))
             })
             .collect();
-        assert_eq!(guidance_items.len(), expected_count, "model {model}");
-        for item in guidance_items {
+        assert_eq!(guidance_positions.len(), expected_count, "model {model}");
+        for (index, item) in guidance_positions {
             assert_eq!(item["role"], "developer");
             assert!(
-                item["content"][0]["text"].as_str().unwrap().contains(
-                    "Choose the simplest approach that delivers the full result the user is after, within the limits they set."
-                )
+                index < user_index,
+                "task guidance should precede the first user message for {model}"
             );
+            let text = item["content"][0]["text"].as_str().unwrap();
+            assert!(text.contains(
+                "Choose the smallest complete change that delivers the agreed outcome through its normal entry points"
+            ));
+            assert!(text.ends_with(
+                "this disclosure takes precedence over brevity and writing-style preferences."
+            ));
+        }
+        if thread_id == &incremental.id
+            || (thread_id == &standard.id && matches!(model, "gpt-6.2-sol" | "openai.gpt-6.2-sol"))
+        {
+            let developer_texts: Vec<_> = input
+                .iter()
+                .filter(|item| item["role"] == "developer")
+                .flat_map(|item| item["content"].as_array().into_iter().flatten())
+                .filter_map(|part| part["text"].as_str())
+                .collect();
+            let combined = developer_texts.join("\n");
+            if thread_id == &standard.id {
+                assert!(
+                    combined.contains("Keep sibling developer guidance."),
+                    "sibling developer instructions should be preserved for {model}"
+                );
+            }
+            assert!(
+                !combined.contains(
+                    "Prefer sending consistent, frequent communication to the user during your turn."
+                ),
+                "frequent communication sentence should be stripped for {model}"
+            );
+            assert!(
+                !combined.contains("(generally 60 seconds by default)"),
+                "60s default sleep sentence should be stripped for {model}"
+            );
+            assert!(
+                !combined.contains(
+                    "The user appreciates consistent, frequent communication during your turn"
+                ),
+                "legacy frequent communication sentence should be stripped for {model}"
+            );
+            assert!(
+                combined
+                    .contains("Do not send updates or check status merely because time passed."),
+                "quiet progress guidance should be present for {model}"
+            );
+            if thread_id == &incremental.id && model == "gpt-6.2-sol" {
+                let model_switch = developer_texts
+                    .iter()
+                    .find(|text| text.starts_with("<model_instructions>"))
+                    .expect("incremental model switch instructions");
+                assert!(
+                    model_switch.contains(
+                        "Do not send updates or check status merely because time passed."
+                    )
+                );
+            }
         }
     }
     Ok(())
