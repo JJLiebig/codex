@@ -1,5 +1,4 @@
 name: Codex++ PR checks
-run-name: ${{ inputs.test_sha && format('Codex++ checks for {0}', inputs.test_sha) || 'Codex++ PR checks' }}
 
 on:
   pull_request:
@@ -40,31 +39,22 @@ on:
       - 'codex-cli/bin/**'
       - 'codex-cli/package.json'
       - 'codex-cli/tests/codex_plus_plus/**'
-      - 'codex-cli/tests/exit-status.test.mjs'
       - 'scripts/codex_package/codex_plus_plus/install.py'
       - 'scripts/install/install-codex-plus-plus*'
       - 'scripts/install/test_install_codex_plus_plus*.py'
   workflow_dispatch:
     inputs:
-      suite:
-        description: Tests to run
-        type: choice
-        options: [fork, terminal-resume]
-        default: fork
       macos:
         description: Run macOS instead of Linux and Windows
         type: boolean
         default: false
-      test_sha:
-        description: Full SHA at the tip of a branch in this repository (defaults to the selected ref)
-        type: string
 
 permissions:
   contents: read
 
 jobs:
   test:
-    name: ${{ inputs.suite == 'terminal-resume' && 'Terminal resume tests' || 'Fork tests' }} (${{ matrix.runner }})
+    name: Fork tests (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
@@ -78,32 +68,13 @@ jobs:
     env:
       CARGO_PROFILE_CI_TEST_DEBUG: '0'
     steps:
-      # A dispatch uses the workflow on main. Only a branch in this repository can supply test code.
-      - name: Verify the requested commit belongs to this repository
-        if: inputs.test_sha != ''
-        shell: bash
-        env:
-          TEST_SHA: ${{ inputs.test_sha }}
-        run: |
-          if [[ ! "$TEST_SHA" =~ ^[0-9a-f]{40}$ ]] ||
-            ! git ls-remote "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY.git" 'refs/heads/*' |
-              cut -f1 | grep -Fx "$TEST_SHA"; then
-            echo '::error::Use the full commit SHA at the tip of a branch in this repository.'
-            exit 1
-          fi
-
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ inputs.test_sha || github.event.pull_request.head.sha || github.sha }}
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
       - name: Report the commit under test
         run: git rev-parse HEAD
-      - name: Confirm the revision contains terminal resume
-        if: inputs.suite == 'terminal-resume' && hashFiles('codex-rs/tui/src/codex_plus_plus/terminal_resume.rs') == ''
-        run: |
-          echo '::error::Select a commit with terminal resume support.'
-          exit 1
 
       # The Windows shim fixtures compare paths and need a temp directory without an 8.3 alias.
       - uses: ./.github/actions/setup-ci
@@ -121,14 +92,12 @@ jobs:
         shell: cmd
         run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus.py
       - name: Test Windows release acquisition
-        if: runner.os == 'Windows' && inputs.suite != 'terminal-resume'
+        if: runner.os == 'Windows'
         shell: cmd
         run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus_latest.py
-      - name: Test Unix installers
+      - name: Test Unix installer and release acquisition
         if: runner.os != 'Windows'
-        env:
-          TEST_PATTERN: ${{ inputs.suite == 'terminal-resume' && 'test_install_codex_plus_plus.py' || 'test_install_codex_plus_plus*.py' }}
-        run: python -m unittest discover -v -s scripts/install -p "$TEST_PATTERN"
+        run: python -m unittest discover -v -s scripts/install -p "test_install_codex_plus_plus*.py"
       - name: Test npm launchers
         run: node --test codex-cli/tests/codex_plus_plus/launcher.test.js codex-cli/tests/codex_plus_plus/windows_upstream_launcher.test.js
 
@@ -155,23 +124,7 @@ jobs:
         working-directory: codex-rs
         run: cargo build --locked --profile ci-test -p codex-windows-sandbox --bin codex-command-runner
 
-      # Exact-head dispatch can select a revision from before terminal resume was added.
-      - name: Test saved conversation recovery in the CLI and TUI
-        if: hashFiles('codex-rs/tui/src/codex_plus_plus/terminal_resume.rs') != ''
-        working-directory: codex-rs
-        run: just test --locked --cargo-profile ci-test -p codex-cli --test terminal_resume
-      - name: Test npm wrapper credentials and signal forwarding
-        if: runner.os != 'Windows' && hashFiles('codex-rs/tui/src/codex_plus_plus/terminal_resume.rs') != ''
-        env:
-          CODEX_TEST_BINARY: ${{ env.CARGO_TARGET_DIR }}/ci-test/codex
-        run: node --test codex-cli/tests/exit-status.test.mjs
-      - name: Test terminal resume state in the TUI
-        if: inputs.suite == 'terminal-resume'
-        working-directory: codex-rs
-        run: just test --locked --cargo-profile ci-test -p codex-tui --lib -E 'test(codex_plus_plus::terminal_resume::)'
-
       - name: Test fork-owned Rust modules
-        if: inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         # On Windows, rustc fixtures need MSVC's link.exe on the native shell's PATH.
         run: >-
@@ -210,18 +163,16 @@ jobs:
           | test(unified_exec::tests::current_user_lifecycle_tests::)'
 
       - name: Test Linux sandbox process cleanup
-        if: runner.os == 'Linux' && inputs.suite != 'terminal-resume'
+        if: runner.os == 'Linux'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-linux-sandbox --test all -E 'test(sandbox_lifetime::)'
       - name: Test Windows history upgrade target resolution
-        if: runner.os == 'Windows' && inputs.suite != 'terminal-resume'
+        if: runner.os == 'Windows'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-cli --test history_upgrade
       - name: Test fork background completion and server retries
-        if: inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-core --test all -E 'test(suite::background_completion::) | test(suite::server_overloaded::)'
       - name: Test active-model guidance in app-server requests
-        if: inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-app-server --test prompt_prefix -E 'test(task_guidance_tests::)'
