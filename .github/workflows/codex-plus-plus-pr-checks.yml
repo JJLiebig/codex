@@ -45,6 +45,11 @@ on:
       - 'scripts/install/test_install_codex_plus_plus*.py'
   workflow_dispatch:
     inputs:
+      suite:
+        description: Tests to run
+        type: choice
+        options: [fork, terminal-resume]
+        default: fork
       macos:
         description: Run macOS instead of Linux and Windows
         type: boolean
@@ -58,7 +63,7 @@ permissions:
 
 jobs:
   test:
-    name: Fork tests (${{ matrix.runner }})
+    name: ${{ inputs.suite == 'terminal-resume' && 'Terminal resume tests' || 'Fork tests' }} (${{ matrix.runner }})
     strategy:
       fail-fast: false
       matrix:
@@ -93,6 +98,11 @@ jobs:
 
       - name: Report the commit under test
         run: git rev-parse HEAD
+      - name: Confirm the revision contains terminal resume
+        if: inputs.suite == 'terminal-resume' && hashFiles('codex-rs/tui/src/codex_plus_plus/terminal_resume.rs') == ''
+        run: |
+          echo '::error::Select a commit with terminal resume support.'
+          exit 1
 
       # The Windows shim fixtures compare paths and need a temp directory without an 8.3 alias.
       - uses: ./.github/actions/setup-ci
@@ -109,9 +119,15 @@ jobs:
         # cmd keeps the native tar and PowerShell 5.1 module search paths.
         shell: cmd
         run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus.py
-      - name: Test the Unix installer and release acquisition
+      - name: Test Windows release acquisition
+        if: runner.os == 'Windows' && inputs.suite != 'terminal-resume'
+        shell: cmd
+        run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus_latest.py
+      - name: Test Unix installers
         if: runner.os != 'Windows'
-        run: python -m unittest discover -v -s scripts/install -p "test_install_codex_plus_plus*.py"
+        env:
+          TEST_PATTERN: ${{ inputs.suite == 'terminal-resume' && 'test_install_codex_plus_plus.py' || 'test_install_codex_plus_plus*.py' }}
+        run: python -m unittest discover -v -s scripts/install -p "$TEST_PATTERN"
       - name: Test npm launchers
         run: node --test codex-cli/tests/codex_plus_plus/launcher.test.js codex-cli/tests/codex_plus_plus/windows_upstream_launcher.test.js
 
@@ -148,13 +164,13 @@ jobs:
         env:
           CODEX_TEST_BINARY: ${{ env.CARGO_TARGET_DIR }}/ci-test/codex
         run: node --test codex-cli/tests/exit-status.test.mjs
-
-      - name: Test Windows release acquisition
-        if: runner.os == 'Windows'
-        shell: cmd
-        run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus_latest.py
+      - name: Test terminal resume state in the TUI
+        if: inputs.suite == 'terminal-resume'
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-tui --lib -E 'test(codex_plus_plus::terminal_resume::)'
 
       - name: Test fork-owned Rust modules
+        if: inputs.suite != 'terminal-resume'
         shell: bash
         working-directory: codex-rs
         run: |
@@ -170,6 +186,7 @@ jobs:
           fork_tests='test(codex_plus_plus::)
             | test(thread_status::completion_wait::tests::)
             | test(=doctor::updates::tests::windows_store_updates_compare_all_four_production_build_components)
+            | test(=doctor::updates::tests::update_details_use_the_shared_fork_release_cache)
             | test(login::device_code_login::tests::)
             | test(guardian::action_format::tests::)
             | test(session::config_lock::tests::)
@@ -189,22 +206,25 @@ jobs:
             | test(account_usage::report::tests::)
             | test(=account_usage::tests::credit_fallback_requires_usable_codex_credits)
             | test(chatwidget::tests::terminal_program_status::)
+            | test(=chatwidget::tests::status_and_layout::background_completion_wait_restores_working_until_completion_or_cancel)
             | test(terminal_program_status::herdr_session::tests::)
             | test(updates_cache::tests::)
             | test(unified_exec::tests::current_user_lifecycle_tests::)'
           just test --locked --cargo-profile ci-test "${packages[@]}" --lib --bin codex -E "$fork_tests"
 
       - name: Test Linux sandbox process cleanup
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-linux-sandbox --test all -E 'test(sandbox_lifetime::)'
       - name: Test Windows history upgrade target resolution
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-cli --test history_upgrade
       - name: Test fork background completion and server retries
+        if: inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-core --test all -E 'test(suite::background_completion::) | test(suite::server_overloaded::)'
       - name: Test active-model guidance in app-server requests
+        if: inputs.suite != 'terminal-resume'
         working-directory: codex-rs
         run: just test --locked --cargo-profile ci-test -p codex-app-server --test prompt_prefix -E 'test(task_guidance_tests::)'
