@@ -315,6 +315,11 @@ class InstallLatestTest(unittest.TestCase):
     def test_incomplete_platform_or_bad_checksum_preserves_working_install(
         self,
     ) -> None:
+        missing_asset_error = (
+            "No usable published Codex++ package."
+            if os.name == "nt"
+            else "Could not download required"
+        )
         for failure in ("missing archive", "missing checksum", "bad checksum"):
             with (
                 self.subTest(failure=failure),
@@ -343,7 +348,7 @@ class InstallLatestTest(unittest.TestCase):
                     self.assertIn(
                         "SHA-256 mismatch"
                         if failure == "bad checksum"
-                        else "Could not download required",
+                        else missing_asset_error,
                         result.stderr,
                     )
                     self.assertEqual(

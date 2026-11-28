@@ -1,0 +1,187 @@
+name: Codex++ PR checks
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/codex-plus-plus-pr-checks.yml'
+      - '.github/actions/setup-ci/**'
+      - '.github/actions/setup-msvc-env/**'
+      - '.github/actions/setup-rusty-v8/**'
+      - '.github/scripts/run_bazel.py'
+      - '.github/scripts/rusty_v8_bazel.py'
+      - '.github/scripts/rusty_v8_module_bazel.py'
+      - '.github/scripts/setup-dev-drive.ps1'
+      - 'third_party/v8/*release_manifests.sha256'
+      - 'justfile'
+      - 'scripts/just-shell.py'
+      - 'codex-rs/Cargo.*'
+      - 'codex-rs/rust-toolchain.toml'
+      - 'codex-rs/.cargo/**'
+      - 'codex-rs/.config/nextest.toml'
+      - 'codex-rs/**/codex_plus_plus/**'
+      - 'codex-rs/app-server/**'
+      - 'codex-rs/arg0/**'
+      - 'codex-rs/cli/**'
+      - 'codex-rs/codex-mcp/**'
+      - 'codex-rs/config/**'
+      - 'codex-rs/core/**'
+      - 'codex-rs/features/src/feature_configs.rs'
+      - 'codex-rs/features/src/lib.rs'
+      - 'codex-rs/install-context/**'
+      - 'codex-rs/linux-sandbox/**'
+      - 'codex-rs/login/**'
+      - 'codex-rs/model-provider/**'
+      - 'codex-rs/protocol/**'
+      - 'codex-rs/sandboxing/src/spawn.rs'
+      - 'codex-rs/shell-command/**'
+      - 'codex-rs/state/**'
+      - 'codex-rs/tui/**'
+      - 'codex-rs/utils/pty/**'
+      - 'codex-rs/windows-sandbox-rs/**'
+      - 'codex-cli/bin/**'
+      - 'codex-cli/package.json'
+      - 'codex-cli/tests/codex_plus_plus/**'
+      - 'scripts/codex_package/codex_plus_plus/install.py'
+      - 'scripts/install/install-codex-plus-plus*'
+      - 'scripts/install/test_install_codex_plus_plus*.py'
+  workflow_dispatch:
+    inputs:
+      macos:
+        description: Run macOS instead of Linux and Windows
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Fork tests (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include: >-
+          ${{ fromJSON(inputs.macos &&
+              '[{"runner":"macos-15","target":"aarch64-apple-darwin"}]' ||
+              '[{"runner":"ubuntu-24.04","target":"x86_64-unknown-linux-gnu"},
+                {"runner":"windows-2025","target":"x86_64-pc-windows-msvc"}]') }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      CARGO_PROFILE_CI_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Report the commit under test
+        run: git rev-parse HEAD
+
+      # The Windows shim fixtures compare paths and need a temp directory without an 8.3 alias.
+      - uses: ./.github/actions/setup-ci
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: '26.12.1'
+          package-manager-cache: false
+
+      - name: Test the Windows installer
+        if: runner.os == 'Windows'
+        # cmd keeps the native tar and PowerShell 5.1 module search paths.
+        shell: cmd
+        run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus.py
+      - name: Test Windows release acquisition
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: python -m unittest discover -v -s scripts/install -p test_install_codex_plus_plus_latest.py
+      - name: Test Unix installer and release acquisition
+        if: runner.os != 'Windows'
+        run: python -m unittest discover -v -s scripts/install -p "test_install_codex_plus_plus*.py"
+      - name: Test npm launchers
+        run: node --test codex-cli/tests/codex_plus_plus/launcher.test.js codex-cli/tests/codex_plus_plus/windows_upstream_launcher.test.js
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends build-essential pkg-config libcap-dev libasound2-dev bubblewrap
+      - uses: dtolnay/rust-toolchain@d124f86f28ff42855784ff3319f48ac182c248f8 # 1.99.1
+      - uses: taiki-e/install-action@44c6d64aa62cd779e873306675c7a58e86d6d532 # v2.62.49
+        with:
+          tool: nextest
+          version: 0.9.103
+      - uses: ./.github/actions/setup-msvc-env
+        if: runner.os == 'Windows'
+        with:
+          target: ${{ matrix.target }}
+      - uses: ./.github/actions/setup-rusty-v8
+        with:
+          target: ${{ matrix.target }}
+
+      - name: Build the Windows command runner for lifecycle tests
+        if: runner.os == 'Windows'
+        working-directory: codex-rs
+        run: cargo build --locked --profile ci-test -p codex-windows-sandbox --bin codex-command-runner
+
+      - name: Test fork-owned Rust modules
+        working-directory: codex-rs
+        # On Windows, rustc fixtures need MSVC's link.exe on the native shell's PATH.
+        run: >-
+          just test --locked --cargo-profile ci-test --lib --bin codex
+          -p codex-app-server -p codex-cli -p codex-config -p codex-core -p codex-install-context
+          -p codex-login -p codex-mcp -p codex-model-provider -p codex-protocol
+          -p codex-shell-command -p codex-state -p codex-tui -p codex-utils-pty
+          ${{ runner.os == 'Windows' && '-p codex-windows-sandbox' || '' }}
+          -E 'test(codex_plus_plus::)
+          | test(thread_status::completion_wait::tests::)
+          | test(=doctor::updates::tests::update_action_labels_use_the_planned_distribution)
+          | test(=doctor::updates::tests::windows_store_updates_compare_all_four_production_build_components)
+          | test(=doctor::updates::tests::update_details_use_the_shared_fork_release_cache)
+          | test(login::device_code_login::tests::)
+          | test(=config_toml::tests::weekly_auto_start_defaults_enabled_and_accepts_override)
+          | test(=config_toml::tests::auto_redeem_accepts_independent_triggers_and_rejects_zero_thresholds)
+          | test(=config_toml::tests::model_capacity_retry_defaults_bounded_and_accepts_override)
+          | test(=config_toml::tests::tool_activity_defaults_full_and_parses_compact)
+          | test(guardian::action_format::tests::)
+          | test(session::config_lock::tests::)
+          | test(=session::turn::tests::failed_realtime_receipt_preserves_sibling_input_before_sampling)
+          | test(unified_exec::process::process_completion::tests::)
+          | test(storage_telemetry::guarded::tests::)
+          | test(account::account_bridge::tests::)
+          | test(account::account_policy::tests::)
+          | test(account::account_removal::tests::)
+          | test(account::reset_state::tests::)
+          | test(account::weekly_window_state::tests::)
+          | test(legacy_error::tests::)
+          | test(powershell_boundaries::tests::)
+          | test(migrations::tests::fork_thread_history::)
+          | test(app::prompt_cache::tests::)
+          | test(app::tests::usage_reset_resume_tests::)
+          | test(account_usage::report::tests::)
+          | test(=account_usage::tests::credit_fallback_requires_usable_codex_credits)
+          | test(=chatwidget::tests::program_status::unanswered_async_question_blocks_while_turn_runs_until_answered)
+          | test(chatwidget::tests::terminal_program_status::)
+          | test(=chatwidget::tests::status_and_layout::background_completion_wait_restores_working_until_completion_or_cancel)
+          | test(terminal_program_status::herdr_session::tests::)
+          | test(updates_cache::tests::)
+          | test(=tests::windows_tests::pipe_processes_do_not_inherit_parent_console)
+          | test(=unified_exec::tests::current_user_runner_isolates_console_and_preserves_descendants)
+          | test(unified_exec::tests::current_user_lifecycle_tests::)'
+
+      - name: Test Linux sandbox process cleanup
+        if: runner.os == 'Linux'
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-linux-sandbox --test all -E 'test(sandbox_lifetime::)'
+      - name: Test Windows history upgrade target resolution
+        if: runner.os == 'Windows'
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-cli --test history_upgrade
+      - name: Test fork background completion and server retries
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-core --test all -E 'test(suite::background_completion::) | test(suite::server_overloaded::)'
+      - name: Test active-model guidance in app-server requests
+        working-directory: codex-rs
+        run: just test --locked --cargo-profile ci-test -p codex-app-server --test prompt_prefix -E 'test(task_guidance_tests::)'

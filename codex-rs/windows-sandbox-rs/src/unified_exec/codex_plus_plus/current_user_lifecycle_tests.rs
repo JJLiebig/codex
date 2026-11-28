@@ -9,9 +9,12 @@ fn current_user_runner_cancellation_terminates_descendants() {
     current_thread_runtime().block_on(async move {
         let codex_home = sandbox_home("current-user-cancellation");
         let ready_marker = codex_home.path().join("descendant-started");
+        let staged_marker = powershell_literal(&ready_marker.with_extension("tmp"));
+        let ready_marker_arg = powershell_literal(&ready_marker);
         let child_command = format!(
-            "Set-Content -LiteralPath '{}' -Value $PID; Start-Sleep -Seconds 30",
-            powershell_literal(&ready_marker),
+            "Set-Content -LiteralPath '{staged_marker}' -Value $PID; \
+             Move-Item -LiteralPath '{staged_marker}' -Destination '{ready_marker_arg}'; \
+             Start-Sleep -Seconds 30",
         );
         let parent_command = start_powershell_child(
             &pwsh,
