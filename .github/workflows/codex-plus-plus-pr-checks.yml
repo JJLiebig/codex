@@ -92,6 +92,7 @@ jobs:
       - name: Report the commit under test
         run: git rev-parse HEAD
 
+      - uses: ./.github/actions/setup-ci
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: '3.12'
@@ -101,11 +102,12 @@ jobs:
           package-manager-cache: false
 
       - name: Test the installer and release acquisition
+        # Windows fixtures invoke PowerShell 5.1 and need its own archive module.
+        shell: bash
         run: python -m unittest discover -v -s scripts/install -p 'test_install_codex_plus_plus*.py'
       - name: Test npm launchers
         run: node --test codex-cli/tests/codex_plus_plus/launcher.test.js codex-cli/tests/codex_plus_plus/windows_upstream_launcher.test.js
 
-      - uses: ./.github/actions/setup-ci
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
