@@ -41,21 +41,16 @@ async function installWrapper(directory, executable) {
 }
 
 test(
-  "the npm spawn fallback forwards a second SIGTERM to a running child",
+  "the token-free npm spawn fallback forwards a second SIGTERM",
   { skip: process.platform === "win32" },
   async () => {
     const directory = await mkdtemp(path.join(tmpdir(), "codex-npm-signal-"));
     try {
       const wrapper = await installWrapper(directory, process.execPath);
       const preload = path.join(directory, "fallback.cjs");
-      const token = "dummy-terminal-resume-token";
-      await writeFile(
-        preload,
-        `process.execve = undefined;
-         process.on("exit", () => {
-           if (process.env.OSC7577_TOKEN) process.exitCode = 91;
-         });`,
-      );
+      await writeFile(preload, "process.execve = undefined;");
+      const env = { ...process.env };
+      delete env.OSC7577_TOKEN;
       const child = spawn(
         process.execPath,
         [
@@ -63,7 +58,7 @@ test(
           preload,
           wrapper,
           "-e",
-          `if (process.env.OSC7577_TOKEN !== ${JSON.stringify(token)}) process.exit(92);
+          `if (process.env.OSC7577_TOKEN !== undefined) process.exit(92);
          let signals = 0;
          process.on("SIGTERM", () => {
            if (++signals === 2) process.exit(17);
@@ -72,11 +67,43 @@ test(
          setTimeout(() => process.exit(1), 5000);
          console.log("ready");`,
         ],
-        { env: { ...process.env, OSC7577_TOKEN: token } },
+        { env },
       );
       const acknowledgements = createInterface({ input: child.stdout });
       acknowledgements.on("line", () => child.kill("SIGTERM"));
       assert.deepEqual(await once(child, "exit"), [17, null]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "the Linux npm fallback refuses a pane credential before starting a child",
+  { skip: process.platform !== "linux" },
+  async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "codex-npm-token-"));
+    try {
+      const wrapper = await installWrapper(directory, process.execPath);
+      const preload = path.join(directory, "fallback.cjs");
+      await writeFile(preload, "process.execve = undefined;");
+      const token = "dummy-terminal-resume-token";
+      const refused = spawnSync(
+        process.execPath,
+        ["--require", preload, wrapper, "-e", "process.exit(92);"],
+        {
+          env: { ...process.env, OSC7577_TOKEN: token },
+          encoding: "utf8",
+          timeout: 30_000,
+        },
+      );
+      assert.equal(refused.error, undefined);
+      assert.deepEqual([refused.status, refused.signal], [1, null]);
+      assert.match(
+        refused.stderr,
+        /current Node\.js release or standalone Codex\+\+/,
+      );
+      assert.ok(!refused.stderr.includes(token));
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -104,6 +131,7 @@ test(
       const home = path.join(directory, "home");
       await mkdir(home);
       const env = { ...process.env, CODEX_HOME: home, CODEX_SQLITE_HOME: home };
+      delete env.OSC7577_TOKEN;
 
       // A normal CLI argument error must retain its numeric exit status.
       const invalid = spawnSync(

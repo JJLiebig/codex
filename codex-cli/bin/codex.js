@@ -14,9 +14,20 @@ import {
 } from "./launcher.js";
 import { stageWindowsUpstreamExecutable } from "./codex_plus_plus/windows_upstream_launcher.js";
 
-// Hand the pane credential to native Codex without keeping it in Node's environment.
+// Hand the pane credential to native Codex. On Linux the initial environment remains
+// readable through procfs while a spawn wrapper is alive, even after deleting the key.
 const resumeToken = process.env.OSC7577_TOKEN;
 delete process.env.OSC7577_TOKEN;
+if (
+  process.platform === "linux" &&
+  resumeToken &&
+  typeof process.execve !== "function"
+) {
+  process.stderr.write(
+    "Codex++ terminal recovery on Linux needs newer Node.js. Use a current Node.js release or standalone Codex++.\n",
+  );
+  process.exit(1);
+}
 
 // __dirname equivalent in ESM
 const __filename = fileURLToPath(import.meta.url);

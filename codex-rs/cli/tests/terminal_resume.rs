@@ -66,7 +66,7 @@ trust_level = "trusted"
     )?;
     fs::write(
         home.join("restore.config.toml"),
-        "web_search = 'disabled'\nmodel = 'gpt-5.4'\nmodel_reasoning_effort = 'medium'\n",
+        "web_search = 'disabled'\nmodel = 'gpt-5.4'\nmodel_reasoning_effort = 'medium'\nservice_tier = 'fast'\n",
     )?;
     // Dotenv must not reintroduce a pane credential after native startup has taken it.
     fs::write(
@@ -134,6 +134,8 @@ trust_level = "trusted"
         "never",
         "-c",
         r#"model_reasoning_effort="low""#,
+        "-c",
+        r#"service_tier="flex""#,
         "-c",
         "features.shell_snapshot=false",
         "--cd",
@@ -257,6 +259,7 @@ trust_level = "trusted"
     let request = resumed_turn.single_request().body_json();
     assert_eq!(request["model"], "gpt-5.4-mini");
     assert_eq!(request["reasoning"]["effort"], "low");
+    assert_eq!(request["service_tier"], "flex");
     recovered.quit().await?;
     assert_eq!(recovered.records(NEXT_TOKEN)?, [(recover_argv, cwd)]);
     ensure!(!recovered.output.contains(NEXT_TOKEN));

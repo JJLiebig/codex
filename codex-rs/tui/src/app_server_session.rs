@@ -512,6 +512,8 @@ pub(crate) enum ResumeModelSettings {
     OverrideFromCurrentConfig,
     /// Omits those overrides so app-server restores the settings saved with the thread.
     RestoreFromThread,
+    /// Restores the saved model settings and service tier after terminal recovery.
+    RestoreFromTerminalRecovery,
     /// Rejoins a loaded thread without changing any of its existing settings.
     PreserveExistingThread,
     /// Restore the saved settings and reapply the side-chat instructions on cold resume.
@@ -2945,8 +2947,10 @@ fn thread_resume_params_from_config(
         })
         .flatten();
     let mut config_overrides = config_request_overrides_from_config(&config, thread_params_mode);
-    if model_settings == ResumeModelSettings::RestoreFromThread
-        && let Some(overrides) = config_overrides.as_mut()
+    if matches!(
+        model_settings,
+        ResumeModelSettings::RestoreFromThread | ResumeModelSettings::RestoreFromTerminalRecovery
+    ) && let Some(overrides) = config_overrides.as_mut()
     {
         overrides.remove("model_reasoning_effort");
         if overrides.is_empty() {
@@ -2959,6 +2963,7 @@ fn thread_resume_params_from_config(
             provider_selection::explicit_provider(&config),
         ),
         ResumeModelSettings::RestoreFromThread
+        | ResumeModelSettings::RestoreFromTerminalRecovery
         | ResumeModelSettings::PreserveExistingThread
         | ResumeModelSettings::PreserveSideConversation => (None, None),
     };
@@ -2979,6 +2984,7 @@ fn thread_resume_params_from_config(
         ),
         ..ThreadResumeParams::default()
     };
+    crate::codex_plus_plus::terminal_resume::restore_saved_options(model_settings, &mut params);
     if thread_params_mode == ThreadParamsMode::Remote || !permission_overrides.approval_policy {
         params.approval_policy = None;
     }

@@ -19,9 +19,8 @@ use codex_protocol::protocol::EventMsg;
 use codex_protocol::protocol::FileSystemPath;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::ThreadSource;
-use codex_rollout::ReverseJsonlScanner;
 use codex_rollout::RolloutItem;
-use codex_rollout::ScanOutcome;
+use codex_rollout::RolloutLine;
 use sha2::Digest;
 use sha2::Sha256;
 
@@ -33,6 +32,7 @@ use crate::session_state::ThreadSessionState;
 mod launch;
 
 pub use launch::apply_home;
+pub(crate) use launch::restore_saved_options;
 pub(crate) use launch::startup_model_settings;
 
 static REPORTER: OnceLock<Reporter> = OnceLock::new();
@@ -130,45 +130,33 @@ async fn saved_root_has_settings(path: &Path, id: ThreadId) -> bool {
     let Some(path) = codex_rollout::existing_rollout_path(path).await else {
         return false;
     };
-    tokio::task::spawn_blocking(move || {
-        // Naming can save just the metadata. Require the owned settings checkpoint, which
-        // new rollouts write ahead of the first input, without traversing a long history.
-        const CHECKPOINT_PREFIX_BYTES: usize = 256 * 1024;
-        let Ok(Some(prefix)) = codex_rollout::read_rollout_prefix(&path, CHECKPOINT_PREFIX_BYTES) else {
-            return false;
-        };
-        let owns_settings = |item| matches!(item, RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event))
-            if event.thread_id == Some(id));
-        let mut items = prefix
-            .split_inclusive(|byte| *byte == b'\n')
-            .filter(|line| line.ends_with(b"\n"))
-            .filter_map(|line| codex_rollout::parse_rollout_line_bytes(line).ok().map(|line| line.item));
-        if !matches!(items.next(), Some(RolloutItem::SessionMeta(meta))
-            if meta.meta.id == id
-                && meta.meta.session_id == SessionId::from(id)
-                && !meta.meta.attached_thread
-                && meta.meta.parent_thread_id.is_none()
-                && !matches!(meta.meta.source, SessionSource::SubAgent(_) | SessionSource::Internal(_))
-                && matches!(meta.meta.thread_source, None | Some(ThreadSource::User)))
+    let Ok(mut reader) = codex_rollout::open_rollout_line_reader(&path).await else {
+        return false;
+    };
+    let Ok(Some(header)) = reader.next_line().await else {
+        return false;
+    };
+    if !matches!(codex_rollout::parse_rollout_line(&header), Ok(RolloutLine { item: RolloutItem::SessionMeta(meta), .. })
+        if meta.meta.id == id
+            && meta.meta.session_id == SessionId::from(id)
+            && !meta.meta.attached_thread
+            && meta.meta.parent_thread_id.is_none()
+            && !matches!(meta.meta.source, SessionSource::SubAgent(_) | SessionSource::Internal(_))
+            && matches!(meta.meta.thread_source, None | Some(ThreadSource::User)))
+    {
+        return false;
+    }
+    // Naming may save the header alone. Stop at the first owned settings checkpoint,
+    // which follows any copied history and is sufficient for ordinary cold resume.
+    while let Ok(Some(line)) = reader.next_line().await {
+        if matches!(codex_rollout::parse_rollout_line(&line),
+            Ok(RolloutLine { item: RolloutItem::EventMsg(EventMsg::ThreadSettingsApplied(event)), .. })
+                if event.thread_id == Some(id))
         {
-            return false;
-        }
-        if items.any(owns_settings) {
             return true;
         }
-        // Copied forks and older histories can have their first owned checkpoint at the end.
-        if prefix.len() < CHECKPOINT_PREFIX_BYTES || !path.extension().is_some_and(|ext| ext == "jsonl") {
-            return false;
-        }
-        let Ok(scanner) = std::fs::File::open(&path).and_then(ReverseJsonlScanner::new) else {
-            return false;
-        };
-        let mut scanner = scanner.with_max_record_bytes(CHECKPOINT_PREFIX_BYTES);
-        (0..32).any(|_| matches!(scanner.scan_next_rollout_line(),
-            Ok(Some(ScanOutcome::Parsed(line))) if owns_settings(line.item)))
-    })
-    .await
-    .unwrap_or(false)
+    }
+    false
 }
 
 fn permission_profile_is_resumable(

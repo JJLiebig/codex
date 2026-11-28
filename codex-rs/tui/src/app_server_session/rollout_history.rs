@@ -235,6 +235,7 @@ impl AppServerSession {
         let session_config = if matches!(
             model_settings,
             ResumeModelSettings::RestoreFromThread
+                | ResumeModelSettings::RestoreFromTerminalRecovery
                 | ResumeModelSettings::PreserveExistingThread
                 | ResumeModelSettings::PreserveSideConversation
         ) {

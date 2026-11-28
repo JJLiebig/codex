@@ -3,6 +3,7 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
+use codex_app_server_protocol::ThreadResumeParams;
 use codex_protocol::ThreadId;
 
 use crate::Cli;
@@ -35,9 +36,18 @@ pub fn apply_home() -> anyhow::Result<()> {
 
 pub(crate) fn startup_model_settings(ordinary: ResumeModelSettings) -> ResumeModelSettings {
     if RECOVERING.get().is_some() {
-        ResumeModelSettings::RestoreFromThread
+        ResumeModelSettings::RestoreFromTerminalRecovery
     } else {
         ordinary
+    }
+}
+
+pub(crate) fn restore_saved_options(mode: ResumeModelSettings, params: &mut ThreadResumeParams) {
+    if mode == ResumeModelSettings::RestoreFromTerminalRecovery {
+        params.service_tier = None;
+        if let Some(overrides) = &mut params.config {
+            overrides.remove("model_reasoning_summary");
+        }
     }
 }
 
@@ -117,6 +127,8 @@ impl Launch {
                 // revert later /model or /permissions changes.
                 "model"
                 | "model_reasoning_effort"
+                | "model_reasoning_summary"
+                | "personality"
                 | "approval_policy"
                 | "approvals_reviewer"
                 | "sandbox_mode"

@@ -66,7 +66,8 @@ impl Arg0PathEntryGuard {
 }
 
 pub fn arg0_dispatch() -> Option<Arg0PathEntryGuard> {
-    program_resume_token::capture();
+    // SAFETY: arg0 dispatch runs before runtime startup.
+    unsafe { program_resume_token::capture() };
     #[cfg(target_os = "linux")]
     codex_utils_pty::init_spawn_helper(std::env::args_os());
     // Determine if we were invoked via the special alias.

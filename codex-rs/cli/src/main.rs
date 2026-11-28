@@ -1081,6 +1081,8 @@ fn stage_str(stage: Stage) -> &'static str {
 }
 
 fn main() -> anyhow::Result<()> {
+    // SAFETY: startup is still single-threaded and has not changed the environment.
+    unsafe { codex_arg0::program_resume_token::capture() };
     codex_tui::apply_terminal_resume_home()?;
     codex_build_info::initialize!();
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();

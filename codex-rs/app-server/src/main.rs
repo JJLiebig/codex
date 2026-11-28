@@ -84,6 +84,8 @@ struct AppServerArgs {
 }
 
 fn main() -> anyhow::Result<()> {
+    // SAFETY: startup is still single-threaded and has not changed the environment.
+    unsafe { codex_arg0::program_resume_token::capture() };
     let remote_control_disabled = codex_app_server::take_remote_control_disabled_env();
     arg0_dispatch_or_else(move |arg0_paths: Arg0DispatchPaths| async move {
         let AppServerArgs {
